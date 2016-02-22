@@ -22,8 +22,7 @@ Example:
 
 `python icap_server.py icap_server.cfg`
 
-####Administration Panel
-
+#### Administration Panel
 
 The admin panel is powered by Laravel, so you'll need a webserver to run it. On the Raspberry Pi  GateSentry uses Lighttpd to serve the administration panel.
 
@@ -31,22 +30,22 @@ Just provide the following path as your document Root to Lighttpd:
 
  `<base_path>/Gatesentry/admin_panel/site/public/`
 
- ####Squid3 
+#### Squid3 
 
  GateSentry uses Squid3 with -sslbump enabled. GateSentry's Squid3 config file can be found in the Squid3 labelled folder of this repo.
 
- ####Dansguardian
+####Dansguardian
 
  Config file available in the repo. 
 
- ###Running GateSentry
+###Running GateSentry
 
- Once everything is in place (Squid3, Dansguardian, GateSentry's ICAP server and the Lighttpd). Start services in the following order :
+Once everything is in place (Squid3, Dansguardian, GateSentry's ICAP server and the Lighttpd). Start services in the following order :
 
- 1-Lighttpd
- 2-Squid3
- 3-Dansguardian
- 4-GateSentry
+ 1. Lighttpd
+ 2. Squid3
+ 3. Dansguardian
+ 4. GateSentry
 
 
 
