@@ -31,27 +31,22 @@ Just provide the following path as your document Root to Lighttpd:
 
  `<base_path>/Gatesentry/admin_panel/site/public/`
 
-
  ####Squid3 
 
  GateSentry uses Squid3 with -sslbump enabled. GateSentry's Squid3 config file can be found in the Squid3 labelled folder of this repo.
 
-
  ####Dansguardian
 
-
  Config file available in the repo. 
-
-
 
  ###Running GateSentry
 
  Once everything is in place (Squid3, Dansguardian, GateSentry's ICAP server and the Lighttpd). Start services in the following order :
 
- 1- Lighttpd
- 2- Squid3
- 3- Dansguardian
- 4- GateSentry
+ 1-Lighttpd
+ 2-Squid3
+ 3-Dansguardian
+ 4-GateSentry
 
 
 
