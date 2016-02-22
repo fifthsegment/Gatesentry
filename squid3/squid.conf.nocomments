@@ -1,0 +1,43 @@
+icap_enable on
+icap_preview_enable off 
+icap_send_client_ip on 
+icap_service service_resp respmod_precache bypass=0 icap://127.0.0.1:1344/filter
+icap_class class_resp service_resp
+icap_access class_resp allow all
+cache deny all
+acl block_site dstdomain "/etc/squid3/squidlist/blocked" #The Conf File for List of Blocked Site
+acl block_regex url_regex "/etc/squid3/squidlist/blockedregex"
+http_access deny block_site
+http_access deny block_regex
+acl SSL_ports port 443
+acl Safe_ports port 80		# http
+acl Safe_ports port 21		# ftp
+acl Safe_ports port 443		# https
+acl Safe_ports port 70		# gopher
+acl Safe_ports port 210		# wais
+acl Safe_ports port 1025-65535	# unregistered ports
+acl Safe_ports port 280		# http-mgmt
+acl Safe_ports port 488		# gss-http
+acl Safe_ports port 591		# filemaker
+acl Safe_ports port 777		# multiling http
+acl CONNECT method CONNECT
+http_access deny !Safe_ports
+http_access deny CONNECT !SSL_ports
+http_access allow localhost manager
+http_access deny manager
+http_access allow localhost
+http_access allow all
+http_port 3129 ssl-bump generate-host-certificates=on dynamic_cert_mem_cache_size=4MB cert=/etc/squid3/certs/myCA.pem
+sslproxy_cert_error allow all
+sslproxy_flags DONT_VERIFY_PEER
+	ssl_bump server-first all
+sslcrtd_program /usr/lib/squid3/ssl_crtd -s /var/spool/squid3_ssldb -M 4MB
+sslcrtd_children 5
+coredump_dir /var/spool/squid3
+refresh_pattern ^ftp:		1440	20%	10080
+refresh_pattern ^gopher:	1440	0%	1440
+refresh_pattern -i (/cgi-bin/|\?) 0	0%	0
+refresh_pattern .		0	20%	4320
+shutdown_lifetime 3 seconds
+visible_hostname rubus
+dns_nameservers 8.8.8.8 8.8.4.4

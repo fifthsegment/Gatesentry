@@ -1,0 +1,11 @@
+#Exception URLs based on Regular Expressions
+#
+# E.g. 'news' would unblock news.bbc.com etc
+
+# Example
+#news
+
+# Prevent content scanning of CSS and/or JavaScript files
+#^[^?]*\.css($|\?)
+#^[^?]*\.jsp?($|\?)
+

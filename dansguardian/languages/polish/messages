@@ -1,0 +1,55 @@
+# DansGuardian messages file 
+# Polish version by Piotr Kapczuk <piotr.kapczuk@hoop.pl>
+# charset=iso-8859-2
+
+"1","Dostêp Zabroniony"
+
+"100","Zakazano dostêpu z twojego adresu IP do strony: "
+"101","Przegl±danie stron www z twojego adresu IP jest niedozwolone."
+"102","Zakazano dostêpu z twoj± nazw± u¿ytkownika do strony: "
+
+"200","¯±dany URL jest ¼le skonstruowany."
+
+"300","Znaleziono zakazan± frazê: "
+"301","Znaleziono zakazan± frazê."
+
+"400","Znaleziono zakazan± kombinacjê fraz: "
+"401","Znaleziono zakazan± kombinacjê fraz."
+"402","Limit fraz liczonych wagowo "
+"403","Przekroczono limit fraz liczonych wagowo." 
+
+"500","Zakazany adres (site): "
+"501","Zakazany URL: "
+"502","Dostêp zezwolony jedynie do wybranych stron, a ta strona nie jest na li¶cie dozwolonych."
+"503","Zakazane Wyra¿enie Regularne dla URL: "
+"504","Znaleziono zakazane Wyra¿enie Regularne w URL."
+"505","Dostêp po samych adresach IP jest zakazany, a ten adres jest jedynie adresem IP."
+
+"600","IP klienta pasuje do wyj±tków."
+"601","Nazwa u¿ytkownika pasuje do wyj±tków."
+"602","Adres pasuje do wyj±tków."
+"603","URL pasuje do wyj±tków."
+"604","Znaleziono frazê, która pasuje do wyj±tków: "
+"605","Znaleziono kombinacjê fraz, która pasuje do wyj±tków: "
+"606","Bypass URL wyj±tków."
+"607","Bypass cookie wyj±tków."
+"608","Scan bypass URL exception."
+"609","Exception regular expression URL match: "
+# 606,607 by Daniel Barron - corrections welcome
+
+"700","Wgrywanie do sieci jest zakazane."
+"701","Przekroczono limit wgrywanych danych."
+
+"800","Zakazany typ MIME: "
+
+"900","Zakazane rozszerzenie: "
+
+"1000","Wedle etykietowania PICS przekroczono dopuszczalny poziom zakazanych tre¶ci." 
+
+"1100","Virus or bad content detected."
+"1101","Advert blocked"
+
+"1200","Please wait - downloading to be scanned..."
+"1210","Download Complete.  Starting scan..."
+"1220","Scan complete.</p><p>Click here to download: "
+"1230","File no longer available"

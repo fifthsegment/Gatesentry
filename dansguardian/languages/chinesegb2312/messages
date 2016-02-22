@@ -1,0 +1,53 @@
+# DansGuardian messages file in chinese gb2312
+# By Chen YiFei
+"1","拒绝访问"
+
+"100","您的 IP 地址无权进行 web 访问: "
+"101","您的 IP 地址无权进行 web 访问。"
+"102","您的帐号无权进行 web 访问。 "
+
+"200","您所请求的 URL 格式有错误。"
+
+"300","发现被禁止的短语: "
+"301","发现被禁止的短语。"
+
+"400","发现被禁止的组合短语: "
+"401","发现被禁止的组合短语。"
+"402"," 短语的权重限制为: "
+"403","超过短语的权重限制。"
+
+"500","被禁止的网站: "
+"501","被禁止的 URL: "
+"502","全面禁止生效，而站点并不在白名单中。"
+"503","被正则表达式禁止的 URL: "
+"504","发现被正则表达式禁止的 URL。"
+"505","全面禁止使用 IP 生效，而该地址仅是一个 IP 地址。"
+
+"600","匹配一个例外的客户端 IP 地址。"
+"601","匹配一个例外的客户端帐号。"
+"602","匹配一个例外的站点。"
+"603","匹配一个例外的 URL。"
+"604","发现例外的短语:"
+"605","发现例外的组合短语: "
+"606","Bypass URL exception."
+"607","Bypass cookie exception."
+"608","Scan bypass URL exception."
+"609","Exception regular expression URL match: "
+# 606,607 by Daniel Barron - corrections welcome
+
+"700","禁止上传文件。"
+"701","超过文件上传限额"
+
+"800","禁止的 MIME 类型: "
+
+"900","禁止的文件扩展名: "
+
+"1000","该网站超过了 PICS 标签级别。"
+
+"1100","Virus or bad content detected."
+"1101","Advert blocked"
+
+"1200","Please wait - downloading to be scanned..."
+"1210","Download Complete.  Starting scan..."
+"1220","Scan complete.</p><p>Click here to download: "
+"1230","File no longer available"

@@ -1,0 +1,55 @@
+# DansGuardian messages file in French
+
+# Translated by: Bernard Wanadoo and Jacques Theys
+# Improvements by Jeanuel
+
+"1","Acces interdit"
+
+"100","Votre addresse IP n'est pas autoris&ecute;e &agrave; afficher le site: "
+"101","Votre addresse IP n'est pas autoris&ecute;e &agrave; naviguer sur le WEB."
+"102","Votre compte utilisateur n'est pas autoris&ecute; &agrave; afficher le site: "
+
+"200","L'URL demandee n'est pas bien form&ecute;e."
+
+"300","Phrase interdite: "
+"301","Phrase interdite trouv&ecute;e."
+
+"400","Combinaison interdite de mots: "
+"401","Combinaison interdite de mots trouv&ecute;e."
+"402","Limite de pond&ecute;ration "
+"403","Limite de pond&eacute;ration d&eacute;pass&eacute;e."
+
+"500","Site interdit: "
+"501","URL interdite: "
+"502","Blanket Block est actif et ce site n'est pas dans la liste autoris&ecute;e."
+"503","Cette URL comprend des mots prohib&ecute;s: "
+"504","L'URL comprend des mots prohib&ecute;s."
+"505","Blanket IP Block est actif et cette addresse est une adresse IP uniquement."
+
+"600","Adresse IP interdite trouv&ecute;e."
+"601","Client interdit trouv&ecute;."
+"602","Site interdit trouv&ecute;."
+"603","URL interdite trouv&ecute;e."
+"604","Phrase interdite trouv&ecute;e: "
+"605","Combinaison de mots interdits trouv&ecute;e: "
+"606","URL sans controle trouv&ecute;e."
+"607","Cookie sans controle trouv&ecute;."
+"608","Scan bypass URL exception."
+"609","Exception regular expression URL match: "
+
+"700","L'upload WEB est interdit."
+"701","D&ecute;passement de limite d'upload Web."
+
+"800","Type MIME interdit: "
+
+"900","Type de fichier interdit: "
+
+"1000","Niveau PICS depass&ecute; sur le site entier."
+
+"1100","Virus or bad content detected."
+"1101","Advert blocked"
+
+"1200","Please wait - downloading to be scanned..."
+"1210","Download Complete.  Starting scan..."
+"1220","Scan complete.</p><p>Click here to download: "
+"1230","File no longer available"

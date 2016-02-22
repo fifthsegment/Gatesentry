@@ -1,0 +1,54 @@
+# DansGuardian messages file
+# Lithuanian version by Nerijus Baliûnas
+# charset=windows-1257
+
+"1","Tinklalapis uþdraustas"
+
+"100","Ið jûsø IP adreso negalima pasiekti tinklalapio: "
+"101","Draudþiama narðyti ið jûsø IP adreso."
+"102","Ðiam vartotojui negalima pasiekti tinklalapio: "
+
+"200","Neteisingas URL."
+
+"300","Rasta uþdrausta frazë: "
+"301","Rasta uþdrausta frazë."
+
+"400","Rasta uþdrausta fraziø kombinacija: "
+"401","Rasta uþdrausta fraziø kombinacija."
+"402","Sumuojamø fraziø limitas "
+"403","Virðytas sumuojamø fraziø limitas."
+
+"500","Uþdraustas adresas (site): "
+"501","Uþdraustas URL: "
+"502","Leidþiamas priëjimas tik prie tinklalapiø, esanèiø 'baltame' sàraðe, bet ðio tinklalapio jame nëra."
+"503","Draudþiamas URL regexp: "
+"504","Rastas draudþiamas URL regexp."
+"505","Priëjimas prie IP adresø uþdraustas, o ðis adresas yra tik IP adresas."
+
+"600","Kliento IP yra iðimèiø sàraðe."
+"601","Kliento vardas yra iðimèiø sàraðe."
+"602","Adresas yra iðimèiø sàraðe."
+"603","URL yra iðimèiø sàraðe."
+"604","Rasta frazë ið iðimèiø sàraðo: "
+"605","Rasta fraziø kombinacija ið iðimèiø sàraðo: "
+"606","URL apëjimo iðimtis."
+"607","Slapuko apëjimo iðimtis."
+"608","URL skanavimo apëjimo iðimtis."
+"609","Regexp URL yra iðimèiø sàraðe: "
+
+"700","Nusiuntimas (upload) yra uþdraustas."
+"701","Virðytas nusiuntimo (upload) limitas."
+
+"800","Uþdraustas MIME tipas: "
+
+"900","Uþdraustas praplëtimas: "
+
+"1000","Virðytas ðio tinklalapio PICS vertinimo kriterijus."
+
+"1100","Turinys uþkrëstas virusu."
+"1101","Reklama uþblokuota"
+
+"1200","Palaukite - siunèiame tikrinimui nuo virusø..."
+"1210","Atsiøsta.  Tikriname nuo virusø..."
+"1220","Patikrinta.</p><p>Atsisiøskite: "
+"1230","Failas neprieinamas"

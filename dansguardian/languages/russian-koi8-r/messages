@@ -1,0 +1,51 @@
+# DansGuardian messages file in Russian KOI8-R 
+
+"1","Доступ запрещен"
+
+"100","Пользователю с таким IP-адресом запрещен доступ к web: "
+"101","Пользователю с таким IP-адресом запрещен доступ к web."
+"102","Пользователю с таким именем запрещен доступ к web: "
+
+"200","Запрашиваемый URL является неправильно оформлен."
+
+"300","Найдена запрещенная фраза: "
+"301","Найдена запрещенная фраза."
+
+"400","Найдена запрещенная комбинация фраз: "
+"401","Найдена запрещенная комбинация фраз."
+"402","Weighted phrase limit of "
+"403","Превышен предел весов фраз."
+
+"500","Запрещенный сайт: "
+"501","Запрещенный URL: "
+"502","Blanket Block is active and that site is not on the white list."
+"503","URL, запрещенный регулярным выражением: "
+"504","Найден URL, запрещенный регулярным выражением."
+"505","Blanket IP Block is active and that address is an IP only address."
+
+"600","Exception client IP match."
+"601","Exception client user match."
+"602","Exception site match."
+"603","Exception URL match."
+"604","Exception phrase found: "
+"605","Combination exception phrase found: "
+"607","Bypass cookie exception."
+"608","Scan bypass URL exception."
+"609","Exception regular expression URL match: "
+
+"700","Загрузка файлов запрещена."
+"701","Превышен предел загрузок."
+
+"800","Запрещенный MIME-тип: "
+
+"900","Запрещенное расширение файла: "
+
+"1000","PICS labeling level exceeded on the above site."
+
+"1100","Virus or bad content detected."
+"1101","Advert blocked"
+
+"1200","Please wait - downloading to be scanned..."
+"1210","Download Complete.  Starting scan..."
+"1220","Scan complete.</p><p>Click here to download: "
+"1230","File no longer available"

@@ -1,0 +1,52 @@
+# DansGuardian 2.8 messages file in Hungarian
+
+"1","A hozzáférés tiltott"
+
+"100","Az Ön IP címe nem engedélyezett ehhez a böngészõhöz: "
+"101","Az Ön IP címe nem engedélyezett ehhez a böngészõhöz."
+"102","A felhasználóneve nem engedélyezett ehhez e aböngészõhöz: "
+
+"200","A kért URL formátuma nem tûnik biztonságosnak."
+
+"300","Tiltott kifejezés: "
+"301","Tiltott kifejezés."
+
+"400","Tiltott összetételû kifejezés: "
+"401","Tiltott összetételû kifejezés."
+"402","A súlyozott kifejezés határa "
+"403","A súlyozott kifejezés elérte a határát."
+
+"500","Tiltott oldal: "
+"501","Tiltott URL: "
+"502","A domain-alapú szûrés aktív és ez az oldal sem a 'fehér', sem a 'szürke' listán nincs fent."
+"503","Tiltott reguláris kifejezésû URL: "
+"504","Tiltott reguláris kifejezésû URL."
+"505","A címtartomány alapú szûrés aktív és ez csak egy egyszerû IP-cím."
+
+"600","Kifogásolható kliens IP egyezés."
+"601","Kifogásolható kliens felhasználó egyezés."
+"602","Kifogásolható oldalegyezés."
+"603","Kifogásolható URL-egyezés."
+"604","Kifogásolható kifejezés: "
+"605","Kombinációs kifogásolható kifejezés: "
+"606","Továbbugrató URL kifogás."
+"607","Továbbugrató süti kifogás."
+"608","Scan bypass URL exception."
+"609","Exception regular expression URL match: "
+
+"700","A Webre történõ feltöltés tiltva."
+"701","A Webre történõ feltöltés korlátját elérte."
+
+"800","Tiltott MIME Típus: "
+
+"900","Tiltott kiterjesztés: "
+
+"1000","A PICS szervezet jelölési szintjét elérte a felsõ oldal."
+
+"1100","Vírussal fetõzött állomány."
+"1101","Advert blocked"
+
+"1200","Please wait - downloading to be scanned..."
+"1210","Download Complete.  Starting scan..."
+"1220","Scan complete.</p><p>Click here to download: "
+"1230","File no longer available"

@@ -1,0 +1,53 @@
+# DansGuardian messages file in Slovak
+# by Du¹an Biro¹èák biroscak@gmail.com
+
+"1","Prístup zamietnutý"
+
+"100","Va¹ej IP adrese neni povolené prehliada»: "
+"101","Va¹a IP adresa nemá povolené prohliadanie."
+"102","Va¹e u¾ívateµské meno nemá povolené prohliada»: "
+
+"200","Po¾adovaná URL je ¹patne zadaná."
+
+"300","Nájdená zakázaná fráza: "
+"301","Nájdena zakázaná fráza."
+
+"400","Nájdená zakázaná kombinacia fráz: "
+"401","Najdená zakázaná kombinacia fráz."
+"402","Limit vá¾ených fráz: "
+"403","Bol prekroèený limit pre vá¾ené frázy."
+
+"500","Zakázané webové sídlo: "
+"501","Zakázaná URL adresa: "
+"502","Celoplo¹né blokovánie prístupu je aktivované a toto webové sídlo neni povolené."
+"503","Nájdena zakázaná URL adresa podµa regularneho výrazu: "
+"504","Nájdena zakázaná URL adresa podµa regularneho výrazu."
+"505","Celoplo¹né blokovanie IP adries je aktivované a bola zadána IP adresa."
+
+"600","Nájdená výnímková IP adresa."
+"601","Nájdený výnimkový u¾ívateµ."
+"602","Nájdené výnimkové webové sídlo."
+"603","Nájdená výnimková URL adresa."
+"604","Nájdená výnimková fráza: "
+"605","Nájdená kombinacia výnimkových fráz: "
+"606","Nahradi» výnimku URL."
+"607","Nahradi» cookie výnimku."
+"608","Scan bypass URL exception."
+"609","Exception regular expression URL match: "
+
+"700","Web upload je zakázaný."
+"701","Web upload limit bol prekroèený."
+
+"800","Zakázaný obsah súboru: "
+
+"900","Zakázaná prípona súboru: "
+
+"1000","Úroven PICS oznaèenia bola prekroèená na tomto webovém sídle."
+
+"1100","Virus or bad content detected."
+"1101","Advert blocked"
+
+"1200","Please wait - downloading to be scanned..."
+"1210","Download Complete.  Starting scan..."
+"1220","Scan complete.</p><p>Click here to download: "
+"1230","File no longer available"

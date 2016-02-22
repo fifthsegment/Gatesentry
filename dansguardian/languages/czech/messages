@@ -1,0 +1,54 @@
+# DansGuardian messages file in Czech
+# by Richard Bukovansky bukovansky@atcomp.cz
+
+"1","Pøístup zamítnut"
+
+"100","Va¹i IP adrese není povoleno prohlí¾et: "
+"101","Va¹e IP adresa nemá povoleno prohlí¾ení."
+"102","Va¹e u¾ivatelské jméno nemá povoleno prohlí¾et: "
+
+"200","Po¾adovaná URL je ¹patnì zadána."
+
+"300","Nalezena zakázaná fráze: "
+"301","Nalezena zakázaná fráze."
+
+"400","Nalezena zakázaná kombinace frázi: "
+"401","Nalezena zakázaná kombinace frázi."
+"402","Limit vá¾ených frází: "
+"403","Byl pøekroèen limit pro vá¾ené fráze."
+
+"500","Zakázané webové sídlo: "
+"501","Zakázaná URL adresa: "
+"502","Celoplo¹né blokování pøístupu je aktivováno a toto webové sídlo není povoleno."
+"503","Nalezena zakázaná URL adresa dle regularního výrazu: "
+"504","Nalezena zakázaná URL adresa dle regularního výrazu."
+"505","Celoplo¹né blokovaní IP adres je aktivováno a byla zadána IP adresa."
+
+"600","Nalezena vyjímková IP adresa."
+"601","Nalezen vyjímkový u¾ivatel."
+"602","Nalezeno vyjímkové webové sídlo."
+"603","Nalezena vyjímková URL adresa."
+"604","Nalezena vyjímková fráze: "
+"605","Nalezena kombinace vyjímkových frázi: "
+"606","Bypass URL exception."
+"607","Bypass cookie exception."
+"608","Scan bypass URL exception."
+"609","Exception regular expression URL match: "
+# 606,607 by Daniel Barron - corrections welcome
+
+"700","Web upload je zakázán."
+"701","Web upload limit byl pøekroèen."
+
+"800","Zakázaný obsah souboru: "
+
+"900","Zakázaná pøípona souboru: "
+
+"1000","Úroveò PICS oznaèení byla pøekroèena na tomto webovém sídle."
+
+"1100","Virus or bad content detected."
+"1101","Advert blocked"
+
+"1200","Please wait - downloading to be scanned..."
+"1210","Download Complete.  Starting scan..."
+"1220","Scan complete.</p><p>Click here to download: "
+"1230","File no longer available"
