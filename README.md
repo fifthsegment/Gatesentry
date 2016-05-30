@@ -1,6 +1,36 @@
 
-##GateSentry
-GateSentry is a complete Web Filtering suite for the Raspberry Pi that supports both HTTP and HTTPS filtering. It can be downloaded and used as a SD-CARD image from : www.abdullahirfan.com/my-projects/gatesentry/.
+## GateSentry
+
+GateSentry is a complete Web Filtering suite for the Raspberry Pi that supports both HTTP and HTTPS filtering. It can be downloaded and used as simply as a SD-CARD image .
+
+##### Features
+* SSL Filtering
+* File Download restriction based upon MIME types
+* Phrase based content restriction
+* Individual Site blocking
+* Ad Blocking
+* Switch Internet access on or off.
+* Updated Squid
+* Support for all Raspberry Pi boards upto Raspberry Pi 3
+* Built in Wifi Access point for the Pi3
+* Sets up proxy automatically on clients using WPAD, works out of the Box on the Pi3 and Pi2 (if * your Wifi Device is supported)
+* Support for OTA updates
+* Its Free!
+
+##### Screenshots
+1  - Main Screen
+![Main-Screen](http://i.imgur.com/oB5FiBL.png)
+2  - Change built-in Wifi name and password
+![Wifi-pass](http://i.imgur.com/sE4ev7c.png)
+3 - Disable Internet access for Wifi Clients
+![Disable-access](http://i.imgur.com/DNYDmrG.png)
+4 - Edit Filters
+![Edit-filters](http://i.imgur.com/8XyoPJs.png)
+
+##### Download and Initial Setup Guide
+
+[https://www.abdullahirfan.com/releasing-gatesentry-v1-0-beta/](Here)
+
 
 ### Under the hood
 GateSentry is powered by:

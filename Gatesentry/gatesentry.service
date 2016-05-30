@@ -1,0 +1,15 @@
+[Unit]
+Description=Gatesentry service
+After=syslog.target network.target
+
+[Service]
+Type=simple
+User=root
+ExecStartPre=service squid3 restart
+ExecStart=/etc/gatesentry/dist/icap_daemon start
+ExecStop=/etc/gatesentry/dist/icap_daemon stop
+PIDFile=/tmp/icap.pid
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

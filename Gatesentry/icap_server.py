@@ -129,7 +129,7 @@ class ICAPHandler(BaseICAPRequestHandler):
         for h in self.enc_req_headers:
             for v in self.enc_req_headers[h]:
                 self.set_enc_header(h, v)
-
+	print self
         # Copy the request body (in case of a POST for example)
         if not self.has_body:
             self.send_headers(False)
@@ -158,7 +158,7 @@ class ICAPHandler(BaseICAPRequestHandler):
         self.set_icap_response(200)        
         self.set_enc_status(' '.join(self.enc_res_status))
 
-
+        print self
        
         CHUNK_SIZE = 1
         # Things that can be handled here:
@@ -225,6 +225,7 @@ class ICAPHandler(BaseICAPRequestHandler):
             chunks = []
             while True:
                 chunk = self.read_chunk()
+      		#print chunk
                 chunks.append(chunk)
                 if (len(chunk) > CHUNK_SIZE):
                     CHUNK_SIZE = len(chunk)
@@ -233,6 +234,9 @@ class ICAPHandler(BaseICAPRequestHandler):
 
             data = ''.join(chunks)
             if (len(data) > 0):
+		self.set_icap_response(200)
+		self.write_chunk(data)
+		self.write_chunk('')
                 if (analize):
                     comObj = compression()
                     data_decompressed = comObj.deflate(data, compress_type)
@@ -270,6 +274,7 @@ def drop_privileges(uid_name='nobody', gid_name='nogroup'):
     old_umask = os.umask(077)
 
 def mainloop(fname):
+    print "Starting main loop "
     import_plugins(modules_dir)
     server = ThreadingSimpleServer(('', icap_port), ICAPHandler)
     global filteredwords
@@ -325,3 +330,4 @@ if __name__ == "__main__":
         if not log.closed: log.close()
     os._exit(0)
     '''
+
