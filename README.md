@@ -41,7 +41,7 @@ GateSentry is powered by:
 * Squid3 compiled with sslbump
 * Dansguardian for http filtering 
 * GateSentry's ICAP server for https filtering
-* PHP5 and Sqlite for the Administration panel
+* PHP5 and Sqlite powered by Laravel (for the Administration panel)
 
 ### Compiling and Running
 
