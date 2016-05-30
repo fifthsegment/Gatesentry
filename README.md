@@ -1,5 +1,9 @@
 
 ## GateSentry
+##### *A Free webfilter + Parental Controls Suite for the Pi*
+
+
+
 
 GateSentry is a complete Web Filtering suite for the Raspberry Pi that supports both HTTP and HTTPS filtering. It can be downloaded and used as simply as a SD-CARD image .
 
