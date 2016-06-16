@@ -35,6 +35,11 @@ GateSentry is a complete Web Filtering suite for the Raspberry Pi that supports 
 
 [https://www.abdullahirfan.com/releasing-gatesentry-v1-0-beta/](Here)
 
+##### Using a self-signed certificate
+
+
+Even though GateSentry comes with its own certificate, for security purposes you're encouraged to generate your own. Here's how:
+
 
 ### Under the hood
 GateSentry is powered by:
