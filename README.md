@@ -40,6 +40,8 @@ GateSentry is a complete Web Filtering suite for the Raspberry Pi that supports 
 
 Even though GateSentry comes with its own certificate, for security purposes you're encouraged to generate your own. Here's how:
 
+`openssl req -x509 -newkey rsa:2048 -keyout key.pem -out cert.pem -days XXX`
+
 
 ### Under the hood
 GateSentry is powered by:
