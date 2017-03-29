@@ -2,6 +2,8 @@
 ## GateSentry
 ##### *A Free webfilter + Parental Controls Suite for the Pi*
 
+## IMPORTANT UPDATE :
+28-March-2017 : A newer, better GateSentry's here. This version will soon be Deprecated, in favor of [that one](http://gatesentryfilter.abdullahirfan.com/). 
 
 
 
