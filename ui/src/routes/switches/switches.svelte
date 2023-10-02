@@ -23,9 +23,9 @@
   labelB="Running"
 />
 <br />
-<ToggleComponent
+<!-- <ToggleComponent
   settingName="enable_https_filtering"
   label="Proxy Server"
   labelA="Not Running"
   labelB="Running"
-/>
+/> -->

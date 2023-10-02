@@ -1,3 +1,26 @@
 .text-center {
   text-align: center;
 }
+
+.mitm-privacy-notice {
+  border: 1px solid #ccc;
+  padding: 10px;
+  margin-top: 10px; 
+  background-color: rgba(255, 255, 255, 0.8);
+}
+
+.mitm-privacy-notice p {
+  margin-top: 4px;
+}
+
+.mitm-privacy-notice .notice-title {
+  color: #000;
+  text-decoration: underline;
+  font-size: 160%;
+  text-align: center;
+  margin-bottom: 20px;
+}
+
+.mitm-privacy-notice .section {
+  margin-top: 20px;
+}
