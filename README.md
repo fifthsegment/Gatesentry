@@ -4,7 +4,7 @@ An MITM proxy server with a nice frontend.
 
 ## Build
 
-`./setup.sh``
+`./setup.sh`
 
 Run
 
