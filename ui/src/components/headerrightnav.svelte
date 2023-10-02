@@ -17,7 +17,6 @@
 </script>
 
 <HeaderUtilities>
-  <HeaderGlobalAction aria-label="Settings" icon={SettingsAdjust} />
   {#if loggedIn}
     <HeaderAction
       bind:isOpen={userProfilePanelOpen}
@@ -25,9 +24,7 @@
       closeIcon={UserAvatarFilledAlt}
     >
       <HeaderPanelLinks>
-        <HeaderPanelDivider>Hello</HeaderPanelDivider>
-        <HeaderPanelLink>User</HeaderPanelLink>
-        <HeaderPanelDivider>Yo</HeaderPanelDivider>
+        <HeaderPanelDivider>Logged in as admin</HeaderPanelDivider>
         <HeaderPanelLink on:click={store.logout}>Logout</HeaderPanelLink>
       </HeaderPanelLinks>
     </HeaderAction>

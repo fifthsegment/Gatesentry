@@ -165,7 +165,7 @@ func (R *GSRuntime) init() {
 	R.GSSettings.SetDefault("Noheartbeat", "0")
 	R.GSSettings.SetDefault("Noheartbeatmessage", "")
 	R.GSSettings.SetDefault("timezone", "Asia/Karachi")
-	R.GSSettings.SetDefault("enable_https_filtering", "true")
+	R.GSSettings.SetDefault("enable_https_filtering", "false")
 	R.GSSettings.SetDefault("enable_dns_server", "true")
 	R.GSSettings.SetDefault("idemail", "")
 

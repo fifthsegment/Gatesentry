@@ -19,7 +19,7 @@
   import Notifications from "./components/notifications.svelte";
   import { setupI18n } from "./language/i18n";
   import Settings from "./routes/settings/settings.svelte";
-  import Stats from "./routes/stats/stats.svelte";
+  import Switches from "./routes/switches/switches.svelte";
   import Home from "./routes/home/home.svelte";
   import Dns from "./routes/dns/dns.svelte";
 
@@ -86,8 +86,8 @@
       <Route path="/excludehosts">
         <Filter type="excludehosts" />
       </Route>
-      <Route path="/stats">
-        <Stats />
+      <Route path="/switches">
+        <Switches />
       </Route>
     </div>
   </Router>

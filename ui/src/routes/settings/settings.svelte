@@ -41,7 +41,7 @@
 />
 
 <TextInput
-helperText={$_("Leave blank to keep the current password")}
+  helperText={$_("Leave blank to keep the current password")}
   type="password"
   title={$_("Password")}
   labelText={$_("Password")}
