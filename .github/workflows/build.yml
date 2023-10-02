@@ -1,0 +1,54 @@
+name: Go Build and Upload
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+  
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v2
+
+      - name: Set up Go
+        uses: actions/setup-go@v2
+        with:
+          go-version: 1.21
+
+      - name: Build
+        id: build
+        run: |
+          mkdir bin
+          go get -v
+          ls -la
+          cd ui && npm install && npm run build && cd ..
+          ls
+          rm -rf gatesentryf/webserver/frontend/files/*
+          mv ui/dist/* gatesentryf/webserver/frontend/files
+          mv gatesentryf/webserver/frontend/files/fs/* gatesentryf/webserver/frontend/files
+          env GOOS=linux GOARCH=amd64 go build -o gatesentry-linux
+          env GOOS=darwin GOARCH=amd64 go build -o gatesentry-macos
+          git config user.name "GitHub Action"
+          git config user.email "fifthsegment@github.com"
+          TAG=v$(date -Iseconds | sed 's/[T:\+]/-/g')
+          echo "$TAG"
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+      - name: Create Tag  
+        uses: cardinalby/git-tag-action@master
+        env:
+            TAG: ${{ steps.build.outputs.tag }}
+            GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.build.outputs.tag }}
+          files: |
+            gatesentry-linux
+            gatesentry-macos
+          
