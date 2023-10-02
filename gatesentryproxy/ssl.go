@@ -172,7 +172,7 @@ func ConnectDirect(conn net.Conn, serverAddr string, extraData []byte, gpt *GSPr
 	// 		fmt.Println("Bytes = " + strconv.FormatInt(counter.Count(), 10) + " . Host = " + serverAddr)
 	// 		// If less than or equal to 500KB, copy the data
 	// 		_, _ = io.Copy(destwithcounter, serverConn)
-
+	//
 	// 	}
 
 	// 	time.Sleep(time.Second)
