@@ -1,10 +1,10 @@
 # Gatesentry
 
-An MITM proxy server with a nice frontend.
+A DNS + proxy server with a nice frontend (also supports MITM).
 
 ## Build
 
-`./setup.sh``
+`./setup.sh`
 
 Run
 
