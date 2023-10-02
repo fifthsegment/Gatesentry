@@ -1,0 +1,1 @@
+./build.sh && cd bin && ./gatesentrybin
