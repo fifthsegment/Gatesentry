@@ -1,8 +1,11 @@
 package gatesentryf
 
 import (
+	"fmt"
+
 	gatesentryDnsServer "bitbucket.org/abdullah_irfan/gatesentryf/dns/server"
 	gatesentry2logger "bitbucket.org/abdullah_irfan/gatesentryf/logger"
+	gatesentry2storage "bitbucket.org/abdullah_irfan/gatesentryf/storage"
 )
 
 var (
@@ -24,6 +27,84 @@ var (
 	}
 )
 
-func StartDNSServer(baseDir string, logger *gatesentry2logger.Log) {
-	gatesentryDnsServer.StartDNSServer(baseDir, logger, blocklists)
+func DNSServerThread(baseDir string, logger *gatesentry2logger.Log, c <-chan int, settings *gatesentry2storage.MapStore) {
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Println("Recovered from panic:", r)
+		}
+	}()
+
+	fmt.Println("Inside DNS server thread")
+	for {
+		select {
+		case msg := <-c:
+			fmt.Println("Received message:", msg)
+			if msg == 1 {
+				// fmt.Println("ACTUAL Starting DNS server")
+				// Start the DNS server
+				go gatesentryDnsServer.StartDNSServer(baseDir, logger, blocklists, settings)
+				fmt.Println("ACTUAL DNS server started")
+			} else if msg == 2 {
+				fmt.Println("ACTUAL Stopping DNS server")
+				// Stop the DNS server
+				go gatesentryDnsServer.StopDNSServer()
+				fmt.Println("ACTUAL DNS server stopped")
+			}
+		}
+	}
+
 }
+
+// func DNSServerThread(baseDir string, logger *gatesentry2logger.Log, c chan int) {
+// 	fmt.Println("Inside DNS server thread")
+// 	select {
+// 	case msg := <-c:
+// 		fmt.Println("Received message: " + fmt.Sprint(msg))
+// 		if msg == 1 {
+// 			fmt.Println("ACTUAL Starting DNS server")
+// 			// Start the DNS server
+// 			// go gatesentryDnsServer.StartDNSServer(baseDir, logger, blocklists)
+// 			fmt.Println("ACTUAL DNS server started")
+// 		} else if msg == 2 {
+// 			fmt.Println("ACTUAL Stopping DNS server")
+// 			// Stop the DNS server
+// 			// go gatesentryDnsServer.StopDNSServer()
+// 			fmt.Println("ACTUAL DNS server stopped")
+// 		}
+// 	}
+// for {
+// 	fmt.Println("Waiting for message")
+// 	msg := <-c
+
+// 	fmt.Println("Received message: " + fmt.Sprint(msg))
+// 	if msg == 2 {
+// 		fmt.Println("Stopping DNS server")
+// 		// Stop the DNS server
+// 		gatesentryDnsServer.StopDNSServer()
+// 	} else if msg == 1 {
+// 		fmt.Println("Starting DNS server")
+// 		// Start the DNS server
+// 		gatesentryDnsServer.StartDNSServer(baseDir, logger, blocklists)
+// 		fmt.Println("DNS server started")
+// 	}
+// }
+// select {
+// case msg := <-c:
+// 	fmt.Println("Received message: " + msg)
+// 	switch msg {
+// 	case "stop":
+// 		fmt.Println("Stopping DNS server")
+// 		// Stop the DNS server
+// 		gatesentryDnsServer.StopDNSServer()
+
+// 	case "start":
+// 		fmt.Println("Starting DNS server")
+// 		// Start the DNS server
+// 		gatesentryDnsServer.StartDNSServer(baseDir, logger, blocklists)
+// 		fmt.Println("DNS server started")
+
+// 	default:
+// 		// Do nothing
+// 	}
+// }
+// }

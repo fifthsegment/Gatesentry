@@ -57,12 +57,24 @@ func RegisterEndpoints(
 	})
 	app.Get("/api/about/info", jwtMiddleware.Serve)
 
+	app.Get("/api/dns/custom_entries", jwtMiddleware.Serve, func(ctx iris.Context) {
+		gatesentryWebserverEndpoints.GSApiDNSEntriesCustom(ctx, settings, runtime)
+	})
+
+	app.Post("/api/dns/custom_entries", jwtMiddleware.Serve, func(ctx iris.Context) {
+		gatesentryWebserverEndpoints.GSApiDNSSaveEntriesCustom(ctx, settings, runtime)
+	})
+
 	app.Get("/api/stats", jwtMiddleware.Serve, func(ctx iris.Context) {
 		gatesentryWebserverEndpoints.ApiGetStats(ctx, logger)
 	})
 
 	app.Get("/api/stats/byUrl", jwtMiddleware.Serve, func(ctx iris.Context) {
 		gatesentryWebserverEndpoints.ApiGetStatsByURL(ctx, logger)
+	})
+
+	app.Get("/api/toggleServer/:id", jwtMiddleware.Serve, func(ctx iris.Context) {
+		gatesentryWebserverEndpoints.ApiToggleServer(ctx, logger)
 	})
 
 	app.Post("/api/verify/certificate", jwtMiddleware.Serve, gatesentryWebserverEndpoints.ApiVerifyCert)

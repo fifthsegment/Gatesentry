@@ -485,23 +485,7 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// logAccess(r, nil, 0, false, user, tally, scores, thisRule, "", ignored)
 		// conf = nil // Allow it to be garbage-collected, since we won't use it any more.
 		log.Printf("Running a CONNECTDIRECT")
-		// int64 to string
-		// IF HOST CONTAINS scontent and fbcdn.net
-		// THEN BLOCK
-		var uploaded, downloaded, wasBlocked = ConnectDirect(conn, r.URL.Host, nil, passthru)
-
-		if wasBlocked {
-			showBlockPage(w, r, nil, []byte("Blocked"))
-			return
-		}
-
-		// uploadedStr := strconv.FormatInt(uploaded, 10)
-		// downloadedStr := strconv.FormatInt(downloaded, 10)
-
-		uploadedStr := GetHumanDataSize(uploaded)
-		downloadedStr := GetHumanDataSize(downloaded)
-		fmt.Println("[Traffic] Host = " + r.URL.Host + " Uploaded = " + uploadedStr + " Downloaded = " + downloadedStr)
-
+		ConnectDirect(conn, r.URL.Host, nil, passthru)
 		return
 	}
 

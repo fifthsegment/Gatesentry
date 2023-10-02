@@ -4,6 +4,7 @@ import (
 	// "gatesentry2/utils"
 	// "github.com/elazarl/goproxy"
 	"encoding/json"
+	"fmt"
 	"log"
 	"strings"
 	"time"
@@ -23,10 +24,11 @@ type Log struct {
 }
 
 type LogEntry struct {
-	Time int64  `json:"time"`
-	IP   string `json:"ip"`
-	URL  string `json:"url"`
-	Type string `json:"type"`
+	Time            int64  `json:"time"`
+	IP              string `json:"ip"`
+	URL             string `json:"url"`
+	Type            string `json:"type"`
+	DNSResponseType string `json:"dnsResponseType"`
 	// Add more fields if needed
 }
 
@@ -67,7 +69,7 @@ func NewLogger(LogLocation string) *Log {
 	return l
 }
 
-func (L *Log) LogDNS(domain string, user string) {
+func (L *Log) LogDNS(domain string, user string, responseType string) {
 	ip := user
 	// url:=url;
 	go func() {
@@ -78,9 +80,9 @@ func (L *Log) LogDNS(domain string, user string) {
 		// logitem := "[GS-Logger] " + ctx.Req.RemoteAddr + " - " + ctx.Req.URL.String();
 
 		timestring := gatesentry2utils.Int64toString(secs)
-		logJson := `{"time": ` + timestring + `, "ip":"` + ip + `","url":"` + domain + `","type":"dns"}`
+		logJson := `{"time": ` + timestring + `, "ip":"` + ip + `","url":"` + domain + `","type":"dns", "dnsResponseType":"` + responseType + `"}`
 		key := gatesentry2utils.RandomString(25) + timestring
-		// fmt.Println( logJson );
+		fmt.Println(logJson)
 
 		err := L.Database.Update(func(tx *buntdb.Tx) error {
 			_, _, err := tx.Set(key, logJson, &buntdb.SetOptions{Expires: true, TTL: Log_Entry_Expires})
@@ -144,17 +146,19 @@ func (L *Log) GetLog(entries int64) string {
 	return result
 }
 
-func (L *Log) GetDNSLogs(entries int64) ([]LogEntry, error) {
-	var logs []LogEntry
+func (L *Log) GetLastXSecondsDNSLogs(fromSeconds int64, groupByDate bool) (interface{}, error) {
+	var logs interface{} // The return type can be either []LogEntry or map[string][]LogEntry
 
 	now := time.Now()
 	totime := now.Unix()
-	fromtime := totime - entries
+	fromtime := totime - fromSeconds
 
 	from := gatesentry2utils.Int64toString(fromtime)
 	to := gatesentry2utils.Int64toString(totime)
 
-	err := L.Database.View(func(tx *buntdb.Tx) error {
+	fmt.Println("Viewing from " + from + " to " + to)
+
+	L.Database.View(func(tx *buntdb.Tx) error {
 		return tx.DescendRange("entries", `{"time":`+to+`}`, `{"time":`+from+`}`, func(key, value string) bool {
 			var parsedValue map[string]interface{}
 			if err := json.Unmarshal([]byte(value), &parsedValue); err != nil {
@@ -166,14 +170,29 @@ func (L *Log) GetDNSLogs(entries int64) ([]LogEntry, error) {
 				if err := json.Unmarshal([]byte(value), &logEntry); err != nil {
 					return true // Continue iterating
 				}
-				logs = append(logs, logEntry)
+
+				if groupByDate {
+					// Group entries by date
+					if logs == nil {
+						logs = make(map[string][]LogEntry)
+					}
+					date := time.Unix(logEntry.Time, 0).Format("2006-01-02")
+					logs.(map[string][]LogEntry)[date] = append(logs.(map[string][]LogEntry)[date], logEntry)
+				} else {
+					// No grouping, add directly to the slice
+					if logs == nil {
+						logs = []LogEntry{}
+					}
+					logs = append(logs.([]LogEntry), logEntry)
+				}
+
 			}
 
 			return true
 		})
 	})
-	if err != nil {
-		return nil, err
+	if logs == nil {
+		logs = []LogEntry{}
 	}
 
 	return logs, nil

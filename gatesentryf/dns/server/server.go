@@ -12,6 +12,7 @@ import (
 	gatesentryDnsScheduler "bitbucket.org/abdullah_irfan/gatesentryf/dns/scheduler"
 	gatesentryDnsUtils "bitbucket.org/abdullah_irfan/gatesentryf/dns/utils"
 	gatesentryLogger "bitbucket.org/abdullah_irfan/gatesentryf/logger"
+	gatesentry2storage "bitbucket.org/abdullah_irfan/gatesentryf/storage"
 	"github.com/miekg/dns"
 )
 
@@ -25,7 +26,7 @@ var (
 	mutex            sync.Mutex // Mutex to control access to blockedDomains
 	blockedDomains   = make(map[string]bool)
 	exceptionDomains = make(map[string]bool)
-	internalRecords  = make(map[string][]dns.RR)
+	internalRecords  = make(map[string]string)
 	localIp, _       = gatesentryDnsUtils.GetLocalIP()
 	queryLogs        = make(map[string][]QueryLog)
 	logMutex         sync.Mutex
@@ -35,11 +36,20 @@ var (
 	logger           *gatesentryLogger.Log
 )
 
-func StartDNSServer(basePath string, ilogger *gatesentryLogger.Log, blockedLists []string) {
+var server *dns.Server
+var serverRunning bool = false
+
+func StartDNSServer(basePath string, ilogger *gatesentryLogger.Log, blockedLists []string, settings *gatesentry2storage.MapStore) {
+
+	if server != nil || serverRunning == true {
+		fmt.Println("DNS server is already running")
+		return
+	}
+
 	logger = ilogger
 	logsPath = basePath + logsPath
 	go gatesentryDnsHttpServer.StartHTTPServer()
-	InitializeLogs()
+	// InitializeLogs()
 	// go gatesentryDnsFilter.InitializeBlockedDomains(&blockedDomains, &blockedLists)
 	go gatesentryDnsScheduler.RunScheduler(
 		&blockedDomains,
@@ -47,11 +57,13 @@ func StartDNSServer(basePath string, ilogger *gatesentryLogger.Log, blockedLists
 		&internalRecords,
 		&exceptionDomains,
 		&mutex,
+		settings,
 	)
-	go PrintQueryLogsPeriodically()
+	// go PrintQueryLogsPeriodically()
 	// Listen for incoming DNS requests on port 53
-	server := &dns.Server{Addr: "0.0.0.0:53", Net: "udp"}
+	server = &dns.Server{Addr: "0.0.0.0:53", Net: "udp"}
 	server.Handler = dns.HandlerFunc(handleDNSRequest)
+
 	fmt.Println("DNS forwarder listening on :53 . Binded on : ", localIp)
 	err := server.ListenAndServe()
 	if err != nil {
@@ -59,6 +71,18 @@ func StartDNSServer(basePath string, ilogger *gatesentryLogger.Log, blockedLists
 		os.Exit(1)
 		return
 	}
+	serverRunning = true
+}
+
+func StopDNSServer() {
+	if server == nil || serverRunning == false {
+		fmt.Println("DNS server is already stopped")
+		return
+	}
+	server.Shutdown()
+	gatesentryDnsHttpServer.StopHTTPServer()
+	serverRunning = false
+	server = nil
 }
 
 func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
@@ -73,13 +97,23 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 		domain := strings.ToLower(q.Name)
 		fmt.Println("Domain requested:", domain)
 		domain = domain[:len(domain)-1]
-		LogQuery(domain)
-		logger.LogDNS(domain, "dns")
+		// LogQuery(domain)
 		if _, exists := exceptionDomains[domain]; exists {
 			fmt.Println("Domain is exception : ", domain)
-		} else if records, exists := internalRecords[domain]; exists {
-			fmt.Println("Domain is internal : ", domain)
-			m.Answer = append(m.Answer, records...)
+			logger.LogDNS(domain, "dns", "exception")
+
+		} else if ip, exists := internalRecords[domain]; exists {
+			fmt.Println("Domain is internal : ", domain, " - ", ip)
+			response := new(dns.Msg)
+			response.SetRcode(r, dns.RcodeSuccess)
+			response.Answer = append(m.Answer, &dns.A{
+				Hdr: dns.RR_Header{Name: domain + ".", Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 3600},
+				A:   net.ParseIP(ip),
+			})
+
+			logger.LogDNS(domain, "dns", "internal")
+			w.WriteMsg(response)
+			return
 		} else if blockedDomains[domain] {
 			fmt.Println("Domain is blocked : ", domain)
 			response := new(dns.Msg)
@@ -88,9 +122,12 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 				Hdr:    dns.RR_Header{Name: domain + ".", Rrtype: dns.TypeCNAME, Class: dns.ClassINET, Ttl: 3600},
 				Target: "gatesentryfilter.abdullahirfan.com.",
 			})
+			logger.LogDNS(domain, "dns", "blocked")
 
 			w.WriteMsg(response)
 			return
+		} else {
+			logger.LogDNS(domain, "dns", "forward")
 		}
 
 		resp, err := forwardDNSRequest(r)
