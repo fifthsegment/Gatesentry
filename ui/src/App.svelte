@@ -19,6 +19,9 @@
   import Notifications from "./components/notifications.svelte";
   import { setupI18n } from "./language/i18n";
   import Settings from "./routes/settings/settings.svelte";
+  import Stats from "./routes/stats/stats.svelte";
+  import Home from "./routes/home/home.svelte";
+  import Dns from "./routes/dns/dns.svelte";
 
   let isSideNavOpen = false;
   let version = "1.8.0";
@@ -64,7 +67,8 @@
   <Router {url}>
     <div>
       <Route path="/login" component={Login} />
-      <Route path="/">Home</Route>
+      <Route path="/" component={Home}></Route>
+      <Route path="/dns" component={Dns}></Route>
       <Route path="/logs" component={Logs} />
       <Route path="/settings" component={Settings} />
       <Route path="/blockedkeywords">
@@ -81,6 +85,9 @@
       </Route>
       <Route path="/excludehosts">
         <Filter type="excludehosts" />
+      </Route>
+      <Route path="/stats">
+        <Stats />
       </Route>
     </div>
   </Router>
