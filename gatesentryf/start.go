@@ -13,8 +13,10 @@ func Start() *GSRuntime {
 	fmt.Println("Starting GateSentry v " + GSVerString)
 	// proxy := gatesentry2proxy.StartProxy();
 	R = &GSRuntime{
-		WebServerPort: 10786,
-		FilterFiles:   make(map[string]string),
+		WebServerPort:    10786,
+		FilterFiles:      make(map[string]string),
+		DNSServerChannel: make(chan int),
+
 		// Proxy: proxy,
 		// FileContents : make(map[string][]GSFILTERLINE),
 	}

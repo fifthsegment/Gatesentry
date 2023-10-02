@@ -222,7 +222,18 @@ func RunGateSentry() {
 	gatesentryproxy.InitProxy()
 	ngp := gatesentryproxy.NewGSProxy()
 
-	go gatesentryf.StartDNSServer(gatesentryf.GetBaseDir(), R.Logger)
+	// fmt.Println("Making a comm channel for dns")
+	go gatesentryf.DNSServerThread(gatesentryf.GetBaseDir(), R.Logger, R.DNSServerChannel, R.GSSettings)
+
+	// go func() {
+	// 	for {
+	// 		select {
+	// 		case msg := <-R.DNSServerChannel:
+	// 			fmt.Println("[DEBUG] Received message:", msg)
+	// 		}
+	// 	}
+	// 	fmt.Println("[DEBUG] Done receive message:")
+	// }()
 
 	// ffp := gatesentryalpha.NewFPProxy();
 	// ffp.StartProxy();
@@ -329,20 +340,7 @@ func RunGateSentry() {
 			}
 			rs.Changed = responder.Blocked
 		}
-	})
 
-	// SSL CONTENT LENGTH AND DOMAIN
-	ngp.RegisterHandler("ssl_contentlength_domain", func(s *[]byte, rs *gatesentryproxy.GSResponder, gpt *gatesentryproxy.GSProxyPassthru) {
-		log.Println("Running ssl_contentlength_domain handler")
-		// log.Println("GPT = ", gpt)
-		responder := &gatesentry2responder.GSFilterResponder{Blocked: false}
-		if !gpt.DontTouch {
-			gatesentryf.RunFilter("text/html", string(*s), responder)
-			if responder.Blocked {
-				*s = []byte(gatesentry2responder.BuildResponsePage(responder.Reasons, responder.Score))
-			}
-			rs.Changed = responder.Blocked
-		}
 	})
 
 	// URL CHECKER

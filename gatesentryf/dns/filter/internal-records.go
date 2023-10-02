@@ -1,22 +1,27 @@
 package gatesentryDnsFilter
 
 import (
+	"encoding/json"
 	"fmt"
-	"net"
 	"sync"
 
-	"github.com/miekg/dns"
+	gatesentry2storage "bitbucket.org/abdullah_irfan/gatesentryf/storage"
+	gatesentryTypes "bitbucket.org/abdullah_irfan/gatesentryf/types"
 )
 
-func InitializeInternalRecords(records *map[string][]dns.RR, mutex *sync.Mutex) {
+func InitializeInternalRecords(records *map[string]string, mutex *sync.Mutex, settings *gatesentry2storage.MapStore) {
 	mutex.Lock()
 	defer mutex.Unlock()
 	fmt.Println("Initializing internal records...")
-	(*records)["abc.com"] = []dns.RR{
-		&dns.A{
-			Hdr: dns.RR_Header{Name: "abc.com.", Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 3600},
-			A:   net.ParseIP("10.1.0.138"),
-		},
+	internalRecordsString := settings.Get("DNS_custom_entries")
+
+	// parse json string to struct
+	var customEntries []gatesentryTypes.DNSCustomEntry
+	json.Unmarshal([]byte(internalRecordsString), &customEntries)
+
+	for _, entry := range customEntries {
+		(*records)[entry.Domain] = entry.IP
 	}
+
 	fmt.Println("Internal records initialized. Number of internal records = ", len(*records))
 }

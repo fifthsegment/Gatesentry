@@ -82,6 +82,7 @@ type GSRuntime struct {
 	GSUserDataSaverRunning      bool
 	GSKeepSentryAliveRunning    bool
 	GSConsumptionUpdaterRunning bool
+	DNSServerChannel            chan int
 }
 
 func SetBaseDir(a string) {
@@ -165,6 +166,7 @@ func (R *GSRuntime) init() {
 	R.GSSettings.SetDefault("Noheartbeatmessage", "")
 	R.GSSettings.SetDefault("timezone", "Asia/Karachi")
 	R.GSSettings.SetDefault("enable_https_filtering", "true")
+	R.GSSettings.SetDefault("enable_dns_server", "true")
 	R.GSSettings.SetDefault("idemail", "")
 
 	R.GSSettings.SetDefault("version", R.GetApplicationVersion())
@@ -210,6 +212,7 @@ BDEiXJif3PORNI8HkJRmy6PUEXdVGXnpwCBMtiB2H4KRLCvrjVEaAQI/BfrMmS0q
 r3jQJqBGV0HT9lE3lnKhJnetFM2muN57tCHRsAVIzepBTcZceFIvonkp2uILW/Gj
 wR8g0gOPPV1l
 -----END PRIVATE KEY-----`)
+	R.GSSettings.SetDefault("DNS_custom_entries", "[]")
 
 	general_settings := R.GSSettings.Get("general_settings")
 	general_settings_parsed := gatesentryWebserverTypes.GSGeneral_Settings{}
@@ -239,6 +242,18 @@ wR8g0gOPPV1l
 	 */
 	ConsumptionUpdater()
 
+	go func() {
+		dnsEnabled := R.GSSettings.Get("enable_dns_server")
+		if dnsEnabled == "true" {
+			fmt.Println("DNS Server, sending start signal")
+			R.DNSServerChannel <- 1
+			fmt.Println("DNS Server, sent start signal")
+		} else {
+			fmt.Println("DNS Server, sending stop signal")
+			R.DNSServerChannel <- 2
+			fmt.Println("DNS Server, sent stop signal")
+		}
+	}()
 }
 
 func (R *GSRuntime) GetInstallationId() string {

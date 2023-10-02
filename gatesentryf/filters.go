@@ -8,6 +8,7 @@ import (
 	gatesentry2proxy "bitbucket.org/abdullah_irfan/gatesentryf/proxy"
 	gatesentry2responder "bitbucket.org/abdullah_irfan/gatesentryf/responder"
 	"github.com/elazarl/goproxy"
+	// "strings"
 )
 
 func RunFilter(filterType string, content string, responder *gatesentry2responder.GSFilterResponder) {

@@ -26,7 +26,7 @@ func GSApiSettingsGET(ctx iris.Context, settings *gatesentryWebserverTypes.Setti
 		}
 		ctx.JSON(struct{ Value string }{Value: value})
 		break
-	case "blocktimes", "strictness", "timezone", "idemail", "enable_https_filtering", "capem", "keypem":
+	case "blocktimes", "strictness", "timezone", "idemail", "enable_https_filtering", "capem", "keypem", "enable_dns_server":
 		value := settings.Get(requestedId)
 		ctx.JSON(struct {
 			Key   string

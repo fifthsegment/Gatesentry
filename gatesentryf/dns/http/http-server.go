@@ -1,6 +1,7 @@
 package dnsHttpServer
 
 import (
+	"context"
 	"crypto/tls"
 	"fmt"
 	"net/http"
@@ -23,14 +24,21 @@ var (
 						</body>
 						</html>
 					`)
-	localIp, _ = gatesentryDnsUtils.GetLocalIP()
+	localIp, _   = gatesentryDnsUtils.GetLocalIP()
+	serverSecure *http.Server
+	server       *http.Server
 )
 
 func StartHTTPServer() {
-	http.HandleFunc("/", handleServerPages)
-	fmt.Println("HTTP server listening on :80")
+	// http.HandleFunc("/", handleServerPages)
 	go func() {
-		err := http.ListenAndServe(":80", nil)
+		fmt.Println("HTTP server listening on :80")
+
+		server = &http.Server{
+			Addr:    ":80",
+			Handler: http.HandlerFunc(handleServerPages),
+		}
+		err := server.ListenAndServe()
 		if err != nil {
 			fmt.Println("Error starting HTTP server:", err)
 		}
@@ -89,16 +97,26 @@ func StartHTTPServer() {
 
 		config := &tls.Config{Certificates: []tls.Certificate{cert}}
 
-		server := &http.Server{
+		serverSecure = &http.Server{
 			Addr:      ":443",
 			TLSConfig: config,
+			Handler:   http.HandlerFunc(handleServerPages),
 		}
 
-		err = server.ListenAndServeTLS("", "")
+		err = serverSecure.ListenAndServeTLS("", "")
 		if err != nil {
 			fmt.Println("Error starting server:", err)
 		}
 	}()
+}
+
+func StopHTTPServer() {
+	serverSecure.Shutdown(context.Background())
+	// serverSecure.Close()
+	server.Shutdown(context.Background())
+	// server.Close()
+	serverSecure = nil
+	server = nil
 }
 
 func handleServerPages(w http.ResponseWriter, r *http.Request) {

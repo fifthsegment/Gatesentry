@@ -1,7 +1,6 @@
 package gatesentryproxy
 
 import (
-	"encoding/json"
 	"io"
 	"log"
 	"net"
@@ -107,22 +106,9 @@ func GSLogSSL(user string, serverAddr string, serverName string, err error, cach
 	log.Println(entry)
 }
 
-type ByteCounter struct {
-	count int64
-}
-
-func (c *ByteCounter) Write(p []byte) (int, error) {
-	c.count += int64(len(p))
-	return len(p), nil
-}
-
-func (c *ByteCounter) Count() int64 {
-	return c.count
-}
-
 // ConnectDirect connects to serverAddr and copies data between it and conn.
 // extraData is sent to the server first.
-func ConnectDirect(conn net.Conn, serverAddr string, extraData []byte, gpt *GSProxyPassthru) (uploaded int64, downloaded int64, blocked bool) {
+func ConnectDirect(conn net.Conn, serverAddr string, extraData []byte, gpt *GSProxyPassthru) (uploaded, downloaded int64) {
 	// activeConnections.Add(1)
 	// defer activeConnections.Done()
 
@@ -148,51 +134,58 @@ func ConnectDirect(conn net.Conn, serverAddr string, extraData []byte, gpt *GSPr
 		serverConn.Write(extraData)
 	}
 
-	downloadedSizeChan := make(chan int64)
-
+	ulChan := make(chan int64)
 	go func() {
 		log.Printf("Non-MITM connection : Writing data to connection")
 		destwithcounter := &DataPassThru{Writer: conn, Contenttype: "", Passthru: gpt}
-
-		// Create a counter for tracking downloaded bytes
-		counter := &ByteCounter{}
-
-		// Do a limited read to check the size without copying data
-		limitedReader := io.LimitedReader{R: serverConn, N: 500 * 1024}
-		_, err := io.Copy(io.MultiWriter(destwithcounter, counter), &limitedReader)
-		gsInfo := GatesentrySSLHostnameWithDataSize{
-			Hostname: serverAddr,
-			Datasize: counter.Count(),
-		}
-		gsInfoByte, _ := json.Marshal(gsInfo)
-		IProxy.RunHandler("ssl_contentlength_domain", serverAddr, &gsInfoByte, gpt)
-
-		// Check if downloaded bytes exceed 500KB (in bytes)
-		fmt.Println("Downloaded bytes = " + strconv.FormatInt(counter.Count(), 10))
-		if strings.Contains(serverAddr, ".fbcdn.net") && counter.Count() >= 500*1023 && err == nil {
-
-			fmt.Println("Downloaded bytes exceed 500KB . Host = " + serverAddr)
-			// If more than 500KB, write an empty response
-			conn.Write([]byte("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n"))
-		} else {
-			fmt.Println("Bytes = " + strconv.FormatInt(counter.Count(), 10) + " . Host = " + serverAddr)
-			// If less than or equal to 500KB, copy the data
-			_, _ = io.Copy(destwithcounter, serverConn)
-
-		}
-
+		n, _ := io.Copy(destwithcounter, serverConn)
 		time.Sleep(time.Second)
 		conn.Close()
-
-		// Send the downloaded byte count
-		downloadedSizeChan <- counter.Count() + int64(len(extraData))
+		ulChan <- n + int64(len(extraData))
 	}()
 
-	uploaded, _ = io.Copy(serverConn, conn)
+	// go func() {
+	// 	log.Printf("Non-MITM connection : Writing data to connection")
+	// 	destwithcounter := &DataPassThru{Writer: conn, Contenttype: "", Passthru: gpt}
 
+	// 	// Create a counter for tracking downloaded bytes
+	// 	counter := &ByteCounter{}
+
+	// 	// Do a limited read to check the size without copying data
+	// 	limitedReader := io.LimitedReader{R: serverConn, N: 500 * 1024}
+	// 	_, err := io.Copy(io.MultiWriter(destwithcounter, counter), &limitedReader)
+	// 	gsInfo := GatesentrySSLHostnameWithDataSize{
+	// 		Hostname: serverAddr,
+	// 		Datasize: counter.Count(),
+	// 	}
+	// 	gsInfoByte, _ := json.Marshal(gsInfo)
+	// 	IProxy.RunHandler("ssl_contentlength_domain", serverAddr, &gsInfoByte, gpt)
+
+	// 	// Check if downloaded bytes exceed 500KB (in bytes)
+	// 	fmt.Println("Downloaded bytes = " + strconv.FormatInt(counter.Count(), 10))
+	// 	if strings.Contains(serverAddr, ".fbcdn.net") && counter.Count() >= 500*1023 && err == nil {
+
+	// 		fmt.Println("Downloaded bytes exceed 500KB . Host = " + serverAddr)
+	// 		// If more than 500KB, write an empty response
+	// 		conn.Write([]byte("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n"))
+	// 	} else {
+	// 		fmt.Println("Bytes = " + strconv.FormatInt(counter.Count(), 10) + " . Host = " + serverAddr)
+	// 		// If less than or equal to 500KB, copy the data
+	// 		_, _ = io.Copy(destwithcounter, serverConn)
+
+	// 	}
+
+	// 	time.Sleep(time.Second)
+	// 	conn.Close()
+
+	// 	// Send the downloaded byte count
+	// 	downloadedSizeChan <- counter.Count() + int64(len(extraData))
+	// }()
+
+	downloaded, _ = io.Copy(serverConn, conn)
 	serverConn.Close()
-	downloaded = <-downloadedSizeChan
-	return uploaded, downloaded, false
+	uploaded = <-ulChan
+	return uploaded, downloaded
 }
 
 // SSLBump performs a man-in-the-middle attack on conn, to filter the HTTPS

@@ -7,11 +7,11 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/miekg/dns"
+	gatesentry2storage "bitbucket.org/abdullah_irfan/gatesentryf/storage"
 )
 
-func InitializeFilters(blockedDomains *map[string]bool, blockedLists *[]string, internalRecords *map[string][]dns.RR, exceptionDomains *map[string]bool, mutex *sync.Mutex) {
-	InitializeInternalRecords(internalRecords, mutex)
+func InitializeFilters(blockedDomains *map[string]bool, blockedLists *[]string, internalRecords *map[string]string, exceptionDomains *map[string]bool, mutex *sync.Mutex, settings *gatesentry2storage.MapStore) {
+	InitializeInternalRecords(internalRecords, mutex, settings)
 	InitializeBlockedDomains(blockedDomains, blockedLists, mutex)
 	InitializeExceptionDomains(exceptionDomains, mutex)
 }
