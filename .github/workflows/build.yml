@@ -3,7 +3,7 @@ name: Go Build and Upload
 on:
   push:
     branches:
-      - main
+      - master
 
 permissions:
   contents: write
