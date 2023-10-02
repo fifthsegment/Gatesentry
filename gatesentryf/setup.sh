@@ -1,0 +1,1 @@
+go env -w GOPRIVATE=bitbucket.org/abdullah_irfan

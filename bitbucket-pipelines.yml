@@ -1,0 +1,56 @@
+#  Template Go (Golang) build
+
+#  This template allows you to validate your Go (Golang) code.
+#  The workflow allows running tests, build and code linting on the default branch.
+
+image: golang:1.21
+
+pipelines:
+  default:
+    - step:
+        name: Build
+        script:
+          - mkdir bin
+          - go get -v
+          - curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.38.0/install.sh | bash
+          - export NVM_DIR="$HOME/.nvm"
+          - "[ -s \"$NVM_DIR/nvm.sh\" ] && \\. \"$NVM_DIR/nvm.sh\""   # This loads nvm
+          - nvm install 18.17 # Install Node.js version 18.17
+          - ls -la
+          - cd ui && npm install && npm run build && cd ..
+          - ls
+          - rm -rf gatesentryf/webserver/frontend/files/*
+          - mv ui/dist/* gatesentryf/webserver/frontend/files
+          - mv gatesentryf/webserver/frontend/files/fs/* gatesentryf/webserver/frontend/files
+          - env GOOS=linux GOARCH=amd64 go build
+          - env GOOS=darwin GOARCH=amd64 go build -o gatesentry-macos
+          # - env GOOS=darwin GOARCH=arm64 go build
+          - ls 
+          - mv gatesentrybin gatesentry-linux
+        artifacts:
+          - gatesentry-linux
+          - gatesentry-macos
+    - step:
+        name: Upload binaries linux
+        script:
+        - pipe: atlassian/bitbucket-upload-file:0.1.2
+          variables:
+            BITBUCKET_USERNAME: $BITBUCKET_USERNAME
+            BITBUCKET_APP_PASSWORD: $BITBUCKET_APP_PASSWORD
+            FILENAME: "gatesentry-linux"
+    - step:
+        name: Upload binaries mac
+        script:
+        - pipe: atlassian/bitbucket-upload-file:0.1.2
+          variables:
+            BITBUCKET_USERNAME: $BITBUCKET_USERNAME
+            BITBUCKET_APP_PASSWORD: $BITBUCKET_APP_PASSWORD
+            FILENAME: "gatesentry-macos"
+    # - step:
+    #     name: Upload mac (arm 64bit) binary
+    #     script:
+    #     - pipe: atlassian/bitbucket-upload-file:0.1.2
+    #       variables:
+    #         BITBUCKET_USERNAME: $BITBUCKET_USERNAME
+    #         BITBUCKET_APP_PASSWORD: $BITBUCKET_APP_PASSWORD
+    #         FILENAME: "gatesentry-linux"
