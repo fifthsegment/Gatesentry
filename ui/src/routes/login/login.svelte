@@ -14,6 +14,7 @@
   import { store } from "../../store/apistore";
   import { navigate } from "svelte-routing/src/history";
   import { afterUpdate } from "svelte";
+  import { notificationstore } from "../../store/notifications";
 
   let username: string = localStorage.getItem("username") || "";
   let password: string = localStorage.getItem("password") || "";
@@ -27,9 +28,16 @@
   let handleLogin = (e) => {
     e.preventDefault();
     var datatosend = { username: username, pass: password };
-    $store.api.doCall("/auth/token", "post", datatosend).then(function (json) {
-      var data = json;
-      if (data.Validated) {
+    $store.api.doCall("/auth/token", "post", datatosend).then(function (data) {
+      if (data == undefined || data == null) {
+        notificationstore.add({
+          kind: "error",
+          title: "Error:",
+          subtitle: "Unable to get a correct response from the api",
+          timeout: 30000,
+        });
+        return;
+      } else if (data?.Validated) {
         localStorage.removeItem("jwt");
         localStorage.setItem("jwt", data.Jwtoken);
         store.loginSuccesful(data.Jwtoken);
