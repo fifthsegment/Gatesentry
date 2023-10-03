@@ -15,6 +15,7 @@
     buildNotificationError,
     buildNotificationSuccess,
   } from "../lib/utils";
+  import { onDestroy, onMount } from "svelte";
 
   const SETTING_GENERAL_SETTINGS = "general_settings";
   let data = null;
@@ -25,8 +26,14 @@
   };
 
   const loadAPIData = async () => {
-    const json = await $store.api.getSetting(SETTING_GENERAL_SETTINGS);
-    data = JSON.parse(json.Value);
+    try {
+      const json = await $store.api.getSetting(SETTING_GENERAL_SETTINGS);
+      data = JSON.parse(json.Value);
+    } catch (error) {
+      console.error(
+        "[GatesentryUI] Unable to load settings (possibly due to logout)",
+      );
+    }
   };
 
   const updateNetwork = async (updateData) => {
@@ -57,9 +64,9 @@
     updateNetwork(updateData);
   };
 
-  $: {
+  onMount(() => {
     loadAPIData();
-  }
+  });
 </script>
 
 <TextInput

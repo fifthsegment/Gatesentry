@@ -95,7 +95,9 @@
         <Route path="/login" component={Login} />
         <Route path="/dns" component={Dns}></Route>
         <Route path="/logs" component={Logs} />
-        <Route path="/settings" component={Settings} />
+        <Route path="/settings">
+          <Settings />
+        </Route>
         <Route path="/blockedkeywords">
           <Filter type="blockedkeywords" />
         </Route>
@@ -117,6 +119,7 @@
         <Route path="/stats">
           <Stats />
         </Route>
+        <Route path="/" component={Home} />
       </div>
 
       <Notifications />
