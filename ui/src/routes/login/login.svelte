@@ -44,7 +44,7 @@
         localStorage.setItem("jwt", data.Jwtoken);
         store.loginSuccesful(data.Jwtoken);
       } else {
-        invalidMessage = "Invalid username or password";
+        invalidMessage = $_("Invalid username or password");
         invalid = true;
       }
     });
