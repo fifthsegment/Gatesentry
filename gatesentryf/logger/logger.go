@@ -44,16 +44,19 @@ func (L *Log) Commit(tx *buntdb.Tx) {
 func NewLogger(LogLocation string) *Log {
 	log.Println("Creating a new log file = " + LogLocation)
 	db, err := buntdb.Open(LogLocation)
+	if err != nil {
+		log.Fatal(err)
+	}
 	var config buntdb.Config
 	if err := db.ReadConfig(&config); err != nil {
-		// log.Fatal(err)
+		log.Fatal(err)
 	}
 	config.SyncPolicy = buntdb.Never
 	if err := db.SetConfig(config); err != nil {
-		// log.Fatal(err)
+		log.Fatal(err)
 	}
 	if err := db.ReadConfig(&config); err != nil {
-		// log.Fatal(err)
+		log.Fatal(err)
 	}
 	// fmt.Println( config );
 	if err != nil {
