@@ -2,6 +2,9 @@
 
 A DNS + proxy server (supports MITM) with a nice frontend.
 
+![gatesentry-repo](https://github.com/fifthsegment/Gatesentry/assets/5513549/5ab836ab-7362-4916-9f7c-655e67e4deab)
+
+
 ## Getting started
 
 Gatesentry Installation and Configuration Guide
@@ -14,16 +17,14 @@ Gatesentry Installation and Configuration Guide
 
 For macOS and Linux:
 
-    Locate the downloaded Gatesentry binary file in your system.
-    Open a terminal window and navigate to the directory containing the downloaded binary.
-    Run the following command to grant execution permissions to the binary file:
-
-    bash
+Locate the downloaded Gatesentry binary file in your system.
+Open a terminal window and navigate to the directory containing the downloaded binary.
+Run the following command to grant execution permissions to the binary file:
 
     chmod +x gatesentry-{platform}
 
-    Replace {platform} with your operating system (linux or mac).
-    Proceed to execute the binary file to initiate the server.
+Replace {platform} with your operating system (linux or mac).
+Proceed to execute the binary file to initiate the server.
 
 For Other Platforms:
 
