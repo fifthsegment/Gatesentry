@@ -69,21 +69,25 @@ func GSApiSettingsPOST(ctx iris.Context, settings *gatesentryWebserverTypes.Sett
 		}
 
 	}
-	settings.Set(requestedId, temp.Value)
-	log.Println("Received a setting on PST =" + requestedId)
+
 	if requestedId == "general_settings" {
 		log.Println("Updating general settings")
-		// general_settings := R.GSSettings.Get("general_settings");
 		general_settings_parsed := gatesentryWebserverTypes.GSGeneral_Settings{}
 		json.Unmarshal([]byte(temp.Value), &general_settings_parsed)
 		pwd := general_settings_parsed.AdminPassword
 		if pwd != "" {
-			log.Println("Updating Password")
-			settings.Set("pass", pwd)
+			settings.Set(requestedId, temp.Value)
+		} else {
+			general_settings_parsed.AdminPassword = settings.GetAdminPassword()
+			// convert general_settings_parsed to json
+			valueJson, err := json.Marshal(general_settings_parsed)
+			if err != nil {
+				log.Fatal("Unable to marshal general settings")
+			} else {
+				//convert valuejSON to string
+				settings.Set(requestedId, string(valueJson))
+			}
 		}
-
-	} else {
-
 	}
 
 	settings.InitGatesentry()

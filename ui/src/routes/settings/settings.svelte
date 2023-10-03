@@ -2,54 +2,77 @@
   import { Button, FormLabel, TextInput } from "carbon-components-svelte";
   import { store } from "../../store/apistore";
   import { _ } from "svelte-i18n";
-  import Certificate from "../../components/certificate.svelte";
+  import Certificate from "../../components/connectedCertificate.svelte";
+  import { notificationstore } from "../../store/notifications";
+  import {
+    buildNotificationError,
+    buildNotificationSuccess,
+  } from "../../lib/utils";
+  import ConnectedGeneralSettingInput from "../../components/connectedGeneralSettingInputs.svelte";
   let data = null;
   let enable_https_filtering = null;
-  const loadAPIData = () => {
-    const url = "/settings/general_settings";
 
-    $store.api.doCall(url).then(function (json) {
-      data = JSON.parse(json.Value);
-    });
+  const SETTING_GENERAL_SETTINGS = "general_settings";
+  const SETTING_ENABLE_HTTPS_FILTERING = "enable_https_filtering";
 
-    $store.api.doCall("/settings/enable_https_filtering").then((json) => {
-      enable_https_filtering = json.Value;
-    });
+  const loadAPIData = async () => {
+    const json = await $store.api.getSetting(SETTING_GENERAL_SETTINGS);
+    data = JSON.parse(json.Value);
+
+    const filtering = await $store.api.getSetting(
+      SETTING_ENABLE_HTTPS_FILTERING,
+    );
+    enable_https_filtering = filtering.Value;
   };
 
-  const toggleHttpsFilteringStatus = () => {
-    const url = "/settings/enable_https_filtering";
-    var datatosend = {
-      key: "enable_https_filtering",
-      value: enable_https_filtering == "true" ? "false" : "true",
-    };
-    $store.api.doCall(url, "post", datatosend).then(function (json) {
-      console.log("json", json);
-      loadAPIData();
-      // that.mapDataToState(json);
-    });
+  const toggleHttpsFilteringStatus = async () => {
+    const response = await $store.api.setSetting(
+      SETTING_ENABLE_HTTPS_FILTERING,
+      enable_https_filtering == "true" ? "false" : "true",
+    );
+    if (response === false) {
+      notificationstore.add(
+        buildNotificationError(
+          { subtitle: $_("Unable to save certificate data") },
+          $_,
+        ),
+      );
+    } else {
+      notificationstore.add(
+        buildNotificationSuccess({ subtitle: $_("Setting updated") }, $_),
+      );
+    }
+    loadAPIData();
   };
 
-  loadAPIData();
+  $: {
+    loadAPIData();
+  }
 </script>
 
 <h2>Settings</h2>
 
-<TextInput
+<br />
+<ConnectedGeneralSettingInput
+  keyName="log_location"
   title={$_("Log Location")}
   labelText={$_("Log Location")}
-  value={data?.log_location}
+  type="text"
+  helperText=""
 />
 
-<TextInput
-  helperText={$_("Leave blank to keep the current password")}
-  type="password"
-  title={$_("Password")}
-  labelText={$_("Password")}
-  value={data?.admin_password}
+<ConnectedGeneralSettingInput
+  keyName="admin_username"
+  helperText={""}
+  type="text"
+  title={$_("Admin username")}
+  labelText={$_("Admin username")}
+  disabled={true}
 />
 
-<Certificate />
+<Certificate settingName="capem" label={$_("HTTPS Filtering - Certificate")} />
+
+<Certificate settingName="keypem" label={$_("HTTPS Filtering - Key")} />
 
 <div style="margin-top: 15px;">
   <FormLabel>{$_("HTTPS Filtering - Man In The Middle Filtering")}</FormLabel>

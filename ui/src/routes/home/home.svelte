@@ -2,7 +2,7 @@
   import { Column, DataTable, Grid, Row } from "carbon-components-svelte";
   import "@carbon/charts/styles.css";
   import { AreaChart } from "@carbon/charts";
-  import { onMount } from "svelte";
+  import { onDestroy, onMount } from "svelte";
   import { store } from "../../store/apistore";
   import { _ } from "svelte-i18n";
 
@@ -19,7 +19,7 @@
       };
     };
   };
-
+  let interval = null;
   const options = {
     title: "Requests served",
     axes: {
@@ -47,6 +47,7 @@
   const updateChartData = async () => {
     try {
       const json = (await $store.api.doCall("/stats/byUrl")) as ResponseData;
+      if (!json) return;
       responseData = json;
       data =
         json.blocked && json.all
@@ -96,10 +97,16 @@
     // @ts-ignore
 
     // Call updateChartData every 30 seconds
-    setInterval(updateChartData, 5000);
+    interval = setInterval(updateChartData, 5000);
 
     // Initial data fetch
     updateChartData();
+  });
+
+  // on unmount, destroy the chart
+  onDestroy(() => {
+    if (interval) clearInterval(interval);
+    chart.destroy();
   });
 </script>
 

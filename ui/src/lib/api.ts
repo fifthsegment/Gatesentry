@@ -56,6 +56,42 @@ class AppAPI {
     return this.headers;
   }
 
+  getSetting(settingName): Promise<any> {
+
+    return new Promise(async (resolve, reject) => {
+      const url = "/settings/" + settingName;
+
+      this.doCall(url).then(function (json) {
+        resolve(json);
+      })
+      .catch(function (err) {
+        reject(err);
+      });
+
+    });
+
+  }
+
+  setSetting(settingName, settingValue, mapper? : (data:any) => any): Promise<any> {
+
+    return new Promise(async (resolve, reject) => {
+      const url = "/settings/" + settingName;
+      var datatosend = mapper? mapper(settingValue) :{
+        key: settingName,
+        value: settingValue,
+      };
+      this.doCall(url, "post", datatosend).then(function (json) {
+        resolve(true);
+      })
+      .catch(function (err) {
+        reject(err);
+      });
+
+    });
+
+  }
+
+
   doCallRaw(
     endpoint = "/",
     method = "get",
@@ -101,7 +137,7 @@ class AppAPI {
         return json;
       }
     } catch (err) {
-      console.error("Gatesentry API error : ", err);
+      console.error("Gatesentry API error : [Path "+ endpoint + "] [Method "+method+"]", err);
       throw err;
     }
   }

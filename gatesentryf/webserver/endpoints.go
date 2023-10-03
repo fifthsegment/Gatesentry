@@ -24,7 +24,7 @@ func RegisterEndpoints(
 ) {
 	settingsStore = settings
 	gatesentryWebserverEndpoints.Init(settings)
-	authentication, jwtMiddleware := gatesentryWebserverAuth.InitAuthMiddleware(settings.WebGet("admin"), settings.WebGet("pass"))
+	authentication, jwtMiddleware := gatesentryWebserverAuth.InitAuthMiddleware(settings.GetAdminUser(), settings.GetAdminPassword())
 
 	app.HandleDir("/css", iris.Dir("./resources/css"))
 	app.HandleDir("/js", iris.Dir("./resources/js"))

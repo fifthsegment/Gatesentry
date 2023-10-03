@@ -40,8 +40,6 @@ func GSwebserverStart(port int) {
 
 	gatesentry2storage.SetBaseDir(GSBASEDIR)
 	R.GSWebSettings = gatesentry2storage.NewMapStore("GSWebSettings", true)
-	R.GSWebSettings.SetDefault("username", "admin")
-	R.GSWebSettings.SetDefault("pass", "admin")
 
 	settings := &gatesentryWebserverTypes.SettingsStore{
 		GetSettings: func(s string) string {
