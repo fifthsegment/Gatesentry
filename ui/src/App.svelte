@@ -22,74 +22,107 @@
   import Switches from "./routes/switches/switches.svelte";
   import Home from "./routes/home/home.svelte";
   import Dns from "./routes/dns/dns.svelte";
+  import Stats from "./routes/stats/stats.svelte";
+
+  import { register, init, _ } from "svelte-i18n";
+  export let url = "";
+
+  let loaded = false;
+  async function setup() {
+    register("en", () => import("./language/en.json"));
+
+    await Promise.allSettled([
+      // TODO: add some more stuff you want to init ...
+      init({ initialLocale: "en", fallbackLocale: "en" }),
+    ]);
+    loaded = true;
+    return true;
+  }
+
+  const setupResult = setup();
 
   let isSideNavOpen = false;
   let version = "1.8.0";
   let userProfilePanelOpen = false;
-  let url = "/auth/verify";
-
-  setupI18n();
+  // setupI18n();
 
   $: loggedIn = $store.api.loggedIn;
 
-  $store.api.verifyToken().then((isValid) => {
-    if (isValid) {
-      store.refresh();
+  $: {
+    if (loaded) {
+      $store.api.verifyToken().then((isValid) => {
+        if (isValid) {
+          store.refresh();
+        }
+      });
+      if (!loggedIn) {
+        navigate("/login");
+      }
     }
-  });
+  }
 
-  afterUpdate(() => {
-    if (!loggedIn) {
-      navigate("/login");
-    }
-  });
+  // afterUpdate(() => {
+  //   if (!loggedIn) {
+  //     navigate("/login");
+  //   }
+  // });
 </script>
 
-<Header
-  company="Gatesentry"
-  platformName={version}
-  bind:isSideNavOpen
-  persistentHamburgerMenu={true}
->
-  <svelte:fragment slot="skip-to-content">
-    <SkipToContent />
-  </svelte:fragment>
-  <Headermenu />
+<Router {url}>
+  {#await setupResult}
+    Loading...
+  {:then}
+    <Header
+      company="Gatesentry"
+      platformName={version}
+      bind:isSideNavOpen
+      persistentHamburgerMenu={true}
+    >
+      <svelte:fragment slot="skip-to-content">
+        <SkipToContent />
+      </svelte:fragment>
+      <Headermenu />
 
-  <Headerrightnav {userProfilePanelOpen} />
-</Header>
+      <Headerrightnav {userProfilePanelOpen} />
+    </Header>
 
-<SideNav bind:isOpen={isSideNavOpen} rail>
-  <Sidenavmenu />
-</SideNav>
+    <SideNav bind:isOpen={isSideNavOpen} rail>
+      <Sidenavmenu />
+    </SideNav>
 
-<Content>
-  <Router {url}>
-    <div>
-      <Route path="/login" component={Login} />
-      <Route path="/" component={Home}></Route>
-      <Route path="/dns" component={Dns}></Route>
-      <Route path="/logs" component={Logs} />
-      <Route path="/settings" component={Settings} />
-      <Route path="/blockedkeywords">
-        <Filter type="blockedkeywords" />
-      </Route>
-      <Route path="/blockedfiletypes">
-        <Filter type="blockedfiletypes" />
-      </Route>
-      <Route path="/excludeurls">
-        <Filter type="excludeurls" />
-      </Route>
-      <Route path="/blockedurls">
-        <Filter type="blockedurls" />
-      </Route>
-      <Route path="/excludehosts">
-        <Filter type="excludehosts" />
-      </Route>
-      <Route path="/switches">
-        <Switches />
-      </Route>
-    </div>
-  </Router>
-  <Notifications />
-</Content>
+    <Content>
+      <div>
+        <Route path="/login" component={Login} />
+        <Route path="/dns" component={Dns}></Route>
+        <Route path="/logs" component={Logs} />
+        <Route path="/settings" component={Settings} />
+        <Route path="/blockedkeywords">
+          <Filter type="blockedkeywords" />
+        </Route>
+        <Route path="/blockedfiletypes">
+          <Filter type="blockedfiletypes" />
+        </Route>
+        <Route path="/excludeurls">
+          <Filter type="excludeurls" />
+        </Route>
+        <Route path="/blockedurls">
+          <Filter type="blockedurls" />
+        </Route>
+        <Route path="/excludehosts">
+          <Filter type="excludehosts" />
+        </Route>
+        <Route path="/switches">
+          <Switches />
+        </Route>
+        <Route path="/stats">
+          <Stats />
+        </Route>
+      </div>
+
+      <Notifications />
+    </Content>
+  {:catch error}
+    <!-- <p style="color: red">{error.message}</p> -->
+    Error: Unable to load localization.
+  {/await}
+</Router>

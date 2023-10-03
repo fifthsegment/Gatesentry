@@ -20,12 +20,19 @@
   import { SettingsAdjust, UserAvatarFilledAlt } from "carbon-icons-svelte";
   import { afterUpdate } from "svelte";
   import ConnectedGeneralSettingInputs from "./connectedGeneralSettingInputs.svelte";
+  import { navigate } from "svelte-routing";
 
   $: loggedIn = $store.api.loggedIn;
   let checked = false;
 
   let bindedUpdate;
   let modalOpen;
+
+  let onLogout = () => {
+    // navigate("/login");
+    store.logout();
+    navigate("/login");
+  };
 </script>
 
 <HeaderUtilities>
@@ -42,7 +49,7 @@
             modalOpen = true;
           }}>{$_("Change password")}</HeaderPanelLink
         >
-        <HeaderPanelLink on:click={store.logout}>Logout</HeaderPanelLink>
+        <HeaderPanelLink on:click={onLogout}>Logout</HeaderPanelLink>
       </HeaderPanelLinks>
     </HeaderAction>
 
