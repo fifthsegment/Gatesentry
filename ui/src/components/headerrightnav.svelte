@@ -32,6 +32,7 @@
     // navigate("/login");
     store.logout();
     userProfilePanelOpen = false;
+    modalOpen = false;
     navigate("/login");
   };
 </script>

@@ -15,7 +15,6 @@ export const notificationstore = {
   subscribe,
   add: ({ title, subtitle, kind, timeout = 1000 }) =>
     update((currentArray) => {
-      console.log("Adding notification with id: " + (currentArray.length + 1));
       return [
         ...currentArray,
         {
@@ -29,7 +28,6 @@ export const notificationstore = {
     }),
   remove: (notification: Notification) =>
     update((currentArray) => {
-      console.log("Removing notification with id: " + notification.id);
       return currentArray.filter((n) => n.id !== notification.id);
     }),
   refresh: () => update((s) => s),
