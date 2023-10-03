@@ -11,6 +11,7 @@ require (
 	github.com/iris-contrib/middleware/jwt v0.0.0-20210110101738-6d0a4d799b5d
 	github.com/kardianos/service v1.2.0
 	github.com/kataras/iris/v12 v12.2.0-alpha2
+	github.com/miekg/dns v1.1.43
 	github.com/oleksandr/bonjour v0.0.0-20210301155756-30f43c61b915
 	github.com/rogpeppe/go-charset v0.0.0-20190617161244-0dc95cdf6f31
 	github.com/tidwall/buntdb v1.2.6
@@ -43,7 +44,6 @@ require (
 	github.com/klauspost/compress v1.13.5 // indirect
 	github.com/mailru/easyjson v0.7.6 // indirect
 	github.com/microcosm-cc/bluemonday v1.0.15 // indirect
-	github.com/miekg/dns v1.1.43 // indirect
 	github.com/mitchellh/go-homedir v1.1.0 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
@@ -70,5 +70,5 @@ require (
 	golang.org/x/time v0.0.0-20210723032227-1f47c861a9ac // indirect
 	google.golang.org/protobuf v1.27.1 // indirect
 	gopkg.in/ini.v1 v1.63.0 // indirect
-	gopkg.in/yaml.v3 v3.0.0-20210107192922-496545a6307b // indirect
+	gopkg.in/yaml.v3 v3.0.0 // indirect
 )
