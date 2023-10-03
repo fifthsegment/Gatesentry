@@ -17,9 +17,8 @@
   import { navigate } from "svelte-routing/src/history";
   import Filter from "./routes/filter/filter.svelte";
   import Notifications from "./components/notifications.svelte";
-  import { setupI18n } from "./language/i18n";
   import Settings from "./routes/settings/settings.svelte";
-  import Switches from "./routes/switches/switches.svelte";
+  import Services from "./routes/services/services.svelte";
   import Home from "./routes/home/home.svelte";
   import Dns from "./routes/dns/dns.svelte";
   import Stats from "./routes/stats/stats.svelte";
@@ -44,17 +43,22 @@
   let isSideNavOpen = false;
   let version = "1.8.0";
   let userProfilePanelOpen = false;
+  let tokenVerified = false;
   // setupI18n();
 
   $: loggedIn = $store.api.loggedIn;
 
   $: {
     if (loaded) {
-      $store.api.verifyToken().then((isValid) => {
-        if (isValid) {
-          store.refresh();
-        }
-      });
+      if (!tokenVerified) {
+        $store.api.verifyToken().then((isValid) => {
+          tokenVerified = true;
+          if (isValid) {
+            store.refresh();
+          }
+        });
+      }
+
       if (!loggedIn) {
         navigate("/login");
       }
@@ -113,8 +117,8 @@
         <Route path="/excludehosts">
           <Filter type="excludehosts" />
         </Route>
-        <Route path="/switches">
-          <Switches />
+        <Route path="/services">
+          <Services />
         </Route>
         <Route path="/stats">
           <Stats />

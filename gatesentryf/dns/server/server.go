@@ -2,6 +2,7 @@ package gatesentryDnsServer
 
 import (
 	"fmt"
+	"log"
 	"net"
 	"os"
 	"strings"
@@ -59,6 +60,7 @@ func StartDNSServer(basePath string, ilogger *gatesentryLogger.Log, blockedLists
 		&mutex,
 		settings,
 	)
+	serverRunning = true
 	// go PrintQueryLogsPeriodically()
 	// Listen for incoming DNS requests on port 53
 	server = &dns.Server{Addr: "0.0.0.0:53", Net: "udp"}
@@ -71,15 +73,17 @@ func StartDNSServer(basePath string, ilogger *gatesentryLogger.Log, blockedLists
 		os.Exit(1)
 		return
 	}
-	serverRunning = true
+
 }
 
 func StopDNSServer() {
+	// if server == nil || serverRunning == false {
 	if server == nil || serverRunning == false {
 		fmt.Println("DNS server is already stopped")
+
 		return
 	}
-	server.Shutdown()
+
 	gatesentryDnsHttpServer.StopHTTPServer()
 	serverRunning = false
 	server = nil
@@ -89,21 +93,29 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 	mutex.Lock()
 	defer mutex.Unlock()
 
+	// send an error if the server is not running
+	if serverRunning == false {
+		fmt.Println("DNS server is not running")
+		w.Close()
+		w.Hijack()
+		return
+	}
+
 	m := new(dns.Msg)
 	m.SetReply(r)
 	m.Authoritative = true
 
 	for _, q := range r.Question {
 		domain := strings.ToLower(q.Name)
-		fmt.Println("Domain requested:", domain)
+		log.Println("[DNS] Domain requested:", domain)
 		domain = domain[:len(domain)-1]
 		// LogQuery(domain)
 		if _, exists := exceptionDomains[domain]; exists {
-			fmt.Println("Domain is exception : ", domain)
+			log.Println("Domain is exception : ", domain)
 			logger.LogDNS(domain, "dns", "exception")
 
 		} else if ip, exists := internalRecords[domain]; exists {
-			fmt.Println("Domain is internal : ", domain, " - ", ip)
+			log.Println("Domain is internal : ", domain, " - ", ip)
 			response := new(dns.Msg)
 			response.SetRcode(r, dns.RcodeSuccess)
 			response.Answer = append(m.Answer, &dns.A{
@@ -115,15 +127,14 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 			w.WriteMsg(response)
 			return
 		} else if blockedDomains[domain] {
-			fmt.Println("Domain is blocked : ", domain)
+			log.Println("[DNS] Domain is blocked : ", domain)
 			response := new(dns.Msg)
 			response.SetRcode(r, dns.RcodeNameError)
 			response.Answer = append(response.Answer, &dns.CNAME{
 				Hdr:    dns.RR_Header{Name: domain + ".", Rrtype: dns.TypeCNAME, Class: dns.ClassINET, Ttl: 3600},
-				Target: "gatesentryfilter.abdullahirfan.com.",
+				Target: "blocked.local.",
 			})
 			logger.LogDNS(domain, "dns", "blocked")
-
 			w.WriteMsg(response)
 			return
 		} else {
@@ -132,7 +143,7 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 
 		resp, err := forwardDNSRequest(r)
 		if err != nil {
-			fmt.Println("Error forwarding DNS request:", err)
+			log.Println("[DNS] Error forwarding DNS request:", err)
 			return
 		}
 

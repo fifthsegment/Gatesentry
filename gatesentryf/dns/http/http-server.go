@@ -1,9 +1,9 @@
 package dnsHttpServer
 
 import (
-	"context"
 	"crypto/tls"
 	"fmt"
+	"log"
 	"net/http"
 
 	dnsCerts "bitbucket.org/abdullah_irfan/gatesentryf/dns/cert"
@@ -24,12 +24,14 @@ var (
 						</body>
 						</html>
 					`)
-	localIp, _   = gatesentryDnsUtils.GetLocalIP()
-	serverSecure *http.Server
-	server       *http.Server
+	localIp, _    = gatesentryDnsUtils.GetLocalIP()
+	serverSecure  *http.Server
+	server        *http.Server
+	serverRunning bool = false
 )
 
 func StartHTTPServer() {
+	serverRunning = true
 	// http.HandleFunc("/", handleServerPages)
 	go func() {
 		fmt.Println("HTTP server listening on :80")
@@ -111,15 +113,21 @@ func StartHTTPServer() {
 }
 
 func StopHTTPServer() {
-	serverSecure.Shutdown(context.Background())
+	serverRunning = false
+	// serverSecure.Shutdown(context.Background())
 	// serverSecure.Close()
-	server.Shutdown(context.Background())
+	// server.Shutdown(context.Background())
 	// server.Close()
-	serverSecure = nil
-	server = nil
+	// serverSecure = nil
+	// server = nil
 }
 
 func handleServerPages(w http.ResponseWriter, r *http.Request) {
+	if serverRunning == false {
+		log.Println("HTTP server is not running")
+		w.Write([]byte("HTTP server is currently disabled"))
+		return
+	}
 	if r.TLS == nil {
 		// Serve different content for HTTP (port 80)
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")

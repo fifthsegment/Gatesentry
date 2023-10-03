@@ -12,7 +12,9 @@
     filterId="JHGJiwjkGOeglsk"
     title={$_("Blocked File Types")}
     showColumns={["content", "actions"]}
-    description={$_("Add file extensions to block here")}
+    description={$_(
+      "Add file extensions to block here. For example to block .jpg files add image/jpeg, to block .webp files add image/webp.",
+    )}
   />
 {:else if type == "blockedkeywords"}
   <Filtereditor
@@ -25,9 +27,9 @@
 {:else if type == "blockedurls"}
   <Filtereditor
     filterId="bTXmTXgTuXpJuOZ"
-    title={$_("Blocked URLs")}
+    title={$_("Block List")}
     showColumns={["content", "actions"]}
-    description={$_("Add URLs to block here.")}
+    description={$_("Add Sites to block here.")}
   />
 {:else if type == "excludeurls"}
   <Filtereditor
@@ -39,8 +41,10 @@
 {:else if type == "excludehosts"}
   <Filtereditor
     filterId="CeBqssmRbqXzbHR"
-    title={$_("Excluded Hosts")}
+    title={$_("Exclusion List")}
     showColumns={["content", "actions"]}
-    description={$_("Add hosts to exclude from filtering here.")}
+    description={$_(
+      "Add hostnames/websites you want to exclude from filtering here.",
+    )}
   />
 {/if}

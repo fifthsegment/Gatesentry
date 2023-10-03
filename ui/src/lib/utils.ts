@@ -15,11 +15,11 @@ const buildNotification = (notification: NotificationMessage, translator:any) =>
 }
 
 const buildNotificationSuccess = (notification: NotificationMessage, translator:any) => {
-    return buildNotification({ ...notification, kind: "success", timeout: 30000 , title : translator("Success")}, translator);
+    return buildNotification({ ...notification, kind: "success", timeout: 2000 , title : translator("Success")}, translator);
 }
 
 const buildNotificationError = (notification: NotificationMessage, translator:any) => {
-    return buildNotification({ ...notification, kind: "error", timeout: 2000 }, translator);
+    return buildNotification({ ...notification, kind: "error", timeout: 30000 }, translator);
 }
 
 

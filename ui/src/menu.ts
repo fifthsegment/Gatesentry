@@ -47,7 +47,7 @@ let menuItems = [
       },
       {
         type: "link",
-        text: "Blocked URLs",
+        text: "Block List",
         href: "/blockedurls",
         icon: Filter,
       },
@@ -73,8 +73,8 @@ let menuItems = [
   },
   {
     type: "link",
-    text: "Switches",
-    href: "/switches",
+    text: "Services",
+    href: "/services",
     icon: SwitchLayer_2,
   },
   {

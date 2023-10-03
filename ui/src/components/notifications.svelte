@@ -10,7 +10,9 @@
   });
 </script>
 
-<div style="position: absolute; right:0; bottom: 0; text-align:left;">
+<div
+  style="position: absolute; right:0; bottom: 0; text-align:left;z-index:10000"
+>
   {#if notifications.length > 0}
     {#each notifications as notification}
       <ToastNotification

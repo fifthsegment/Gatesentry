@@ -4,17 +4,26 @@
   export let label = "Label";
   export let labelA = "On";
   export let labelB = "Off";
+  import { _ } from "svelte-i18n";
   import { store } from "../store/apistore";
+  import { onMount } from "svelte";
+  import { notificationstore } from "../store/notifications";
+  import { buildNotificationSuccess } from "../lib/utils";
 
-  let settingValue = "";
+  export let settingValue = "";
+  export let preClickEvent = null;
+  export let hide = false;
+  export let noNotification = false;
   const loadAPIData = () => {
     $store.api.doCall("/settings/" + settingName).then((json) => {
       settingValue = json.Value;
     });
   };
 
-  const toggleSettingStatus = () => {
-    console.log("toggling");
+  const toggleSettingStatus = async () => {
+    if (preClickEvent) {
+      await preClickEvent();
+    }
     const url = "/settings/" + settingName;
     var datatosend = {
       key: settingName,
@@ -23,14 +32,32 @@
 
     $store.api.doCall(url, "post", datatosend).then(function (json) {
       loadAPIData();
+      if (noNotification) {
+        return;
+      }
+      notificationstore.add(
+        buildNotificationSuccess(
+          {
+            title: $_("Success"),
+            subtitle: $_("Setting updated"),
+          },
+          $_,
+        ),
+      );
     });
   };
 
-  loadAPIData();
+  onMount(() => {
+    loadAPIData();
+  });
+
+  $: {
+    loadAPIData();
+  }
 </script>
 
 <span>
-  {#if settingValue == ""}
+  {#if hide == true}{:else if settingValue == ""}
     <Loading />
   {:else}
     <Toggle

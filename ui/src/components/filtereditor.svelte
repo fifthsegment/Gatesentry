@@ -11,6 +11,7 @@
     Column,
     DataTable,
     Grid,
+    InlineNotification,
     Row,
     TextInput,
     Tile,
@@ -22,6 +23,7 @@
   import { store } from "../store/apistore";
   import { notificationstore } from "../store/notifications";
   import { _ } from "svelte-i18n";
+  import Toggle from "./toggle.svelte";
 
   let data = [];
 
@@ -50,8 +52,8 @@
       .catch(function (err) {
         notificationstore.add({
           kind: "error",
-          title: "Error:",
-          subtitle: "Unable to load data from the api : " + err.message,
+          title: $_("Error:"),
+          subtitle: $_("Unable to load data from the api : ") + err.message,
           timeout: 30000,
         });
       });
@@ -114,12 +116,14 @@
 
   const addRow = () => {
     const newId = data.length + 1;
-    data = [...data, { id: newId, content: "New item", score: 0 }];
+    data = [...data, { id: newId, content: $_("New item"), score: 0 }];
     editRow(newId);
   };
 
   loadAPIdata();
   let filteredRowIds = [];
+
+  let enable_https_filtering = "";
 </script>
 
 <Grid>
@@ -132,11 +136,27 @@
       <h2>{title}</h2>
     </Column>
   </Row>
+  <Toggle
+    bind:settingValue={enable_https_filtering}
+    settingName="enable_https_filtering"
+    hide={true}
+  />
   <Row>
     <Column>
       <div style="margin: 20px 0px;">
         {description}
       </div>
+      {#if enable_https_filtering == "false"}
+        <InlineNotification
+          style="width:100%;"
+          hideCloseButton
+          kind="warning"
+          title={$_("Important: ")}
+          subtitle={$_(
+            "For these filters to take effect, you must enable HTTPS Filtering from the Settings Menu.",
+          )}
+        />
+      {/if}
     </Column>
   </Row>
   <Row>
@@ -148,16 +168,16 @@
         headers={[
           {
             key: "content",
-            value: "Content",
+            value: $_("Content"),
           },
           {
             key: "score",
-            value: "Score",
+            value: $_("Score"),
             width: "15%",
           },
           {
             key: "actions",
-            value: "Actions",
+            value: $_("Actions"),
             width: "15%",
           },
         ].filter((item) => showColumns.includes(item.key))}
@@ -175,23 +195,25 @@
         <Toolbar size="sm">
           <ToolbarContent>
             <ToolbarSearch value="" shouldFilterRows bind:filteredRowIds />
-            <Button icon={AddAlt} on:click={addRow}>{$_("Add")}</Button>
+            <Button icon={AddAlt} on:click={addRow}>{$_("Insert")}</Button>
           </ToolbarContent>
         </Toolbar>
         <svelte:fragment slot="cell" let:row let:cell>
           {#if cell.key === "actions"}
-            <Button
-              icon={editingRowId != null && row.id === editingRowId
-                ? Save
-                : Edit}
-              iconDescription={$_("Edit")}
-              on:click={() => editRow(row.id)}
-            ></Button>
-            <Button
-              icon={RowDelete}
-              iconDescription={$_("Delete")}
-              on:click={() => removeRow(row.id)}
-            ></Button>
+            <div style="float:right;">
+              <Button
+                icon={editingRowId != null && row.id === editingRowId
+                  ? Save
+                  : Edit}
+                iconDescription={$_("Edit")}
+                on:click={() => editRow(row.id)}
+              ></Button>
+              <Button
+                icon={RowDelete}
+                iconDescription={$_("Delete")}
+                on:click={() => removeRow(row.id)}
+              ></Button>
+            </div>
           {:else if editingRowId && editingRowId === row.id}
             {#if cell.key === "score"}
               <TextInput
@@ -219,9 +241,8 @@
             </div>
             <div class="add-icon">
               <TaskAdd size="200" />
-              {editingRowId}
             </div>
-            <Button icon={AddAlt} on:click={addRow}>Create Item</Button>
+            <Button icon={AddAlt} on:click={addRow}>{$_("Create Item")}</Button>
           </Tile>
         </div>
       {/if}
