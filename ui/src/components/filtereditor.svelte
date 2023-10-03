@@ -120,8 +120,6 @@
 
   loadAPIdata();
   let filteredRowIds = [];
-
-  
 </script>
 
 <Grid>
@@ -129,7 +127,7 @@
     <Column>
       <Breadcrumb style="margin-bottom: 10px;">
         <BreadcrumbItem href="/">{$_("Dashboard")}</BreadcrumbItem>
-        <BreadcrumbItem >{$_("Filters")}</BreadcrumbItem>
+        <BreadcrumbItem>{$_("Filters")}</BreadcrumbItem>
       </Breadcrumb>
       <h2>{title}</h2>
     </Column>
@@ -163,14 +161,16 @@
             width: "15%",
           },
         ].filter((item) => showColumns.includes(item.key))}
-        rows={data.map((item) => {
-          return {
-            id: item.id,
-            content: item.content,
-            score: item.score,
-            actions: "",
-          };
-        }).sort((a, b) => b.id - a.id)}
+        rows={data
+          .map((item) => {
+            return {
+              id: item.id,
+              content: item.content,
+              score: item.score,
+              actions: "",
+            };
+          })
+          .sort((a, b) => b.id - a.id)}
       >
         <Toolbar size="sm">
           <ToolbarContent>
@@ -181,11 +181,12 @@
         <svelte:fragment slot="cell" let:row let:cell>
           {#if cell.key === "actions"}
             <Button
-              icon={(editingRowId != null && row.id === editingRowId ) ? Save : Edit}
+              icon={editingRowId != null && row.id === editingRowId
+                ? Save
+                : Edit}
               iconDescription={$_("Edit")}
               on:click={() => editRow(row.id)}
-            >
-          </Button>
+            ></Button>
             <Button
               icon={RowDelete}
               iconDescription={$_("Delete")}

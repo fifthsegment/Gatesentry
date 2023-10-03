@@ -1,6 +1,8 @@
 package gatesentryWebserverTypes
 
 import (
+	"encoding/json"
+
 	gatesentryLogger "bitbucket.org/abdullah_irfan/gatesentryf/logger"
 	structures "bitbucket.org/abdullah_irfan/gatesentryf/structures"
 )
@@ -49,6 +51,20 @@ func (s *SettingsStore) WebSet(key string, value string) {
 	s.WebSetSettings(key, value)
 }
 
+func (s *SettingsStore) GetAdminPassword() string {
+	general_settings := s.Get("general_settings")
+	general_settings_parsed := GSGeneral_Settings{}
+	json.Unmarshal([]byte(general_settings), &general_settings_parsed)
+	return general_settings_parsed.AdminPassword
+}
+
+func (s *SettingsStore) GetAdminUser() string {
+	general_settings := s.Get("general_settings")
+	general_settings_parsed := GSGeneral_Settings{}
+	json.Unmarshal([]byte(general_settings), &general_settings_parsed)
+	return general_settings_parsed.AdminUser
+}
+
 func (s *SettingsStore) OnMajorSettingsChange() {
 	s.InitGatesentry()
 }
@@ -66,6 +82,7 @@ type Login struct {
 type GSGeneral_Settings struct {
 	LogLocation   string `json:"log_location"`
 	AdminPassword string `json:"admin_password"`
+	AdminUser     string `json:"admin_username"`
 }
 
 type Datareceiver struct {

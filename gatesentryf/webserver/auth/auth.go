@@ -10,9 +10,7 @@ var (
 )
 
 func VerifyAdminUser(username string, password string, settingsStore *gatesentryWebserverTypes.SettingsStore) bool {
-	validusername := settingsStore.WebGet("username")
-	validpassword := settingsStore.WebGet("pass")
-	if validusername == username && validpassword == password {
+	if settingsStore.GetAdminUser() == username && settingsStore.GetAdminPassword() == password {
 		return true
 	}
 	return false

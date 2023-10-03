@@ -18,7 +18,9 @@
   <Filtereditor
     filterId="bVxTPTOXiqGRbhF"
     title={$_("Blocked Keywords")}
-    description={$_("Add/Update things to block here. The score is used to determine how bad the keyword is. The higher the score, the worse the keyword.")}
+    description={$_(
+      "Add/Update things to block here. The score is used to determine how bad the keyword is. The higher the score, the worse the keyword.",
+    )}
   />
 {:else if type == "blockedurls"}
   <Filtereditor

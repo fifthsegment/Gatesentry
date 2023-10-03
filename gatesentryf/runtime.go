@@ -156,7 +156,7 @@ func (R *GSRuntime) init() {
 	R.GSSettings = gatesentry2storage.NewMapStore("GSSettings", true)
 	R.GSUpdateLog = gatesentry2storage.NewMapStore("GSUpdateLog", false)
 	R.GSSettings.SetDefault("strictness", "2000")
-	R.GSSettings.SetDefault("general_settings", "{\"log_location\": \"./log.db\", \"admin_password\": \"admin\" }")
+	R.GSSettings.SetDefault("general_settings", "{\"log_location\": \"./log.db\", \"admin_password\": \"admin\", \"admin_username\": \"admin\" }")
 	R.GSSettings.SetDefault("blocktimes", "{\"fromhours\":0,\"tohours\":0,\"fromminutes\":58,\"tominutes\":59}")
 	R.GSSettings.SetDefault("authusers", "[{\"user\": \"guest\", \"pass\": \"guest\", \"allowaccess\": true, \"dataconsumed\": 0 }]")
 	// R.GSSettings.Update("authusers", "[{\"user\": \"guest\", \"pass\": \"guest\", \"allowaccess\": true, \"dataconsumed\": 0 }]" );
@@ -164,8 +164,8 @@ func (R *GSRuntime) init() {
 	R.GSSettings.SetDefault("NonAlives", "0")
 	R.GSSettings.SetDefault("Noheartbeat", "0")
 	R.GSSettings.SetDefault("Noheartbeatmessage", "")
-	R.GSSettings.SetDefault("timezone", "Asia/Karachi")
-	R.GSSettings.SetDefault("enable_https_filtering", "true")
+	R.GSSettings.SetDefault("timezone", "Europe/Oslo")
+	R.GSSettings.SetDefault("enable_https_filtering", "false")
 	R.GSSettings.SetDefault("enable_dns_server", "true")
 	R.GSSettings.SetDefault("idemail", "")
 

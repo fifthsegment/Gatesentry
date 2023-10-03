@@ -15,6 +15,8 @@
   import { navigate } from "svelte-routing/src/history";
   import { afterUpdate } from "svelte";
   import { notificationstore } from "../../store/notifications";
+  import { buildNotificationError } from "../../lib/utils";
+  import { _ } from "svelte-i18n";
 
   let username: string = localStorage.getItem("username") || "";
   let password: string = localStorage.getItem("password") || "";
@@ -30,12 +32,12 @@
     var datatosend = { username: username, pass: password };
     $store.api.doCall("/auth/token", "post", datatosend).then(function (data) {
       if (data == undefined || data == null) {
-        notificationstore.add({
-          kind: "error",
-          title: "Error:",
-          subtitle: "Unable to get a correct response from the api",
-          timeout: 30000,
-        });
+        notificationstore.add(
+          buildNotificationError(
+            { subtitle: $_("Unable to get a correct response from the api") },
+            $_,
+          ),
+        );
         return;
       } else if (data?.Validated) {
         localStorage.removeItem("jwt");
