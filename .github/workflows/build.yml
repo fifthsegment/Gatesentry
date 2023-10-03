@@ -55,3 +55,5 @@ jobs:
           files: |
             gatesentry-linux
             gatesentry-macos
+            gatesentry-windows.exe
+            gatesentry-linux-arm64
