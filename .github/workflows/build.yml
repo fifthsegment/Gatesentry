@@ -35,6 +35,7 @@ jobs:
           env GOOS=linux GOARCH=amd64 go build -o gatesentry-linux
           env GOOS=darwin GOARCH=amd64 go build -o gatesentry-macos
           env GOOS=windows GOARCH=amd64 go build -o gatesentry-windows.exe
+          env GOOS=linux GOARCH=arm64 go build -o gatesentry-linux-arm64
           chmod +x gatesentry-linux
           chmod +x gatesentry-macos
           git config user.name "GitHub Action"
@@ -54,3 +55,5 @@ jobs:
           files: |
             gatesentry-linux
             gatesentry-macos
+            gatesentry-windows.exe
+            gatesentry-linux-arm64
