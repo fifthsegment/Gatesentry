@@ -31,6 +31,7 @@
   let onLogout = () => {
     // navigate("/login");
     store.logout();
+    userProfilePanelOpen = false;
     navigate("/login");
   };
 </script>
@@ -57,15 +58,17 @@
       <ModalHeader title={$_("Update password")} />
 
       <ModalBody hasForm>
-        <ConnectedGeneralSettingInputs
-          keyName="admin_password"
-          helperText={$_("Leave blank to keep the current password")}
-          type="password"
-          title={$_("Password")}
-          labelText={$_("Password")}
-          disableOnblur={true}
-          bind:updateDataOnBackend={bindedUpdate}
-        />
+        {#if loggedIn}
+          <ConnectedGeneralSettingInputs
+            keyName="admin_password"
+            helperText={$_("Leave blank to keep the current password")}
+            type="password"
+            title={$_("Password")}
+            labelText={$_("Password")}
+            disableOnblur={true}
+            bind:updateDataOnBackend={bindedUpdate}
+          />
+        {/if}
       </ModalBody>
       <ModalFooter
         secondaryButtonText="Proceed"

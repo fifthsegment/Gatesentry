@@ -1,13 +1,11 @@
 <script lang="ts">
-  import { isIP, isIPv4 } from "is-ip";
+  import { isIPv4 } from "is-ip";
   import {
     Button,
     DataTable,
-    FormLabel,
     TextInput,
     Toolbar,
     ToolbarContent,
-    ToolbarSearch,
   } from "carbon-components-svelte";
   import { store } from "../../store/apistore";
   import { _ } from "svelte-i18n";
@@ -16,7 +14,6 @@
   let data = null;
   let domainText = "";
   let ipText = "";
-  let isValid = false;
 
   let editingRowId = null;
   let showForm = false;
