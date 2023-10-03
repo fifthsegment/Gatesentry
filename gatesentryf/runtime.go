@@ -225,6 +225,7 @@ wR8g0gOPPV1l
 	}
 
 	R.Logger = gatesentry2logger.NewLogger(log_location)
+
 	for i := 0; i < len(R.Filters); i++ {
 		// log.Println( R.GSSettings.GetInt("strictness") )
 		R.Filters[i].Strictness = R.GSSettings.GetInt("strictness")
