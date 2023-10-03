@@ -77,6 +77,12 @@ let menuItems = [
     href: "/switches",
     icon: SwitchLayer_2,
   },
+  {
+    type: "link",
+    text: "Stats",
+    href: "/stats",
+    icon: GraphicalDataFlow,
+  }
 ];
 
 export { menuItems };
