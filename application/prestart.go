@@ -23,15 +23,6 @@ func PSSetApiBase(url string) {
 	Baseendpointv2 = url
 }
 
-func PSVerifyGS() bool {
-	// fmt.Println("...")
-	_, err := gstransport.PNDGet(Baseendpointv2 + "/cert?version=" + GSVerString)
-	if err != nil {
-		return false
-	}
-	return true
-}
-
 func PSGetMac() string {
 	fmt.Println("Checking if API key exists")
 	apifile := GSBASEDIR + "/" + ".api"

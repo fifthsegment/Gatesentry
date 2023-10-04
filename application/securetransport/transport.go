@@ -214,40 +214,6 @@ func certRemoveWhiteSpace(certString string) string {
 	return certString
 }
 
-func PNDGet(url string) (string, error) {
-	certString := PinnedServerCert
-	certString = certRemoveWhiteSpace(certString)
-	client := &http.Client{}
-	tlsConfig := &tls.Config{InsecureSkipVerify: true}
-	client.Transport = &http.Transport{
-		DialTLS: func(network, addr string) (net.Conn, error) {
-			conn, err := tls.Dial(network, addr, tlsConfig)
-			if err != nil {
-				return conn, err
-			}
-			if len(conn.ConnectionState().PeerCertificates) == 0 {
-				return nil, errors.New("No certificates found in chain")
-			}
-			sEnc := base64.StdEncoding.EncodeToString(conn.ConnectionState().PeerCertificates[0].Raw)
-			if sEnc != certString {
-				return nil, errors.New("Unable to validate certificate")
-			}
-			return conn, nil
-		},
-	}
-	resp, err := client.Get(url)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	contents, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return "", err
-		// os.Exit(1)
-	}
-	return string(contents), nil
-}
-
 func GETHttpClient() *http.Client {
 	certString := PinnedServerCert
 	certString = certRemoveWhiteSpace(certString)
