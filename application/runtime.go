@@ -23,11 +23,9 @@ import (
 	"runtime"
 	"syscall"
 
-	gscommonweb "bitbucket.org/abdullah_irfan/gatesentryf/commonweb"
 	gatesentry2filters "bitbucket.org/abdullah_irfan/gatesentryf/filters"
 	gatesentry2internalfiles "bitbucket.org/abdullah_irfan/gatesentryf/internalfiles"
 	gatesentry2logger "bitbucket.org/abdullah_irfan/gatesentryf/logger"
-	gstransport "bitbucket.org/abdullah_irfan/gatesentryf/securetransport"
 	gatesentry2storage "bitbucket.org/abdullah_irfan/gatesentryf/storage"
 )
 
@@ -97,20 +95,12 @@ func (R *GSRuntime) GSWasUpdated() {
 	t := time.Now()
 	ts := t.String()
 	prevversions := R.GSUpdateLog.Get("versions")
-	R.GSUpdateLog.Update("versions", prevversions+R.GSSettings.Get("version")+" - "+R.GetApplicationVersion()+" on = "+ts+" ,")
-	fmt.Println("\n\n\n\nGateSentry was updated.\n\n\n")
+	R.GSUpdateLog.Update("versions", prevversions+R.GSSettings.Get("version")+" - "+R.GetApplicationVersion()+" on = "+ts+",")
+	log.Println("GateSentry was updated.")
 	R.GSSettings.Update("version", R.GetApplicationVersion())
-	iid := R.GetInstallationId()
-	gg := gscommonweb.GSDataUpdater{Id: iid}
-	kaj, err := json.Marshal(gg)
-	if err == nil {
-		resp, err := gstransport.SendEncryptedData("/updated?ver="+R.GetApplicationVersion(), kaj, iid)
-		// if ( err != nil ){
-		//    return false, err
-		// }
-		_ = resp
-		_ = err
-	}
+}
+
+func (R *GSRuntime) UpdateConsumption(consumedBytes int64) {
 
 }
 
