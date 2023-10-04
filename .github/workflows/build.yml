@@ -29,9 +29,9 @@ jobs:
           ls -la
           cd ui && npm install && npm run build && cd ..
           ls
-          rm -rf gatesentryf/webserver/frontend/files/*
-          mv ui/dist/* gatesentryf/webserver/frontend/files
-          mv gatesentryf/webserver/frontend/files/fs/* gatesentryf/webserver/frontend/files
+          rm -rf application/webserver/frontend/files/*
+          mv ui/dist/* application/webserver/frontend/files
+          mv application/webserver/frontend/files/fs/* application/webserver/frontend/files
           env GOOS=linux GOARCH=amd64 go build -o gatesentry-linux
           env GOOS=darwin GOARCH=amd64 go build -o gatesentry-macos
           env GOOS=windows GOARCH=amd64 go build -o gatesentry-windows.exe
