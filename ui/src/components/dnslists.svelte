@@ -95,7 +95,7 @@
 <h5>{$_("Custom DNS Block lists")}</h5>
 <p>
   {$_(
-    "Any domains listed here will be blocked by the DNS server. This is useful for blocking ads, tracking, and other unwanted content.",
+    "A block list is a file containing a list of domains to block. Gatesentry comes with a series of predefined blocklists for adblocking. You can also add your own custom block lists or remove the existing ones.",
   )}
 </p>
 
