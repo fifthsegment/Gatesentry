@@ -1,6 +1,6 @@
 module gatesentrybin
 
-go 1.21.0
+go 1.21
 
 replace bitbucket.org/abdullah_irfan/gatesentryf => ./gatesentryf
 
