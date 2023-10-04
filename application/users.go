@@ -153,7 +153,6 @@ func (R *GSRuntime) AddUser(user string, pass string) bool {
 	if err != nil {
 		return false
 	}
-	log.Println(string(b))
 	R.GSSettings.Update("authusers", string(b))
 	R.LoadUsers()
 	return true
