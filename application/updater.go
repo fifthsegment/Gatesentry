@@ -5,10 +5,7 @@ import (
 	"runtime"
 
 	gscommonweb "bitbucket.org/abdullah_irfan/gatesentryf/commonweb"
-	gstransport "bitbucket.org/abdullah_irfan/gatesentryf/securetransport"
-
 	// "strconv"
-	"encoding/json"
 )
 
 func GetUpdateBinaryURL(basepoint string) string {
@@ -58,26 +55,7 @@ func GetFileHash(binpath string) string {
 
 func ValidateUpdateHashFromServer(hash string) bool {
 	log.Println("Running hash Validator")
-	gstransport.SetbaseEndpoint(GSAPIBASEPOINT)
-	ka := gscommonweb.GSKeepAliver{Id: INSTALLATIONID, Version: GSVer}
-	kaj, err := json.Marshal(ka)
-	if err != nil {
-		log.Println(err.Error())
-		return false
-	}
-	goarch := runtime.GOARCH
-	goos := runtime.GOOS
-	resp, err := gstransport.SendEncryptedData("/updates/verify?goos="+goos+"&goarch="+goarch+"&hash="+hash, kaj, INSTALLATIONID)
-	if err != nil {
-		log.Println(err.Error())
-		return false
-	}
-	var kar gscommonweb.GSKeepAliveResponse
-	json.Unmarshal([]byte(resp), &kar)
-	log.Println(resp)
-	if kar.Ok {
-		return true
-	}
+
 	return false
 }
 

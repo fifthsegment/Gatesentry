@@ -6,14 +6,10 @@ import (
 
 	// "bufio"
 	"io/ioutil"
-	"log"
 	"net"
 	"strings"
-
 	// "net/http"
 	// "crypto/x509"
-
-	gstransport "bitbucket.org/abdullah_irfan/gatesentryf/securetransport"
 	// "strconv"
 )
 
@@ -28,22 +24,7 @@ func PSGetMac() string {
 	apifile := GSBASEDIR + "/" + ".api"
 
 	if _, er := os.Stat(apifile); os.IsNotExist(er) {
-		// path/to/whatever does not exist
-		fmt.Println("First run, obtaining key...")
-		keystr, _ := gstransport.PNDPost(Baseendpointv2 + "/key?version=" + GSVerString)
-		// reader := bufio.NewReader(os.Stdin)
-		// fmt.Println("Unable to read API file")
-		// fmt.Println("Please register for an API key on https://www.gatesentryfilter.com/register")
-		// fmt.Println("Then enter your API key here : ")
-		// text, _ := reader.ReadString('\n')
-		dat := []byte(keystr)
-		// fmt.Println("Saving : "+ text)
-		// fmt.Println("API saved in = " + apifile)
-		erro := ioutil.WriteFile(apifile, dat, 0777)
-		if erro != nil {
-			log.Fatal(erro)
-			//os.Exit(1)
-		}
+		keystr := ""
 		return keystr
 	} else {
 		filebytes, _ := ioutil.ReadFile(apifile)
