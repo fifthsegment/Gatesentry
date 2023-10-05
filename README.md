@@ -1,6 +1,22 @@
 # Gatesentry
 
-A DNS + proxy server (supports MITM) with a nice frontend.
+An open source proxy server (supports SSL filtering / MITM) + DNS Server with a nice frontend.
+
+Usages:
+
+- Privacy Protection: Users can use Gatesentry to prevent tracking by various online services by blocking tracking scripts and cookies.
+
+- Parental Controls: Parents can configure Gatesentry to block inappropriate content or websites for younger users on the network.
+
+- Bandwidth Management: By blocking unnecessary content like ads or heavy scripts, users can save on bandwidth, which is especially useful for limited data plans.
+
+- Enhanced Security: Gatesentry can be used to block known malicious websites or phishing domains, adding an extra layer of security to the network.
+
+- Access Control: In a corporate or institutional setting, Gatesentry can be used to restrict access to non-work-related sites during work hours.
+
+- Logging and Monitoring: Track and monitor all the requests made in the network to keep an eye on suspicious activities or to analyze network usage patterns.
+
+- Custom Redirects (via DNS): Redirect specific URLs to other addresses, useful for local development or for redirecting deprecated domains.
 
 ![gatesentry-repo](https://github.com/fifthsegment/Gatesentry/assets/5513549/5ab836ab-7362-4916-9f7c-655e67e4deab)
 
