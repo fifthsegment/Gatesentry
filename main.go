@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"bitbucket.org/abdullah_irfan/gatesentryf"
-	gatesentry2filters "bitbucket.org/abdullah_irfan/gatesentryf/filters"
-	gatesentry2responder "bitbucket.org/abdullah_irfan/gatesentryf/responder"
+	application "bitbucket.org/abdullah_irfan/gatesentryf"
+	filters "bitbucket.org/abdullah_irfan/gatesentryf/filters"
+	gresponder "bitbucket.org/abdullah_irfan/gatesentryf/responder"
 	"bitbucket.org/abdullah_irfan/gatesentryproxy"
 	"github.com/jpillora/overseer"
 	"github.com/kardianos/service"
@@ -26,7 +26,8 @@ import (
 
 var GSPROXYPORT = "10413"
 var GSBASEDIR = ""
-var Baseendpointv2 = "https://www.gatesentryfilter.com/api/"
+var Baseendpointv2 = "https://www.applicationilter.com/api/"
+var GATESENTRY_VERSION = "1.9"
 
 type program struct {
 	exit chan struct{}
@@ -40,39 +41,30 @@ func (p *program) Start(s service.Service) error {
 	return nil
 }
 func (p *program) run() error {
-	// logger.Infof("I'm running %v.", service.Platform())
-	// ticker := time.NewTicker(2 * time.Second)
 	RunGateSentry()
 	for {
 		select {
-		// case tm := <-ticker.C:
-		// logger.Infof("Still running at %v...", tm)
+
 		case <-p.exit:
 			log.Println("Stopping GateSentry")
-			// ticker.Stop()
-			gatesentryf.Stop()
+			application.Stop()
 			return nil
 		}
 	}
 }
 func (p *program) Stop(s service.Service) error {
-	// Any work in Stop should be quick, usually a few seconds at most.
-	// logger.Info("I'm Stopping!")
 	close(p.exit)
 	return nil
 }
 
-// create another main() to run the overseer process
-// and then convert your old main() into a 'prog(state)'
 func preupgradeCheck(binpath string) error {
 	fmt.Println("Pre upgrade check = " + binpath)
-	// fmt.Println(encoded)
-	encoded := gatesentryf.GetFileHash(binpath)
+	encoded := application.GetFileHash(binpath)
 
-	if !gatesentryf.ValidateUpdateHashFromServer(encoded) {
+	if !application.ValidateUpdateHashFromServer(encoded) {
 		return errors.New("Unable to validate hash from server")
 	}
-	// fmt.Printf( "% x", h.Sum(nil) )
+
 	return nil
 }
 
@@ -81,25 +73,28 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	// fmt.Println("We are at : " + dir)
-	// os.Chdir(dir);
+
 	GSBASEDIR = dir
-	gatesentryf.SetBaseDir(dir + "/")
-	// InitTasks();
+	application.SetBaseDir(dir + "/")
 	_ = devnull.Writer
 	// log.SetOutput(devnull.Writer)
 	overseer.SanityCheck()
 	baseendpoint := "http://gatesentryreflector.abdullahirfan.com/api"
 	baseendpointforupdates := "http://gatesentryupdates.abdullahirfan.com/api"
-	// Baseendpointv2 :=
+
 	_ = baseendpointforupdates
+
 	updaterInterval := time.Second * 60 * 30
-	gatesentryf.SetGSVer(1.8)
-	gatesentryf.SetAPIBaseEndpoint(baseendpoint)
+	version, err := strconv.ParseFloat(GATESENTRY_VERSION, 32)
+	if err != nil {
+		log.Fatal(err)
+	}
+	application.SetGSVer(float32(version))
+	application.SetAPIBaseEndpoint(baseendpoint)
 	// macaddr:=getMac();
 	// APPLicense := BuildInstallationIDFromMac(macaddr)
 	APPLicense := "NONEXISTENT"
-	gatesentryf.SetInstallationID(APPLicense)
+	application.SetInstallationID(APPLicense)
 
 	serviceflag := ""
 
@@ -111,40 +106,17 @@ func main() {
 	if serviceflag == "start" || serviceflag == "stop" || serviceflag == "uninstall" || serviceflag == "restart" || serviceflag == "install" {
 		RunGateSentryServiceRunner(serviceflag)
 	} else {
-		url := gatesentryf.GetUpdateBinaryURLOld(baseendpointforupdates)
+		url := application.GetUpdateBinaryURLOld(baseendpointforupdates)
 		_ = updaterInterval
 		_ = url
 		RunGateSentryServiceRunner("")
-		// fmt.Println(url);
-		/*overseer.Run(overseer.Config{
-			Program: prog,
-			Address: ":37453",
-			Fetcher: &fetcher.HTTP{
-				URL:     url,
-				// URL: "http://localhost/updates/bin/updater.bin2",
-				Interval: updaterInterval,
-			},
-			PreUpgrade:preupgradeCheck,
-		})*/
+
 	}
 
 }
 
-// prog(state) runs in a child process
 func prog(state overseer.State) {
 	RunGateSentryServiceRunner("")
-
-	// log.Printf("app (%s) listening...", state.ID)
-	// go func(){
-	// 	return;
-	// 	t := time.NewTicker( time.Second * 5 )
-	// 	for {
-	// 		fmt.Println("I'm a runner from the first class");
-	// 	// }
-	// 		<-t.C
-	// 	}
-	// }();
-	// ();
 }
 
 // Service setup.
@@ -155,12 +127,6 @@ func prog(state overseer.State) {
 //	Handle service controls (optional).
 //	Run the service.
 func RunGateSentryServiceRunner(svcFlag string) {
-
-	// var port string
-	// svcFlag := flag.String("service", "", "Control the system service.")
-	// flag.StringVar(&port, "port", "10413", "port to run on")
-	// port = GSPROXYPORT
-	// flag.Parse()
 
 	svcConfig := &service.Config{
 		Name:        "GateSentry",
@@ -188,8 +154,6 @@ func RunGateSentryServiceRunner(svcFlag string) {
 		}
 	}()
 
-	// fmt.Println("Flag = " + svcFlag)
-	// return;
 	if len(svcFlag) != 0 {
 		err := service.Control(s, svcFlag)
 		if err != nil {
@@ -212,38 +176,17 @@ func BuildInstallationIDFromMac(mac string) string {
 
 func RunGateSentry() {
 
-	// log.Println("Your installation id = "+ APPLicense)
-
-	// Disable Logging
-	// log.SetOutput(devnull.Writer)
-
-	R := gatesentryf.Start()
-	gatesentryf.StartBonjour()
+	R := application.Start()
+	application.StartBonjour()
 	gatesentryproxy.InitProxy()
 	ngp := gatesentryproxy.NewGSProxy()
 
-	// fmt.Println("Making a comm channel for dns")
-	go gatesentryf.DNSServerThread(gatesentryf.GetBaseDir(), R.Logger, R.DNSServerChannel, R.GSSettings)
+	// Making a comm channel for our internal dns server
+	go application.DNSServerThread(application.GetBaseDir(), R.Logger, R.DNSServerChannel, R.GSSettings)
 
-	// go func() {
-	// 	for {
-	// 		select {
-	// 		case msg := <-R.DNSServerChannel:
-	// 			fmt.Println("[DEBUG] Received message:", msg)
-	// 		}
-	// 	}
-	// 	fmt.Println("[DEBUG] Done receive message:")
-	// }()
-
-	// ffp := gatesentryalpha.NewFPProxy();
-	// ffp.StartProxy();
-
-	// flag.StringVar(&port, "port", "10413", "port to run on")
-	// flag.Parse()
 	addr := "0.0.0.0:"
 	addr += GSPROXYPORT
 
-	// ggport := strconv.Itoa( GSPROXYPORT )
 	ttt := time.NewTicker(time.Second * 10)
 	portavailable := false
 	for {
@@ -270,8 +213,8 @@ func RunGateSentry() {
 	proxyListener, err := net.Listen("tcp", addr)
 	proxyHandler := gatesentryproxy.ProxyHandler{Iproxy: ngp}
 
-	CannedResponsesAuthError := []byte(gatesentry2responder.BuildGeneralResponsePage([]string{"Your access has been disabled."}, -1))
-	CannedResponseAccessNotActiveError := []byte(gatesentry2responder.BuildGeneralResponsePage([]string{"Your access has been disabled by the administrator of this network."}, -1))
+	CannedResponsesAuthError := []byte(gresponder.BuildGeneralResponsePage([]string{"Your access has been disabled."}, -1))
+	CannedResponseAccessNotActiveError := []byte(gresponder.BuildGeneralResponsePage([]string{"Your access has been disabled by the administrator of this network."}, -1))
 
 	// CONTENT FILTER
 	ngp.RegisterHandler("proxyerror", func(bytesReceived *[]byte, rs *gatesentryproxy.GSResponder, gpt *gatesentryproxy.GSProxyPassthru) {
@@ -284,7 +227,7 @@ func RunGateSentry() {
 		default:
 			break
 		}
-		*bytesReceived = []byte(gatesentry2responder.BuildGeneralResponsePage([]string{msg}, -1))
+		*bytesReceived = []byte(gresponder.BuildGeneralResponsePage([]string{msg}, -1))
 	})
 
 	// Should the Proxy MITM this traffic or not
@@ -300,8 +243,8 @@ func RunGateSentry() {
 			rs.Changed = true
 			return
 		}
-		responder := &gatesentry2responder.GSFilterResponder{Blocked: false}
-		gatesentryf.RunFilter("url/https_dontbump", host, responder)
+		responder := &gresponder.GSFilterResponder{Blocked: false}
+		application.RunFilter("url/https_dontbump", host, responder)
 		if responder.Blocked {
 			gpt.DontTouch = true
 			rs.Changed = true
@@ -312,12 +255,12 @@ func RunGateSentry() {
 	ngp.RegisterHandler("except_urls", func(bytesReceived *[]byte, rs *gatesentryproxy.GSResponder, gpt *gatesentryproxy.GSProxyPassthru) {
 		host := string(*bytesReceived)
 		log.Println("Running exception handler for = ", host)
-		responder := &gatesentry2responder.GSFilterResponder{Blocked: false}
-		gatesentryf.RunFilter("url/all_exception_urls", host, responder)
+		responder := &gresponder.GSFilterResponder{Blocked: false}
+		application.RunFilter("url/all_exception_urls", host, responder)
 		if responder.Blocked {
 			gpt.DontTouch = true
 			log.Println("URL found in exception = ", host)
-			// *s = []byte(gatesentry2responder.BuildGeneralResponsePage( []string{"Unable to fulfill your request because it contains a <strong>blocked URL</strong>."}, -1));
+			// *s = []byte(gresponder.BuildGeneralResponsePage( []string{"Unable to fulfill your request because it contains a <strong>blocked URL</strong>."}, -1));
 			rs.Changed = true
 		}
 	})
@@ -325,11 +268,11 @@ func RunGateSentry() {
 	ngp.RegisterHandler("content", func(bytesReceived *[]byte, rs *gatesentryproxy.GSResponder, gpt *gatesentryproxy.GSProxyPassthru) {
 		log.Println("Running content handler")
 		// log.Println("GPT = ", gpt)
-		responder := &gatesentry2responder.GSFilterResponder{Blocked: false}
+		responder := &gresponder.GSFilterResponder{Blocked: false}
 		if !gpt.DontTouch {
-			gatesentryf.RunFilter("text/html", string(*bytesReceived), responder)
+			application.RunFilter("text/html", string(*bytesReceived), responder)
 			if responder.Blocked {
-				*bytesReceived = []byte(gatesentry2responder.BuildResponsePage(responder.Reasons, responder.Score))
+				*bytesReceived = []byte(gresponder.BuildResponsePage(responder.Reasons, responder.Score))
 			}
 			rs.Changed = responder.Blocked
 		}
@@ -339,10 +282,10 @@ func RunGateSentry() {
 	// URL CHECKER
 	ngp.RegisterHandler("url", func(bytesReceived *[]byte, rs *gatesentryproxy.GSResponder, gpt *gatesentryproxy.GSProxyPassthru) {
 		host := string(*bytesReceived)
-		responder := &gatesentry2responder.GSFilterResponder{Blocked: false}
-		gatesentryf.RunFilter("url/all_blocked_urls", host, responder)
+		responder := &gresponder.GSFilterResponder{Blocked: false}
+		application.RunFilter("url/all_blocked_urls", host, responder)
 		if responder.Blocked {
-			*bytesReceived = []byte(gatesentry2responder.BuildGeneralResponsePage([]string{"Unable to fulfill your request because it contains a <strong>blocked URL</strong>."}, -1))
+			*bytesReceived = []byte(gresponder.BuildGeneralResponsePage([]string{"Unable to fulfill your request because it contains a <strong>blocked URL</strong>."}, -1))
 			rs.Changed = true
 		}
 	})
@@ -404,13 +347,13 @@ func RunGateSentry() {
 		// url := string(*s)
 		rs.Changed = false
 		blockedtimes := R.GSSettings.Get("blocktimes")
-		responder := &gatesentry2responder.GSFilterResponder{Blocked: false}
+		responder := &gresponder.GSFilterResponder{Blocked: false}
 		timezone := R.GSSettings.Get("timezone")
-		gatesentry2filters.RunTimeFilter(responder, blockedtimes, timezone)
+		filters.RunTimeFilter(responder, blockedtimes, timezone)
 		// user := gpt.User
 		if responder.Blocked {
 			rs.Changed = true
-			*bytesReceived = []byte(gatesentry2responder.BuildGeneralResponsePage([]string{"Internet access on this network has been disabled because the current time has been specified as a blocked time period in GateSentry's settings."}, -1))
+			*bytesReceived = []byte(gresponder.BuildGeneralResponsePage([]string{"Internet access on this network has been disabled because the current time has been specified as a blocked time period in GateSentry's settings."}, -1))
 		}
 	})
 
@@ -420,16 +363,16 @@ func RunGateSentry() {
 
 	ngp.RegisterHandler("contenttypeblocked", func(bytesReceived *[]byte, rs *gatesentryproxy.GSResponder, gpt *gatesentryproxy.GSProxyPassthru) {
 		contentType := string(*bytesReceived)
-		responder := &gatesentry2responder.GSFilterResponder{Blocked: false}
-		gatesentryf.RunFilter("url/all_blocked_mimes", contentType, responder)
+		responder := &gresponder.GSFilterResponder{Blocked: false}
+		application.RunFilter("url/all_blocked_mimes", contentType, responder)
 		if responder.Blocked {
 			rs.Changed = true
 			message := "This content type has been blocked on this network."
 			if contentType == "image/png" || contentType == "image/jpeg" || contentType == "image/jpg" || "image/gif" == contentType || "image/webp" == contentType {
-				dat, _ := gatesentry2filters.Asset("app/transparent.png")
+				dat, _ := filters.Asset("app/transparent.png")
 				*bytesReceived = dat
 			} else {
-				*bytesReceived = []byte(gatesentry2responder.BuildGeneralResponsePage([]string{message}, -1))
+				*bytesReceived = []byte(gresponder.BuildGeneralResponsePage([]string{message}, -1))
 			}
 		}
 	})
@@ -488,31 +431,6 @@ func VerifyKey(key string) {
 
 func getMac() string {
 	fmt.Println("Checking if API key exists")
-	// apifile := GSBASEDIR+"/" +".api"
-
-	// if _, er := os.Stat(apifile); os.IsNotExist(er) {
-	//   // path/to/whatever does not exist
-
-	// 	reader := bufio.NewReader(os.Stdin)
-	// 	fmt.Println("Unable to read API file")
-	// 	fmt.Println("Please register for an API key on https://www.gatesentryfilter.com/register")
-	// 	fmt.Println("Then enter your API key here : ")
-	// 	text, _ := reader.ReadString('\n')
-	// 	dat:= []byte(text);
-	// 	fmt.Println("Saving : "+ text)
-	// 	fmt.Println("API saved in = " + apifile)
-	// 	erro := ioutil.WriteFile(apifile, dat , 0777)
-	// 	if erro != nil {
-	// 		log.Fatal(erro)
-	// 		//os.Exit(1)
-	// 	}
-	// }else{
-	// 	filebytes,_ :=ioutil.ReadFile(apifile)
-	// 	filestring := string(filebytes)
-	// 	fmt.Println("API: " + filestring)
-	// 	VerifyKey(filestring)
-	// 	//os.Exit(1)
-	// }
 
 	addrs, err := net.InterfaceAddrs()
 
