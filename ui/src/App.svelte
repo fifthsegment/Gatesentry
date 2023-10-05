@@ -41,7 +41,7 @@
   const setupResult = setup();
 
   let isSideNavOpen = false;
-  let version = "1.8.0";
+  let version = "1.9.0";
   let userProfilePanelOpen = false;
   let tokenVerified = false;
   // setupI18n();
