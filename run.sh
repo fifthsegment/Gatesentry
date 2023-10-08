@@ -1,1 +1,1 @@
-./build.sh && cd bin && ./gatesentrybin
+./build.sh && cd bin && ./gatesentrybin > ../log.txt 2>&1

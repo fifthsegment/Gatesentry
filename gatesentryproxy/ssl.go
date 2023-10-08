@@ -106,6 +106,51 @@ func GSLogSSL(user string, serverAddr string, serverName string, err error, cach
 	log.Println(entry)
 }
 
+func newHijackedConn(w http.ResponseWriter) (*hijackedConn, error) {
+	hj, ok := w.(http.Hijacker)
+	if !ok {
+		return nil, errors.New("connection doesn't support hijacking")
+	}
+	conn, bufrw, err := hj.Hijack()
+	if err != nil {
+		return nil, err
+	}
+	err = bufrw.Flush()
+	if err != nil {
+		conn.Close()
+		return nil, err
+	}
+	return &hijackedConn{
+		Conn:   conn,
+		Reader: bufrw.Reader,
+	}, nil
+}
+
+func HandleSSLBump(r *http.Request, w http.ResponseWriter, user string, authUser string, passthru *GSProxyPassthru) {
+	conn, err := newHijackedConn(w)
+	if err != nil {
+		log.Println("Error hijacking connection for CONNECT request to %s: %v", r.URL.Host, err)
+		showBlockPage(w, r, nil, BLOCKED_ERROR_HIJACK_BYTES)
+		return
+	}
+	fmt.Fprint(conn, "HTTP/1.1 200 Connection Established\r\n\r\n")
+	SSLBump(conn, r.URL.Host, user, authUser, r, passthru)
+}
+
+func HandleSSLConnectDirect(r *http.Request, w http.ResponseWriter, user string, passthru *GSProxyPassthru) {
+	conn, err := newHijackedConn(w)
+	if err != nil {
+		log.Println("Error hijacking connection for CONNECT request to %s: %v", r.URL.Host, err)
+		return
+	}
+	fmt.Fprint(conn, "HTTP/1.1 200 Connection Established\r\n\r\n")
+	// logAccess(r, nil, 0, false, user, tally, scores, thisRule, "", ignored)
+	// conf = nil // Allow it to be garbage-collected, since we won't use it any more.
+	log.Printf("Running a CONNECTDIRECT")
+	ConnectDirect(conn, r.URL.Host, nil, passthru)
+
+}
+
 // ConnectDirect connects to serverAddr and copies data between it and conn.
 // extraData is sent to the server first.
 func ConnectDirect(conn net.Conn, serverAddr string, extraData []byte, gpt *GSProxyPassthru) (uploaded, downloaded int64) {

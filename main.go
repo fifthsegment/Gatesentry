@@ -1,15 +1,26 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"flag"
+	"image/jpeg"
+	"io"
 	"log"
+	"math/rand"
+	"mime/multipart"
 	"net"
 	"net/http"
+	"net/textproto"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
+
+	"errors"
+	"fmt"
+	"io/ioutil"
 
 	application "bitbucket.org/abdullah_irfan/gatesentryf"
 	filters "bitbucket.org/abdullah_irfan/gatesentryf/filters"
@@ -18,16 +29,57 @@ import (
 	"github.com/jpillora/overseer"
 	"github.com/kardianos/service"
 	"github.com/steakknife/devnull"
-
-	"errors"
-	"fmt"
-	"io/ioutil"
+	"golang.org/x/image/webp"
 )
 
 var GSPROXYPORT = "10413"
 var GSBASEDIR = ""
 var Baseendpointv2 = "https://www.applicationilter.com/api/"
 var GATESENTRY_VERSION = "1.9"
+
+var contentTypeToExt = map[string]string{
+	"image/png":  ".png",
+	"image/jpeg": ".jpg",
+	"image/jpg":  ".jpg",
+	"image/gif":  ".gif",
+	"image/webp": ".webp",
+	"image/avif": ".avif",
+	"":           "",
+}
+
+type InferenceDetectionCategory struct {
+	Class string  `json:"class"`
+	Score float64 `json:"score"`
+}
+
+type InferenceResponse struct {
+	Category   string                       `json:"category"`
+	Confidence int                          `json:"confidence"`
+	Detections []InferenceDetectionCategory `json:"detections"`
+}
+
+func ConvertWebPToJPEG(webpData []byte) ([]byte, error) {
+	// Decode webp bytes to image.Image
+	img, err := webp.Decode(bytes.NewReader(webpData))
+	if err != nil {
+		return nil, err
+	}
+
+	// Encode image.Image to jpeg
+	var jpegBuf bytes.Buffer
+	err = jpeg.Encode(&jpegBuf, img, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return jpegBuf.Bytes(), nil
+}
+
+type ContentScannerInput struct {
+	Content     []byte
+	ContentType string
+	Url         string
+}
 
 type program struct {
 	exit chan struct{}
@@ -174,6 +226,29 @@ func BuildInstallationIDFromMac(mac string) string {
 	return lic
 }
 
+func saveToDisk(data []byte, fileExt string) {
+	// Ensure the 'temp' directory exists
+	if _, err := os.Stat("temp"); os.IsNotExist(err) {
+		os.Mkdir("temp", 0755)
+	}
+
+	// Generate a random string for the filename
+	rand.Seed(time.Now().UnixNano())
+	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	randomString := make([]byte, 10) // for example, 10 characters long
+	for i := range randomString {
+		randomString[i] = charset[rand.Intn(len(charset))]
+	}
+
+	// Create the file in the 'temp' directory with the random filename
+	dst, err := os.Create(fmt.Sprintf("temp/%s%s", randomString, fileExt))
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	defer dst.Close()
+}
+
 func RunGateSentry() {
 
 	R := application.Start()
@@ -238,11 +313,14 @@ func RunGateSentry() {
 		enable_filtering := R.GSSettings.Get("enable_https_filtering")
 		log.Println("MITM Handler - enable_https_filtering = " + enable_filtering)
 		if enable_filtering != "true" {
-			log.Println("MITM Handler - Filtering disabled")
 			gpt.DontTouch = true
 			rs.Changed = true
 			return
 		}
+		// else {
+		// 	rs.Changed = false
+		// 	gpt.DontTouch = true
+		// }
 		responder := &gresponder.GSFilterResponder{Blocked: false}
 		application.RunFilter("url/https_dontbump", host, responder)
 		if responder.Blocked {
@@ -361,10 +439,177 @@ func RunGateSentry() {
 		rs.Changed = false
 	})
 
+	ngp.RegisterHandler("youtube", func(bytesReceived *[]byte, rs *gatesentryproxy.GSResponder, gpt *gatesentryproxy.GSProxyPassthru) {
+		url1 := "mainvideo url"
+		// Extract video ID
+		parts := strings.Split(url1, "/")
+		videoID := parts[4]
+
+		// Extract sqp parameter
+		sqpIndex := strings.Index(url1, "sqp=")
+		sqpEndIndex := strings.Index(url1[sqpIndex:], "|48")
+		if sqpEndIndex == -1 {
+			sqpEndIndex = len(url1) - sqpIndex
+		} else {
+			sqpEndIndex += sqpIndex
+		}
+		sqp := url1[sqpIndex:sqpEndIndex]
+
+		// Extract sigh parameter
+		sighIndex := strings.LastIndex(url1, "rs$")
+		sigh := url1[sighIndex:]
+
+		// Construct the new URL
+		url2 := fmt.Sprintf("https://i.ytimg.com/sb/%s/storyboard3_L2/M2.jpg?%s&sigh=%s", videoID, sqp, sigh)
+		fmt.Println(url2)
+	})
+
+	ngp.RegisterHandler("contentscanner", func(bytesReceived *[]byte, rs *gatesentryproxy.GSResponder, gpt *gatesentryproxy.GSProxyPassthru) {
+		rs.Changed = false
+		log.Println("Running content scanner")
+
+		// convert bytes to json struct of type ContentScannerInput
+		var contentScannerInput ContentScannerInput
+		err := json.Unmarshal(*bytesReceived, &contentScannerInput)
+		if err != nil {
+			log.Println("Error unmarshalling content scanner input")
+		}
+		log.Println("Running content scanner for content type = " + contentScannerInput.ContentType)
+
+		if len(contentScannerInput.Content) < 6000 {
+			// continue
+		} else if (contentScannerInput.ContentType == "image/jpeg") || (contentScannerInput.ContentType == "image/jpg") || (contentScannerInput.ContentType == "image/png") || (contentScannerInput.ContentType == "image/gif") || (contentScannerInput.ContentType == "image/webp") || (contentScannerInput.ContentType == "image/avif") {
+			contentType := contentScannerInput.ContentType
+			log.Println("Running content scanner for image")
+
+			// if contentType == "image/jpg" || contentType == "image/jpeg" || contentType == "image/png" || contentType == "image/gif" || contentType == "image/webp" {
+			var b bytes.Buffer
+			wr := multipart.NewWriter(&b)
+			// part, _ := wr.CreateFormFile("image", "uploaded_image"+contentTypeToExt[contentType])
+
+			if contentType == "image/webp" {
+				// convert webp to jpeg
+				jpegBytes, err := ConvertWebPToJPEG(contentScannerInput.Content)
+				if err != nil {
+					fmt.Println("Error converting webp to jpeg")
+				}
+				contentScannerInput.Content = jpegBytes
+				contentType = "image/jpeg"
+			}
+
+			// Create a new form header for the file
+			// h := make(textproto.MIMEHeader)
+			h := make(textproto.MIMEHeader)
+			// ext := contentTypeToExt[contentType]
+			h.Set("Content-Disposition", fmt.Sprintf(`form-data; name="image"; filename="%s"`, "uploaded_image"))
+			// h.Set("Content-Type", contentType)
+
+			// Create the form file with the custom header
+			part, _ := wr.CreatePart(h)
+
+			part.Write(*&contentScannerInput.Content)
+
+			// save the file to disk
+			// add randomness to file name and save it under folder called thumbs
+			// generate random string
+			b.Bytes()
+			// saveToDisk(b.Bytes(), contentTypeToExt[contentType])
+			wr.Close()
+
+			// Log the request headers and body
+			// fmt.Println("Request Headers:")
+			// fmt.Println("Content-Type:", wr.FormDataContentType())
+			// fmt.Println("\nRequest Body:")
+			// fmt.Println(b.String())
+
+			resp, _ := http.Post("http://10.1.0.115:8000/infer/onnx", wr.FormDataContentType(), &b)
+			if resp.StatusCode == http.StatusOK {
+				bytesLength := len(*bytesReceived)
+				// convert bytes length to string
+				//
+				bytesLengthString := strconv.Itoa(bytesLength)
+				fmt.Println("Inference for " + contentScannerInput.Url + " Content type = " + contentType + "Length = " + bytesLengthString)
+				respBytes, _ := io.ReadAll(resp.Body)
+				responseString := string(respBytes)
+				var inferenceResponse InferenceResponse
+				err := json.Unmarshal([]byte(respBytes), &inferenceResponse)
+				if err != nil {
+					fmt.Println("Error:", err)
+					return
+				}
+				fmt.Println("Inference Response = " + responseString)
+				if inferenceResponse.Category == "sexy" && inferenceResponse.Confidence > 85 {
+					rs.Changed = true
+				}
+				if inferenceResponse.Category == "porn" && inferenceResponse.Confidence > 85 {
+					rs.Changed = true
+				}
+				if len(inferenceResponse.Detections) > 0 {
+					// rs.Changed = true
+					var conditionsMet = 0
+
+					for _, detection := range inferenceResponse.Detections {
+
+						if detection.Class == "FEMALE_GENITALIA_EXPOSED" && detection.Score > 0.4 {
+							conditionsMet += 2
+						}
+						if detection.Class == "FEMALE_BREAST_EXPOSED" && detection.Score > 0.4 {
+							conditionsMet += 2
+						}
+						if detection.Class == "FEMALE_BREAST_COVERED" && detection.Score > 0.4 {
+							conditionsMet += 2
+						}
+						if detection.Class == "BELLY_COVERED" && detection.Score > 0.5 {
+							conditionsMet += 2
+						}
+						if detection.Class == "ARMPITS_EXPOSED" && detection.Score > 0.5 {
+							conditionsMet++
+						}
+						if detection.Class == "MALE_GENITALIA_EXPOSED" && detection.Score > 0.5 {
+							conditionsMet += 2
+						}
+						if detection.Class == "MALE_BREAST_EXPOSED" && detection.Score > 0.5 {
+							conditionsMet++
+						}
+
+						if detection.Class == "BUTTOCKS_EXPOSED" && detection.Score > 0.5 {
+							conditionsMet += 2
+						}
+
+						if detection.Class == "ANUS_EXPOSED" && detection.Score > 0.5 {
+							conditionsMet += 2
+						}
+
+						if detection.Class == "BELLY_EXPOSED" && detection.Score > 0.5 {
+							conditionsMet++
+
+						}
+
+					}
+					if conditionsMet >= 2 {
+						rs.Changed = true
+					}
+
+				}
+
+			} else {
+				fmt.Println("Inference for Content type = " + contentType + " failed")
+				respBytes, _ := io.ReadAll(resp.Body)
+
+				fmt.Println("Inference Response = " + string(respBytes))
+			}
+			defer resp.Body.Close()
+			// }
+		}
+
+	})
+
 	ngp.RegisterHandler("contenttypeblocked", func(bytesReceived *[]byte, rs *gatesentryproxy.GSResponder, gpt *gatesentryproxy.GSProxyPassthru) {
 		contentType := string(*bytesReceived)
 		responder := &gresponder.GSFilterResponder{Blocked: false}
 		application.RunFilter("url/all_blocked_mimes", contentType, responder)
+		// dictionary of contentType to file extension
+
 		if responder.Blocked {
 			rs.Changed = true
 			message := "This content type has been blocked on this network."
