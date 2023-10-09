@@ -309,25 +309,32 @@ func RunGateSentry() {
 	ngp.RegisterHandler("mitm", func(bytesReceived *[]byte, rs *gatesentryproxy.GSResponder, gpt *gatesentryproxy.GSProxyPassthru) {
 		log.Println("Running MITM handler")
 		// log.Println("GPT = ", gpt)
-		host := string(*bytesReceived)
+
 		enable_filtering := R.GSSettings.Get("enable_https_filtering")
 		log.Println("MITM Handler - enable_https_filtering = " + enable_filtering)
-		if enable_filtering != "true" {
-			gpt.DontTouch = true
+		if enable_filtering == "true" {
 			rs.Changed = true
-			return
+		} else {
+			rs.Changed = false
 		}
+		gpt.DontTouch = true
+		// if enable_filtering != "true" {
+		// 	gpt.DontTouch = true
+		// 	rs.Changed = true
+		// 	return
+		// }
 		// else {
 		// 	rs.Changed = false
 		// 	gpt.DontTouch = true
 		// }
-		responder := &gresponder.GSFilterResponder{Blocked: false}
-		application.RunFilter("url/https_dontbump", host, responder)
-		if responder.Blocked {
-			gpt.DontTouch = true
-			rs.Changed = true
-			return
-		}
+		// host := string(*bytesReceived)
+		// responder := &gresponder.GSFilterResponder{Blocked: false}
+		// application.RunFilter("url/https_dontbump", host, responder)
+		// if responder.Blocked {
+		// 	gpt.DontTouch = true
+		// 	rs.Changed = true
+		// 	return
+		// }
 	})
 
 	ngp.RegisterHandler("except_urls", func(bytesReceived *[]byte, rs *gatesentryproxy.GSResponder, gpt *gatesentryproxy.GSProxyPassthru) {
@@ -464,7 +471,7 @@ func RunGateSentry() {
 		fmt.Println(url2)
 	})
 
-	ngp.RegisterHandler("contentscanner", func(bytesReceived *[]byte, rs *gatesentryproxy.GSResponder, gpt *gatesentryproxy.GSProxyPassthru) {
+	ngp.RegisterHandler("contentscannerMedia", func(bytesReceived *[]byte, rs *gatesentryproxy.GSResponder, gpt *gatesentryproxy.GSProxyPassthru) {
 		rs.Changed = false
 		log.Println("Running content scanner")
 
@@ -546,49 +553,63 @@ func RunGateSentry() {
 				}
 				if len(inferenceResponse.Detections) > 0 {
 					// rs.Changed = true
+					var reasonForBlock []string
 					var conditionsMet = 0
 
 					for _, detection := range inferenceResponse.Detections {
 
 						if detection.Class == "FEMALE_GENITALIA_EXPOSED" && detection.Score > 0.4 {
+							reasonForBlock = append(reasonForBlock, " - "+detection.Class+" ("+strconv.FormatFloat(detection.Score, 'f', 2, 64)+")")
 							conditionsMet += 2
 						}
 						if detection.Class == "FEMALE_BREAST_EXPOSED" && detection.Score > 0.4 {
+							reasonForBlock = append(reasonForBlock, " - "+detection.Class+" ("+strconv.FormatFloat(detection.Score, 'f', 2, 64)+")")
 							conditionsMet += 2
 						}
 						if detection.Class == "FEMALE_BREAST_COVERED" && detection.Score > 0.4 {
-							conditionsMet += 2
+							reasonForBlock = append(reasonForBlock, " - "+detection.Class+" ("+strconv.FormatFloat(detection.Score, 'f', 2, 64)+")")
+							conditionsMet += 1
 						}
 						if detection.Class == "BELLY_COVERED" && detection.Score > 0.5 {
+							reasonForBlock = append(reasonForBlock, " - "+detection.Class+" ("+strconv.FormatFloat(detection.Score, 'f', 2, 64)+")")
 							conditionsMet += 2
 						}
 						if detection.Class == "ARMPITS_EXPOSED" && detection.Score > 0.5 {
+							reasonForBlock = append(reasonForBlock, " - "+detection.Class+" ("+strconv.FormatFloat(detection.Score, 'f', 2, 64)+")")
 							conditionsMet++
 						}
 						if detection.Class == "MALE_GENITALIA_EXPOSED" && detection.Score > 0.5 {
+							reasonForBlock = append(reasonForBlock, " - "+detection.Class+" ("+strconv.FormatFloat(detection.Score, 'f', 2, 64)+")")
 							conditionsMet += 2
 						}
 						if detection.Class == "MALE_BREAST_EXPOSED" && detection.Score > 0.5 {
+							reasonForBlock = append(reasonForBlock, " - "+detection.Class+" ("+strconv.FormatFloat(detection.Score, 'f', 2, 64)+")")
 							conditionsMet++
 						}
 
 						if detection.Class == "BUTTOCKS_EXPOSED" && detection.Score > 0.5 {
+							reasonForBlock = append(reasonForBlock, " - "+detection.Class+" ("+strconv.FormatFloat(detection.Score, 'f', 2, 64)+")")
 							conditionsMet += 2
 						}
 
 						if detection.Class == "ANUS_EXPOSED" && detection.Score > 0.5 {
+							reasonForBlock = append(reasonForBlock, " - "+detection.Class+" ("+strconv.FormatFloat(detection.Score, 'f', 2, 64)+")")
 							conditionsMet += 2
 						}
 
 						if detection.Class == "BELLY_EXPOSED" && detection.Score > 0.5 {
+							reasonForBlock = append(reasonForBlock, " - "+detection.Class+" ("+strconv.FormatFloat(detection.Score, 'f', 2, 64)+")")
 							conditionsMet++
-
 						}
 
 					}
 					if conditionsMet >= 2 {
 						rs.Changed = true
 					}
+					// convert reasonForBlock to bytes
+
+					jsonData, _ := json.Marshal(reasonForBlock)
+					rs.Data = jsonData
 
 				}
 

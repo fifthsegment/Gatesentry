@@ -34,7 +34,7 @@ func HandleAuthAndAssignUser(r *http.Request, passthru *GSProxyPassthru, h Proxy
 			// Verify Credentials here
 			authUser = user
 			temp := []byte(r.Header.Get("Proxy-Authorization"))
-			isauth := IProxy.RunHandler("isauthuser", "", &temp, passthru)
+			isauth, _ := IProxy.RunHandler("isauthuser", "", &temp, passthru)
 			if !isauth {
 				user = ""
 			}

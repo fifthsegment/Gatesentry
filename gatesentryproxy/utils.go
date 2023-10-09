@@ -38,3 +38,36 @@ func isAVIF(data []byte) bool {
 		string(data[4:8]) == "ftyp" &&
 		string(data[8:12]) == "avif"
 }
+
+func isVideo(contentType string) bool {
+	return (contentType == "video/webm" ||
+		contentType == "video/mp4" ||
+		contentType == "video/x-ms-wmv" ||
+		contentType == "audio/mpeg" ||
+		contentType == "video/x-msvideo" ||
+		contentType == "video/jpeg")
+}
+
+func isImage(contentType string) bool {
+	return (contentType == "image/png" ||
+		contentType == "image/avif" ||
+		contentType == "image/gif" ||
+		contentType == "image/jpeg" ||
+		contentType == "image/jpg" ||
+		contentType == "image/webp" ||
+		contentType == "image/svg+xml" ||
+		contentType == "image/x-icon")
+
+	// 	cContentType == "image/x-icon" ||
+	// 	cContentType == "text/css" ||
+	// 	cContentType == "font/woff2" ||
+	// 	cContentType == "application/x-font-woff" ||
+	// 	cContentType == "application/zip" ||
+	// 	cContentType == "application/x-msdownload" ||
+	// 	cContentType == "application/octet-stream" ||
+	// 	cContentType == "application/x-javascript" ||
+	// 	cContentType == "application/javascript" {
+	// 	log.Println("Not filtering, sending directly to client")
+
+	// }
+}

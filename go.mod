@@ -15,6 +15,7 @@ require (
 	github.com/StackExchange/wmi v0.0.0-20190523213315-cbe66965904d // indirect
 	github.com/chai2010/webp v1.1.1 // indirect
 	github.com/go-ole/go-ole v1.2.4 // indirect
+	github.com/golang/freetype v0.0.0-20170609003504-e2365dfdc4a0 // indirect
 	github.com/google/go-cmp v0.5.6 // indirect
 	github.com/gopherjs/gopherjs v1.17.2 // indirect
 	github.com/h2non/filetype v1.1.3 // indirect

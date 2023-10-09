@@ -4,9 +4,8 @@ import (
 	"bytes"
 	"image"
 	"image/color"
-	"image/gif"
+	"image/draw"
 	"image/jpeg"
-	"image/png"
 	"log"
 	"os"
 
@@ -42,60 +41,116 @@ func CreateBlockedImageBytes() {
 	blocked_image = buf.Bytes()
 }
 
-func createEmptyImage(width, height int, format string) ([]byte, error) {
-	return blocked_image, nil
-	// Create a new RGBA image with the specified width and height
-	img := image.NewRGBA(image.Rect(0, 0, width, height))
+func createImageWithText(texts []string) ([]byte, error) {
+	// Create a new RGBA image with the desired size (512x512)
+	img := image.NewRGBA(image.Rect(0, 0, 512, 512))
 
-	// Fill the top half with red and the bottom half with blue
-	for y := 0; y < height; y++ {
-		for x := 0; x < width; x++ {
-			if y < height/2 {
-				img.Set(x, y, color.RGBA{255, 0, 0, 255}) // Red
-			} else {
-				img.Set(x, y, color.RGBA{0, 0, 255, 255}) // Blue
-			}
+	// Set a background color (e.g., white)
+	bgColor := color.White
+	draw.Draw(img, img.Bounds(), &image.Uniform{C: bgColor}, image.Point{}, draw.Src)
+
+	// Text color (e.g., black)
+	textColor := color.Black
+
+	// Calculate the width and height of the text to be added
+	// labelWidth := font.MeasureString(basicfont.Face7x13, text).Round()
+	// labelHeight := basicfont.Face7x13.Metrics().Height.Round()
+
+	// Calculate the starting point to draw the text at the center
+	// pointX := (img.Bounds().Dx() - labelWidth) / 2
+	// pointY := (img.Bounds().Dy() - labelHeight) / 2
+
+	for i, text := range texts {
+		var nextLine = 1400 * i
+		point := fixed.Point26_6{X: 100, Y: fixed.Int26_6(nextLine)}
+
+		var fontFace = basicfont.Face7x13
+		fontFace.Height = 80
+		fontFace.Left = 20
+		drawer := &font.Drawer{
+			Dst:  img,
+			Src:  image.NewUniform(textColor),
+			Face: fontFace,
+			Dot:  point,
 		}
+		drawer.DrawString(text)
 	}
 
-	// Add the text "blocked" to the image
-	addLabel(img, "blocked")
-
-	// Use a bytes.Buffer to capture the encoded image data
+	// Encode the image as JPEG and return it as bytes
 	var buf bytes.Buffer
-
-	// Encode the image to the desired format
-	switch format {
-	case "jpeg":
-		err := jpeg.Encode(&buf, img, nil)
-		return buf.Bytes(), err
-	case "png":
-		err := png.Encode(&buf, img)
-		return buf.Bytes(), err
-	case "gif":
-		err := gif.Encode(&buf, img, &gif.Options{
-			NumColors: 256,
-			Quantizer: nil,
-			Drawer:    nil,
-		})
-		return buf.Bytes(), err
-	default:
-		return nil, nil
+	if err := jpeg.Encode(&buf, img, nil); err != nil {
+		return nil, err
 	}
+
+	return buf.Bytes(), nil
+}
+
+func createTextOverlayOnImage(imageBytes []byte, texts []string) ([]byte, error) {
+	// conver imageBytes to image
+	img, _, err := image.Decode(bytes.NewReader(imageBytes))
+	if err != nil {
+		log.Println("[IMAGE] Error decoding image file:", err)
+		return nil, err
+	}
+
+	// Set a background color (e.g., white)
+	// bgColor := color.White
+
+	// Text color (e.g., black)
+	textColor := color.Black
+
+	for i, text := range texts {
+		var nextLine = 1400 * i
+		point := fixed.Point26_6{X: 100, Y: fixed.Int26_6(nextLine)}
+
+		var fontFace = basicfont.Face7x13
+		fontFace.Height = 80
+		fontFace.Left = 20
+		drawer := &font.Drawer{
+			Dst:  img.(*image.RGBA),
+			Src:  image.NewUniform(textColor),
+			Face: fontFace,
+			Dot:  point,
+		}
+		drawer.DrawString(text)
+	}
+
+	// Encode the image as JPEG and return it as bytes
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, img, nil); err != nil {
+		return nil, err
+	}
+
+	return buf.Bytes(), nil
+
+	// Encode the image as JPEG and return it as bytes
+	// var buf bytes.Buffer
+	// if err := jpeg.Encode(&buf, img, nil); err != nil {
+	// 	return nil, err
+	// }
+
+	// return buf.Bytes(), nil
+
+}
+
+func createEmptyImage(width, height int, format string, texts []string) ([]byte, error) {
+	var img1, _ = createImageWithText(texts)
+	return img1, nil
 }
 
 func addLabel(img *image.RGBA, label string) {
+	X := 100
+	Y := 100
 	col := color.RGBA{255, 255, 255, 255} // White color
 
-	// Calculate the width and height of the text to be added
-	labelWidth := font.MeasureString(basicfont.Face7x13, label).Round()
-	labelHeight := basicfont.Face7x13.Metrics().Height.Round()
+	// Calculate the width of the text to be added
+	// labelWidth := font.MeasureString(basicfont.Face7x13, label).Round()
 
 	// Calculate the starting point to draw the string such that it's centered
-	pointX := (img.Bounds().Dx() - labelWidth) / 2
-	pointY := (img.Bounds().Dy() + labelHeight) / 2
+	pointX := X
+	pointY := Y
 
-	point := fixed.Point26_6{fixed.Int26_6(pointX), fixed.Int26_6(pointY)}
+	point := fixed.Point26_6{fixed.Int26_6(pointX + X), fixed.Int26_6(pointY + Y)}
 
 	drawer := &font.Drawer{
 		Dst:  img,
