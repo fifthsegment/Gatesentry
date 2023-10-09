@@ -473,153 +473,140 @@ func RunGateSentry() {
 
 	ngp.RegisterHandler("contentscannerMedia", func(bytesReceived *[]byte, rs *gatesentryproxy.GSResponder, gpt *gatesentryproxy.GSProxyPassthru) {
 		rs.Changed = false
-		log.Println("Running content scanner")
-
-		// convert bytes to json struct of type ContentScannerInput
-		var contentScannerInput ContentScannerInput
-		err := json.Unmarshal(*bytesReceived, &contentScannerInput)
-		if err != nil {
-			log.Println("Error unmarshalling content scanner input")
-		}
-		log.Println("Running content scanner for content type = " + contentScannerInput.ContentType)
-
-		if len(contentScannerInput.Content) < 6000 {
-			// continue
-		} else if (contentScannerInput.ContentType == "image/jpeg") || (contentScannerInput.ContentType == "image/jpg") || (contentScannerInput.ContentType == "image/png") || (contentScannerInput.ContentType == "image/gif") || (contentScannerInput.ContentType == "image/webp") || (contentScannerInput.ContentType == "image/avif") {
-			contentType := contentScannerInput.ContentType
-			log.Println("Running content scanner for image")
-
-			// if contentType == "image/jpg" || contentType == "image/jpeg" || contentType == "image/png" || contentType == "image/gif" || contentType == "image/webp" {
-			var b bytes.Buffer
-			wr := multipart.NewWriter(&b)
-			// part, _ := wr.CreateFormFile("image", "uploaded_image"+contentTypeToExt[contentType])
-
-			if contentType == "image/webp" {
-				// convert webp to jpeg
-				jpegBytes, err := ConvertWebPToJPEG(contentScannerInput.Content)
-				if err != nil {
-					fmt.Println("Error converting webp to jpeg")
-				}
-				contentScannerInput.Content = jpegBytes
-				contentType = "image/jpeg"
+		if R.GSSettings.Get("enable_ai_image_filtering") == "true" && R.GSSettings.Get("ai_scanner_url") != "" {
+			// convert bytes to json struct of type ContentScannerInput
+			var contentScannerInput ContentScannerInput
+			err := json.Unmarshal(*bytesReceived, &contentScannerInput)
+			if err != nil {
+				log.Println("Error unmarshalling content scanner input")
 			}
+			log.Println("Running content scanner for content type = " + contentScannerInput.ContentType)
 
-			// Create a new form header for the file
-			// h := make(textproto.MIMEHeader)
-			h := make(textproto.MIMEHeader)
-			// ext := contentTypeToExt[contentType]
-			h.Set("Content-Disposition", fmt.Sprintf(`form-data; name="image"; filename="%s"`, "uploaded_image"))
-			// h.Set("Content-Type", contentType)
+			if len(contentScannerInput.Content) < 6000 {
+				// continue
+			} else if (contentScannerInput.ContentType == "image/jpeg") || (contentScannerInput.ContentType == "image/jpg") || (contentScannerInput.ContentType == "image/png") || (contentScannerInput.ContentType == "image/gif") || (contentScannerInput.ContentType == "image/webp") || (contentScannerInput.ContentType == "image/avif") {
+				contentType := contentScannerInput.ContentType
+				log.Println("Running content scanner for image")
 
-			// Create the form file with the custom header
-			part, _ := wr.CreatePart(h)
+				// if contentType == "image/jpg" || contentType == "image/jpeg" || contentType == "image/png" || contentType == "image/gif" || contentType == "image/webp" {
+				var b bytes.Buffer
+				wr := multipart.NewWriter(&b)
+				// part, _ := wr.CreateFormFile("image", "uploaded_image"+contentTypeToExt[contentType])
 
-			part.Write(*&contentScannerInput.Content)
-
-			// save the file to disk
-			// add randomness to file name and save it under folder called thumbs
-			// generate random string
-			b.Bytes()
-			// saveToDisk(b.Bytes(), contentTypeToExt[contentType])
-			wr.Close()
-
-			// Log the request headers and body
-			// fmt.Println("Request Headers:")
-			// fmt.Println("Content-Type:", wr.FormDataContentType())
-			// fmt.Println("\nRequest Body:")
-			// fmt.Println(b.String())
-
-			resp, _ := http.Post("http://10.1.0.115:8000/infer/onnx", wr.FormDataContentType(), &b)
-			if resp.StatusCode == http.StatusOK {
-				bytesLength := len(*bytesReceived)
-				// convert bytes length to string
-				//
-				bytesLengthString := strconv.Itoa(bytesLength)
-				fmt.Println("Inference for " + contentScannerInput.Url + " Content type = " + contentType + "Length = " + bytesLengthString)
-				respBytes, _ := io.ReadAll(resp.Body)
-				responseString := string(respBytes)
-				var inferenceResponse InferenceResponse
-				err := json.Unmarshal([]byte(respBytes), &inferenceResponse)
-				if err != nil {
-					fmt.Println("Error:", err)
-					return
-				}
-				fmt.Println("Inference Response = " + responseString)
-				if inferenceResponse.Category == "sexy" && inferenceResponse.Confidence > 85 {
-					rs.Changed = true
-				}
-				if inferenceResponse.Category == "porn" && inferenceResponse.Confidence > 85 {
-					rs.Changed = true
-				}
-				if len(inferenceResponse.Detections) > 0 {
-					// rs.Changed = true
-					var reasonForBlock []string
-					var conditionsMet = 0
-
-					for _, detection := range inferenceResponse.Detections {
-
-						if detection.Class == "FEMALE_GENITALIA_EXPOSED" && detection.Score > 0.4 {
-							reasonForBlock = append(reasonForBlock, " - "+detection.Class+" ("+strconv.FormatFloat(detection.Score, 'f', 2, 64)+")")
-							conditionsMet += 2
-						}
-						if detection.Class == "FEMALE_BREAST_EXPOSED" && detection.Score > 0.4 {
-							reasonForBlock = append(reasonForBlock, " - "+detection.Class+" ("+strconv.FormatFloat(detection.Score, 'f', 2, 64)+")")
-							conditionsMet += 2
-						}
-						if detection.Class == "FEMALE_BREAST_COVERED" && detection.Score > 0.4 {
-							reasonForBlock = append(reasonForBlock, " - "+detection.Class+" ("+strconv.FormatFloat(detection.Score, 'f', 2, 64)+")")
-							conditionsMet += 1
-						}
-						if detection.Class == "BELLY_COVERED" && detection.Score > 0.5 {
-							reasonForBlock = append(reasonForBlock, " - "+detection.Class+" ("+strconv.FormatFloat(detection.Score, 'f', 2, 64)+")")
-							conditionsMet += 2
-						}
-						if detection.Class == "ARMPITS_EXPOSED" && detection.Score > 0.5 {
-							reasonForBlock = append(reasonForBlock, " - "+detection.Class+" ("+strconv.FormatFloat(detection.Score, 'f', 2, 64)+")")
-							conditionsMet++
-						}
-						if detection.Class == "MALE_GENITALIA_EXPOSED" && detection.Score > 0.5 {
-							reasonForBlock = append(reasonForBlock, " - "+detection.Class+" ("+strconv.FormatFloat(detection.Score, 'f', 2, 64)+")")
-							conditionsMet += 2
-						}
-						if detection.Class == "MALE_BREAST_EXPOSED" && detection.Score > 0.5 {
-							reasonForBlock = append(reasonForBlock, " - "+detection.Class+" ("+strconv.FormatFloat(detection.Score, 'f', 2, 64)+")")
-							conditionsMet++
-						}
-
-						if detection.Class == "BUTTOCKS_EXPOSED" && detection.Score > 0.5 {
-							reasonForBlock = append(reasonForBlock, " - "+detection.Class+" ("+strconv.FormatFloat(detection.Score, 'f', 2, 64)+")")
-							conditionsMet += 2
-						}
-
-						if detection.Class == "ANUS_EXPOSED" && detection.Score > 0.5 {
-							reasonForBlock = append(reasonForBlock, " - "+detection.Class+" ("+strconv.FormatFloat(detection.Score, 'f', 2, 64)+")")
-							conditionsMet += 2
-						}
-
-						if detection.Class == "BELLY_EXPOSED" && detection.Score > 0.5 {
-							reasonForBlock = append(reasonForBlock, " - "+detection.Class+" ("+strconv.FormatFloat(detection.Score, 'f', 2, 64)+")")
-							conditionsMet++
-						}
-
+				if contentType == "image/webp" {
+					// convert webp to jpeg
+					jpegBytes, err := ConvertWebPToJPEG(contentScannerInput.Content)
+					if err != nil {
+						fmt.Println("Error converting webp to jpeg")
 					}
-					if conditionsMet >= 2 {
+					contentScannerInput.Content = jpegBytes
+					contentType = "image/jpeg"
+				}
+
+				// Create a new form header for the file
+
+				h := make(textproto.MIMEHeader)
+				// ext := contentTypeToExt[contentType]
+				h.Set("Content-Disposition", fmt.Sprintf(`form-data; name="image"; filename="%s"`, "uploaded_image"))
+				part, _ := wr.CreatePart(h)
+
+				part.Write(*&contentScannerInput.Content)
+
+				b.Bytes()
+				wr.Close()
+
+				ai_service_url := R.GSSettings.Get("ai_scanner_url")
+				resp, _ := http.Post(ai_service_url, wr.FormDataContentType(), &b)
+				if resp.StatusCode == http.StatusOK {
+					bytesLength := len(*bytesReceived)
+					// convert bytes length to string
+					//
+					bytesLengthString := strconv.Itoa(bytesLength)
+					log.Println("Inference for " + contentScannerInput.Url + " Content type = " + contentType + "Length = " + bytesLengthString)
+					respBytes, _ := io.ReadAll(resp.Body)
+					responseString := string(respBytes)
+					var inferenceResponse InferenceResponse
+					err := json.Unmarshal([]byte(respBytes), &inferenceResponse)
+					if err != nil {
+						fmt.Println("Error:", err)
+						return
+					}
+					log.Println("Inference Response = " + responseString)
+					if inferenceResponse.Category == "sexy" && inferenceResponse.Confidence > 85 {
 						rs.Changed = true
 					}
-					// convert reasonForBlock to bytes
+					if inferenceResponse.Category == "porn" && inferenceResponse.Confidence > 85 {
+						rs.Changed = true
+					}
+					if len(inferenceResponse.Detections) > 0 {
+						var reasonForBlock []string
+						var conditionsMet = 0
 
-					jsonData, _ := json.Marshal(reasonForBlock)
-					rs.Data = jsonData
+						for _, detection := range inferenceResponse.Detections {
 
+							if detection.Class == "FEMALE_GENITALIA_EXPOSED" && detection.Score > 0.4 {
+								reasonForBlock = append(reasonForBlock, " - "+detection.Class+" ("+strconv.FormatFloat(detection.Score, 'f', 2, 64)+")")
+								conditionsMet += 2
+							}
+							if detection.Class == "FEMALE_BREAST_EXPOSED" && detection.Score > 0.4 {
+								reasonForBlock = append(reasonForBlock, " - "+detection.Class+" ("+strconv.FormatFloat(detection.Score, 'f', 2, 64)+")")
+								conditionsMet += 2
+							}
+							if detection.Class == "FEMALE_BREAST_COVERED" && detection.Score > 0.4 {
+								reasonForBlock = append(reasonForBlock, " - "+detection.Class+" ("+strconv.FormatFloat(detection.Score, 'f', 2, 64)+")")
+								conditionsMet += 1
+							}
+							if detection.Class == "BELLY_COVERED" && detection.Score > 0.5 {
+								reasonForBlock = append(reasonForBlock, " - "+detection.Class+" ("+strconv.FormatFloat(detection.Score, 'f', 2, 64)+")")
+								conditionsMet += 2
+							}
+							if detection.Class == "ARMPITS_EXPOSED" && detection.Score > 0.5 {
+								reasonForBlock = append(reasonForBlock, " - "+detection.Class+" ("+strconv.FormatFloat(detection.Score, 'f', 2, 64)+")")
+								conditionsMet++
+							}
+							if detection.Class == "MALE_GENITALIA_EXPOSED" && detection.Score > 0.5 {
+								reasonForBlock = append(reasonForBlock, " - "+detection.Class+" ("+strconv.FormatFloat(detection.Score, 'f', 2, 64)+")")
+								conditionsMet += 2
+							}
+							if detection.Class == "MALE_BREAST_EXPOSED" && detection.Score > 0.5 {
+								reasonForBlock = append(reasonForBlock, " - "+detection.Class+" ("+strconv.FormatFloat(detection.Score, 'f', 2, 64)+")")
+								conditionsMet++
+							}
+
+							if detection.Class == "BUTTOCKS_EXPOSED" && detection.Score > 0.5 {
+								reasonForBlock = append(reasonForBlock, " - "+detection.Class+" ("+strconv.FormatFloat(detection.Score, 'f', 2, 64)+")")
+								conditionsMet += 2
+							}
+
+							if detection.Class == "ANUS_EXPOSED" && detection.Score > 0.5 {
+								reasonForBlock = append(reasonForBlock, " - "+detection.Class+" ("+strconv.FormatFloat(detection.Score, 'f', 2, 64)+")")
+								conditionsMet += 2
+							}
+
+							if detection.Class == "BELLY_EXPOSED" && detection.Score > 0.5 {
+								reasonForBlock = append(reasonForBlock, " - "+detection.Class+" ("+strconv.FormatFloat(detection.Score, 'f', 2, 64)+")")
+								conditionsMet++
+							}
+
+						}
+						if conditionsMet >= 2 {
+							rs.Changed = true
+						}
+
+						jsonData, _ := json.Marshal(reasonForBlock)
+						rs.Data = jsonData
+
+					}
+
+				} else {
+					fmt.Println("Inference for Content type = " + contentType + " failed")
+					respBytes, _ := io.ReadAll(resp.Body)
+
+					fmt.Println("Inference Response = " + string(respBytes))
 				}
+				defer resp.Body.Close()
 
-			} else {
-				fmt.Println("Inference for Content type = " + contentType + " failed")
-				respBytes, _ := io.ReadAll(resp.Body)
-
-				fmt.Println("Inference Response = " + string(respBytes))
 			}
-			defer resp.Body.Close()
 			// }
 		}
 
