@@ -26,7 +26,7 @@ func GSApiSettingsGET(ctx iris.Context, settings *gatesentryWebserverTypes.Setti
 		}
 		ctx.JSON(struct{ Value string }{Value: value})
 		break
-	case "blocktimes", "strictness", "timezone", "idemail", "enable_https_filtering", "capem", "keypem", "enable_dns_server", "dns_custom_entries":
+	case "blocktimes", "strictness", "timezone", "idemail", "enable_https_filtering", "capem", "keypem", "enable_dns_server", "dns_custom_entries", "ai_scanner_url", "enable_ai_image_filtering":
 		value := settings.Get(requestedId)
 		ctx.JSON(struct {
 			Key   string
@@ -89,15 +89,11 @@ func GSApiSettingsPOST(ctx iris.Context, settings *gatesentryWebserverTypes.Sett
 		}
 	}
 
-	if requestedId == "enable_https_filtering" {
-		settings.Set(requestedId, temp.Value)
-	}
-
-	if requestedId == "enable_dns_server" {
-		settings.Set(requestedId, temp.Value)
-	}
-
-	if requestedId == "dns_custom_entries" {
+	if requestedId == "dns_custom_entries" ||
+		requestedId == "enable_dns_server" ||
+		requestedId == "enable_https_filtering" ||
+		requestedId == "enable_ai_image_filtering" ||
+		requestedId == "ai_scanner_url" {
 		settings.Set(requestedId, temp.Value)
 	}
 

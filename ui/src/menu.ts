@@ -7,6 +7,7 @@ import {
   ServerDns,
   Settings,
   SwitchLayer_2,
+  Network_4,
 } from "carbon-icons-svelte";
 
 let menuItems = [
@@ -82,6 +83,12 @@ let menuItems = [
     text: "Stats",
     href: "/stats",
     icon: GraphicalDataFlow,
+  },
+  {
+    type: "link",
+    text: "AI",
+    href: "/ai",
+    icon: Network_4,
   }
 ];
 

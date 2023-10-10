@@ -22,6 +22,7 @@
   import Home from "./routes/home/home.svelte";
   import Dns from "./routes/dns/dns.svelte";
   import Stats from "./routes/stats/stats.svelte";
+  import AI from "./routes/ai/ai.svelte";
 
   import { register, init, _ } from "svelte-i18n";
   export let url = "";
@@ -122,6 +123,9 @@
         </Route>
         <Route path="/stats">
           <Stats />
+        </Route>
+        <Route path="/ai">
+          <AI />
         </Route>
         <Route path="/" component={Home} />
       </div>

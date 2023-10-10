@@ -13,11 +13,15 @@ require (
 
 require (
 	github.com/StackExchange/wmi v0.0.0-20190523213315-cbe66965904d // indirect
+	github.com/chai2010/webp v1.1.1 // indirect
 	github.com/go-ole/go-ole v1.2.4 // indirect
+	github.com/golang/freetype v0.0.0-20170609003504-e2365dfdc4a0 // indirect
 	github.com/google/go-cmp v0.5.6 // indirect
 	github.com/gopherjs/gopherjs v1.17.2 // indirect
+	github.com/h2non/filetype v1.1.3 // indirect
 	github.com/jpillora/s3 v1.1.4 // indirect
 	github.com/jtolds/gls v4.20.0+incompatible // indirect
+	golang.org/x/image v0.13.0 // indirect
 	golang.org/x/xerrors v0.0.0-20200804184101-5ec99f83aff1 // indirect
 )
 
@@ -80,8 +84,8 @@ require (
 	github.com/yosssi/ace v0.0.5 // indirect
 	golang.org/x/crypto v0.1.0 // indirect
 	golang.org/x/net v0.1.0 // indirect
-	golang.org/x/sys v0.1.0 // indirect
-	golang.org/x/text v0.4.0 // indirect
+	golang.org/x/sys v0.5.0 // indirect
+	golang.org/x/text v0.13.0 // indirect
 	golang.org/x/time v0.0.0-20210723032227-1f47c861a9ac // indirect
 	google.golang.org/protobuf v1.27.1 // indirect
 	gopkg.in/ini.v1 v1.63.0 // indirect
