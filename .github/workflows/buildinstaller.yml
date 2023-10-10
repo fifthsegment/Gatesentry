@@ -43,7 +43,7 @@ jobs:
       #       echo "tag=$TAG" >> $GITHUB_OUTPUT
       - name: Setup Inno Setup
         run: |
-          docker run --rm -i -v $PWD:/work amake/innosetup scripts/installer.iss
+          docker run --rm -i -v $PWD:/work:Z amake/innosetup scripts/installer.iss
 
       #   - name: Create Windows Installer
       #     run: |
