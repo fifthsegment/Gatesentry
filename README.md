@@ -56,15 +56,11 @@ Gatesentry Installation and Configuration Guide
 
     **For Windows**
 
-    Simply run the binary on your system.
+    The installer (GatesentrySetup.exe) contains instructions.
 
     **Running as a Service**
 
-    If you want Gatesentry to keep running in the background on your machine, install it as :
-
-    `./gatesentry-{platform} -service install`
-
-    Then you can use the `services.msc` in Windows to start or stop Gatesentry (Look for a service named `GateSentry` in the services.msc UI)
+    The installer (GatesentrySetup.exe) should automatically install a service. You can look for it by searching for gatesentry in your Service manager (open it by running `services.msc`)
 
 3.  Launching the Server:
 
