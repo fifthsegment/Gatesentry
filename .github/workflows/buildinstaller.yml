@@ -1,4 +1,4 @@
-name: Go Build and Upload
+name: Build installer
 
 on:
   push:
@@ -32,28 +32,32 @@ jobs:
           rm -rf application/webserver/frontend/files/*
           mv ui/dist/* application/webserver/frontend/files
           mv application/webserver/frontend/files/fs/* application/webserver/frontend/files
-          env GOOS=linux GOARCH=amd64 go build -o gatesentry-linux
-          env GOOS=darwin GOARCH=amd64 go build -o gatesentry-macos
           env GOOS=windows GOARCH=amd64 go build -o gatesentry-windows.exe
-          env GOOS=linux GOARCH=arm64 go build -o gatesentry-linux-arm64
-          chmod +x gatesentry-linux
-          chmod +x gatesentry-macos
+          chmod +x gatesentry-windows.exe
           git config user.name "GitHub Action"
           git config user.email "fifthsegment@github.com"
           TAG=v$(date -Iseconds | sed 's/[T:\+]/-/g')
           echo "$TAG"
           echo "tag=$TAG" >> $GITHUB_OUTPUT
-      - name: Create Tag
-        uses: cardinalby/git-tag-action@master
-        env:
-          TAG: ${{ steps.build.outputs.tag }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Create Release
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: ${{ steps.build.outputs.tag }}
-          files: |
-            gatesentry-linux
-            gatesentry-macos
-            gatesentry-windows.exe
-            gatesentry-linux-arm64
+      - name: Setup Inno Setup
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y innoextract wine inno-setup
+      - name: Create Windows Installer
+        run: |
+          wine "C:\\Program Files (x86)\\Inno Setup 6\\ISCC.exe" scripts/installer.iss
+      - name: Check installer
+        run: |
+          ls -lh
+    #   - name: Create Tag
+    #     uses: cardinalby/git-tag-action@master
+    #     env:
+    #       TAG: ${{ steps.build.outputs.tag }}
+    #       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    #   - name: Create Release
+    #     uses: softprops/action-gh-release@v1
+    #     with:
+    #       tag_name: ${{ steps.build.outputs.tag }}
+    #       files: |
+    #         gatesentry-windows.exe
+    #         GatesentrySetup.exe  # assuming the installer file is named "GatesentrySetup.exe"
