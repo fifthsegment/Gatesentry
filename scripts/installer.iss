@@ -25,3 +25,21 @@ Name: desktopicon; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm
 Filename: "{app}\gatesentry-windows.exe"; Parameters: "-service install"; Description: "Install Gatesentry Service"; Flags: nowait postinstall skipifsilent runascurrentuser
 Filename: "{app}\gatesentry-windows.exe"; Description: "Launch Gatesentry"; Flags: nowait postinstall skipifsilent
 Filename: "{cmd}"; Parameters: "/C sc start GateSentry"; Description: "Start Gatesentry Service"; Flags: postinstall skipifsilent
+
+[Code]
+var
+  LastStep: TSetupStep;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  LastStep := CurStep;
+end;
+
+procedure DeinitializeSetup();
+begin
+  { Check if setup has reached the post-install step }
+  if LastStep = ssPostInstall then
+  begin
+    MsgBox('The installation was successfully completed. To manage Gatesentry, visit http://localhost:10786 in any web browser.', mbInformation, MB_OK);
+  end
+end;
