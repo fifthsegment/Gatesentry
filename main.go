@@ -181,8 +181,8 @@ func prog(state overseer.State) {
 func RunGateSentryServiceRunner(svcFlag string) {
 
 	svcConfig := &service.Config{
-		Name:        "GateSentry",
-		DisplayName: "A web filtering proxy",
+		Name:        "gatesentry",
+		DisplayName: "gatesentry",
 		Description: "A web filtering proxy",
 	}
 
