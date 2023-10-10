@@ -50,7 +50,7 @@ jobs:
       #       wine "C:\\Program Files (x86)\\Inno Setup 6\\ISCC.exe" scripts/installer.iss
       - name: Check installer
         run: |
-          ls -lh
+          ls -lh scripts
     #   - name: Create Tag
     #     uses: cardinalby/git-tag-action@master
     #     env:
