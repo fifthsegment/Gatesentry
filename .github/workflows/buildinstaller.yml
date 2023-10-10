@@ -43,14 +43,20 @@ jobs:
       #       echo "tag=$TAG" >> $GITHUB_OUTPUT
       - name: Setup Inno Setup
         run: |
-          docker run --rm -i -v $PWD:/work:Z amake/innosetup scripts/installer.iss
+          docker container create --name setup amake/innosetup installer.iss
+          docker cp ./scripts/installer.iss setup:/work/
+          docker cp ./gatesentry-windows.exe setup:/work/
+          docker start -i -a setup
+          docker cp setup:/work/Output/. .
+          docker rm setup
+        #   docker run --rm -i -v $PWD:/work:Z amake/innosetup scripts/installer.iss
 
       #   - name: Create Windows Installer
       #     run: |
       #       wine "C:\\Program Files (x86)\\Inno Setup 6\\ISCC.exe" scripts/installer.iss
       - name: Check installer
         run: |
-          ls -lh GatesentrySetup.exe
+          ls -lh
     #   - name: Create Tag
     #     uses: cardinalby/git-tag-action@master
     #     env:

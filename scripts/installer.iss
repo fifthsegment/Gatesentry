@@ -4,12 +4,13 @@ AppVersion=1.0
 DefaultDirName={pf}\Gatesentry
 DefaultGroupName=Gatesentry
 UninstallDisplayIcon={app}\gatesentry-windows.exe
+OutputDir=userdocs:gatesentry
 OutputBaseFilename=GatesentrySetup
 Compression=lzma
 SolidCompression=yes
 
 [Files]
-Source: "Z:\work\gatesentry-windows.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "gatesentry-windows.exe"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\Gatesentry"; Filename: "{app}\gatesentry-windows.exe"
