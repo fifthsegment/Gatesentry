@@ -45,11 +45,12 @@ jobs:
           echo "tag=$TAG" >> $GITHUB_OUTPUT
       - name: Setup Inno Setup
         run: |
-          sudo apt-get update -y
-          sudo apt-get install -y innoextract wine inno-setup
-      - name: Create Windows Installer
-        run: |
-          wine "C:\\Program Files (x86)\\Inno Setup 6\\ISCC.exe" installer.iss
+          docker container create --name setup amake/innosetup installer.iss
+          docker cp ./scripts/installer.iss setup:/work/
+          docker cp ./gatesentry-windows.exe setup:/work/
+          docker start -i -a setup
+          docker cp setup:/work/Output/. .
+          docker rm setup
       - name: Create Tag
         uses: cardinalby/git-tag-action@master
         env:
