@@ -10,7 +10,7 @@ Compression=lzma
 SolidCompression=yes
 
 [Files]
-Source: "gatesentry-windows.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "Z:\work\gatesentry-windows.exe"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\Gatesentry"; Filename: "{app}\gatesentry-windows.exe"
