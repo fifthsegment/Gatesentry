@@ -7,6 +7,7 @@ UninstallDisplayIcon={app}\gatesentry-windows.exe
 OutputBaseFilename=GatesentrySetup
 Compression=lzma
 SolidCompression=yes
+PrivilegesRequired=admin
 
 [Files]
 Source: "gatesentry-windows.exe"; DestDir: "{app}"; Flags: ignoreversion
@@ -21,6 +22,6 @@ Name: "{group}\Stop Gatesentry Service"; Filename: "{cmd}"; Parameters: "/C sc s
 Name: desktopicon; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
 
 [Run]
-Filename: "{app}\gatesentry-windows.exe"; Parameters: "-service install"; Description: "Install Gatesentry Service"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\gatesentry-windows.exe"; Parameters: "-service install"; Description: "Install Gatesentry Service"; Flags: nowait postinstall skipifsilent runascurrentuser
 Filename: "{app}\gatesentry-windows.exe"; Description: "Launch Gatesentry"; Flags: nowait postinstall skipifsilent
 Filename: "{cmd}"; Parameters: "/C sc start GateSentry"; Description: "Start Gatesentry Service"; Flags: postinstall skipifsilent
