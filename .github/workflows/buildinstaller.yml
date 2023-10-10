@@ -43,8 +43,15 @@ jobs:
           echo "tag=$TAG" >> $GITHUB_OUTPUT
       - name: Setup Inno Setup
         run: |
-          sudo apt-get update -y
-          sudo apt-get install -y innoextract wine inno-setup
+          sudo dpkg --add-architecture i386
+          wget -nc https://dl.winehq.org/wine-builds/winehq.key
+          sudo apt-key add winehq.key
+          sudo add-apt-repository 'deb https://dl.winehq.org/wine-builds/ubuntu/ focal main'
+          sudo apt-get update
+          sudo apt-get install --install-recommends winehq-stable
+          wget https://jrsoftware.org/download.php/is.exe -O is.exe
+          wine is.exe /SP- /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /DIR=C:\\InnoSetup
+
       - name: Create Windows Installer
         run: |
           wine "C:\\Program Files (x86)\\Inno Setup 6\\ISCC.exe" scripts/installer.iss
