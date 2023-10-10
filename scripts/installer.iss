@@ -27,11 +27,19 @@ Filename: "{app}\gatesentry-windows.exe"; Description: "Launch Gatesentry"; Flag
 Filename: "{cmd}"; Parameters: "/C sc start GateSentry"; Description: "Start Gatesentry Service"; Flags: postinstall skipifsilent
 
 [Code]
+var
+  LastStep: TSetupStep;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
-  if CurStep = ssDone then
+  LastStep := CurStep;
+end;
+
+procedure DeinitializeSetup();
+begin
+  { Check if setup has reached the post-install step }
+  if LastStep = ssPostInstall then
   begin
-    WizardForm.FinishedLabel.Caption := 'The installation was successfully completed. To manage Gatesentry, visit http://localhost:10786 in any web browser.';
-    WizardForm.FinishedHeadingLabel.Caption := 'Installation Complete';
-  end;
+    MsgBox('The installation was successfully completed. To manage Gatesentry, visit http://localhost:10786 in any web browser.', mbInformation, MB_OK);
+  end
 end;
