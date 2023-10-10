@@ -1,5 +1,11 @@
 <script lang="ts">
-  import { Column, DataTable, Grid, Row } from "carbon-components-svelte";
+  import {
+    Column,
+    DataTable,
+    Grid,
+    Loading,
+    Row,
+  } from "carbon-components-svelte";
   import "@carbon/charts/styles.css";
   import { AreaChart } from "@carbon/charts";
   import { onDestroy, onMount } from "svelte";
@@ -117,73 +123,82 @@
       <div id="statschart"></div>
     </Column>
   </Row>
-  <Row>
-    <Column>
-      <div>
-        <br />
-        <h4>{$_("Top 5 Blocked Requests")}</h4>
-        <br />
-        {#if responseData && responseData["blocked"]}
-          <DataTable
-            headers={[
-              { key: "host", value: "Host" },
-              { key: "count", value: "Times requested" },
-            ]}
-            rows={Object.entries(responseData["blocked"])
-              .flatMap(([key, item]) => {
-                return item.hosts.map((host) => {
-                  return {
-                    id: host.host,
-                    host: host.host,
-                    count: host.count,
-                  };
-                });
-              })
-              .slice(0, 5)}
-          />
-        {/if}
-        {#if responseData && !responseData["blocked"]}
-          <p>
-            <i>{$_("Nothing found. Please make some requests.")}</i>
-          </p>
-        {/if}
-      </div>
-    </Column>
-    <Column>
-      <div>
-        <br />
-        <h4>{$_("Top 5 Requests")}</h4>
-        <br />
-        {#if responseData && responseData["all"]}
-          <DataTable
-            headers={[
-              { key: "host", value: "Host" },
-              { key: "count", value: "Times requested" },
-            ]}
-            rows={Object.entries(responseData["all"])
-              .flatMap(([key, item]) => {
-                return item.hosts.map((host, index) => {
-                  return {
-                    id: host.host + "all" + index,
-                    host: host.host,
-                    count: host.count,
-                  };
-                });
-              })
-              .filter(
-                (item, index, self) =>
-                  index === self.findIndex((t) => t.id === item.id),
-              )
-              .sort((a, b) => b.count - a.count)
-              .slice(0, 5)}
-          />
-        {/if}
-        {#if responseData && !responseData["all"]}
-          <p>
-            <i>{$_("Nothing found. Please make some requests.")}</i>
-          </p>
-        {/if}
-      </div>
-    </Column>
-  </Row>
+  {#if chart}
+    <Row>
+      <Column>
+        <div>
+          <br />
+          <h4>{$_("Top 5 Blocked Requests")}</h4>
+          <br />
+          {#if responseData && responseData["blocked"]}
+            <DataTable
+              headers={[
+                { key: "host", value: "Host" },
+                { key: "count", value: "Times requested" },
+              ]}
+              rows={Object.entries(responseData["blocked"])
+                .flatMap(([key, item]) => {
+                  return item.hosts.map((host) => {
+                    return {
+                      id: host.host,
+                      host: host.host,
+                      count: host.count,
+                    };
+                  });
+                })
+                .slice(0, 5)}
+            />
+          {/if}
+          {#if responseData && !responseData["blocked"]}
+            <p>
+              <i>{$_("Nothing found. Please make some requests.")}</i>
+            </p>
+          {/if}
+        </div>
+      </Column>
+      <Column>
+        <div>
+          <br />
+          <h4>{$_("Top 5 Requests")}</h4>
+          <br />
+          {#if responseData && responseData["all"]}
+            <DataTable
+              headers={[
+                { key: "host", value: "Host" },
+                { key: "count", value: "Times requested" },
+              ]}
+              rows={Object.entries(responseData["all"])
+                .flatMap(([key, item]) => {
+                  return item.hosts.map((host, index) => {
+                    return {
+                      id: host.host + "all" + index,
+                      host: host.host,
+                      count: host.count,
+                    };
+                  });
+                })
+                .filter(
+                  (item, index, self) =>
+                    index === self.findIndex((t) => t.id === item.id),
+                )
+                .sort((a, b) => b.count - a.count)
+                .slice(0, 5)}
+            />
+          {/if}
+          {#if responseData && !responseData["all"]}
+            <p>
+              <i>{$_("Nothing found. Please make some requests.")}</i>
+            </p>
+          {/if}
+        </div>
+      </Column>
+    </Row>
+  {/if}
+  {#if !chart}
+    <Row>
+      <Column>
+        <Loading />
+      </Column>
+    </Row>
+  {/if}
 </Grid>

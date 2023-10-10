@@ -36,6 +36,7 @@ var GSPROXYPORT = "10413"
 var GSBASEDIR = ""
 var Baseendpointv2 = "https://www.applicationilter.com/api/"
 var GATESENTRY_VERSION = "1.9"
+var GS_BOUND_ADDRESS = ":"
 
 var contentTypeToExt = map[string]string{
 	"image/png":  ".png",
@@ -252,6 +253,8 @@ func saveToDisk(data []byte, fileExt string) {
 func RunGateSentry() {
 
 	R := application.Start()
+	R.BoundAddress = &GS_BOUND_ADDRESS
+
 	application.StartBonjour()
 	gatesentryproxy.InitProxy()
 	ngp := gatesentryproxy.NewGSProxy()
@@ -272,6 +275,18 @@ func RunGateSentry() {
 		} else {
 			portavailable = true
 			err = ln.Close()
+			fmt.Println("Listening on address:", ln.Addr().String())
+			boundAddresses := []string{}
+			host, _ := os.Hostname()
+			addrs, _ := net.LookupIP(host)
+			for _, addr := range addrs {
+				if ipv4 := addr.To4(); ipv4 != nil {
+					// GS_BOUND_ADDRESS += ipv4.String() + ","
+					boundAddresses = append(boundAddresses, ipv4.String()+":"+GSPROXYPORT)
+				}
+			}
+			GS_BOUND_ADDRESS = strings.Join(boundAddresses, ",")
+
 		}
 
 		if portavailable {
@@ -279,6 +294,7 @@ func RunGateSentry() {
 		}
 		<-ttt.C
 	}
+
 	// if portavailable {}
 
 	capembytes := []byte(R.GSSettings.Get("capem"))
