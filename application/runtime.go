@@ -81,6 +81,7 @@ type GSRuntime struct {
 	GSKeepSentryAliveRunning    bool
 	GSConsumptionUpdaterRunning bool
 	DNSServerChannel            chan int
+	BoundAddress                *string
 }
 
 func SetBaseDir(a string) {

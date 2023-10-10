@@ -21,6 +21,7 @@ func RegisterEndpoints(
 	filters *[]gatesentryFilters.GSFilter,
 	logger *gatesentryLogger.Log,
 	runtime *gatesentryWebserverTypes.TemporaryRuntime,
+	_boundAddress *string,
 ) {
 	settingsStore = settings
 	gatesentryWebserverEndpoints.Init(settings)
@@ -67,6 +68,10 @@ func RegisterEndpoints(
 
 	app.Get("/api/stats", jwtMiddleware.Serve, func(ctx iris.Context) {
 		gatesentryWebserverEndpoints.ApiGetStats(ctx, logger)
+	})
+
+	app.Get("/api/status", jwtMiddleware.Serve, func(ctx iris.Context) {
+		gatesentryWebserverEndpoints.ApiGetStatus(ctx, logger, _boundAddress)
 	})
 
 	app.Get("/api/stats/byUrl", jwtMiddleware.Serve, func(ctx iris.Context) {
