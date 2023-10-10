@@ -50,9 +50,9 @@ Gatesentry Installation and Configuration Guide
 
     Next, on linux you can use your system service runner to start or stop it, for example for ubuntu:
 
-    `service GateSentry start   #starts the service`
+    `service gatesentry start   #starts the service`
 
-    `service GateSentry stop    #stops the service`
+    `service gatesentry stop    #stops the service`
 
     **For Windows**
 
