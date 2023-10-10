@@ -1,7 +1,7 @@
 [Setup]
 AppName=Gatesentry
 AppVersion=1.0
-DefaultDirName={autopf}\Gatesentry
+DefaultDirName={pf}\Gatesentry
 DefaultGroupName=Gatesentry
 UninstallDisplayIcon={app}\gatesentry-windows.exe
 OutputBaseFilename=GatesentrySetup
