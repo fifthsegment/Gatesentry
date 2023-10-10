@@ -1,10 +1,9 @@
 [Setup]
 AppName=Gatesentry
 AppVersion=1.0
-DefaultDirName={pf}\Gatesentry
+DefaultDirName={autopf}\Gatesentry
 DefaultGroupName=Gatesentry
 UninstallDisplayIcon={app}\gatesentry-windows.exe
-OutputDir=userdocs:Gatesentry
 OutputBaseFilename=GatesentrySetup
 Compression=lzma
 SolidCompression=yes
