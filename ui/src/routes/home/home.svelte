@@ -89,7 +89,7 @@
       </Column>
     </Row>
   </Column><Column
-    ><div style="margin: 0 auto">
+    ><div style="margin: 0 auto" class="text-center">
       <img src={imageBin} style="width:500px; border:1px solid gray;" />
       <pre>Once properly setup, Gatesentry can filter traffic on all your devices.</pre>
     </div></Column

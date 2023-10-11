@@ -211,5 +211,3 @@ The Smithsonian Institution,si.edu,"Research institution and museum complex with
 The European Organization for Nuclear Research (CERN),cern.ch,"Leading research center for particle physics and fundamental science.",Research
 The Royal Society,royalsociety.org,"The UK's national academy of science, promoting scientific excellence.",Science
 Science News,sciencenews.org,"Independent source for news on scientific discoveries and developments.",Science
-
-
