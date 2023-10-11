@@ -8,6 +8,7 @@ import {
   Settings,
   SwitchLayer_2,
   Network_4,
+  UserAccess,
 } from "carbon-icons-svelte";
 
 let menuItems = [
@@ -89,6 +90,12 @@ let menuItems = [
     text: "AI",
     href: "/ai",
     icon: Network_4,
+  },
+  {
+    type: "link",
+    text: "Users",
+    href: "/users",
+    icon: UserAccess,
   }
 ];
 
