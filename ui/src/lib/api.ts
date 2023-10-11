@@ -72,6 +72,39 @@ class AppAPI {
 
   }
 
+  getUsers(): Promise<any> {
+    return new Promise(async (resolve, reject) => {
+      const url = "/users";
+
+      this.doCall(url).then(function (json) {
+        resolve(json);
+      })
+      .catch(function (err) {
+        reject(err);
+      });
+
+    });
+  }
+
+  updateUsers(users : Array<any>): Promise<any> {
+    return new Promise(async (resolve, reject) => {
+      const url = "/users";
+      const data = {
+        users: users.map((user: any) => ({
+          ...user,
+          dataconsumed: +user.dataconsumed,
+        }))
+      };
+      this.doCall(url, "post", data).then(function (json) {
+        resolve(json);
+      })
+      .catch(function (err) {
+        reject(err);
+      });
+
+    });
+  }
+
   setSetting(settingName, settingValue, mapper? : (data:any) => any): Promise<any> {
 
     return new Promise(async (resolve, reject) => {

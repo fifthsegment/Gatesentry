@@ -53,7 +53,6 @@ func GSApiSettingsPOST(ctx iris.Context, settings *gatesentryWebserverTypes.Sett
 
 	var temp gatesentryWebserverTypes.Datareceiver
 	err := ctx.ReadJSON(&temp)
-	_ = err
 	if err != nil {
 		return
 	}

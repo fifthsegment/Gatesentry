@@ -47,6 +47,15 @@ func RegisterEndpoints(
 	app.Post("/api/settings/:id", jwtMiddleware.Serve, func(ctx iris.Context) {
 		gatesentryWebserverEndpoints.GSApiSettingsPOST(ctx, settings)
 	})
+
+	app.Get("/api/users", jwtMiddleware.Serve, func(ctx iris.Context) {
+		gatesentryWebserverEndpoints.GSApiUsersGET(ctx, runtime, settings.GetSettings("authusers"))
+	})
+
+	app.Post("/api/users", jwtMiddleware.Serve, func(ctx iris.Context) {
+		gatesentryWebserverEndpoints.GSApiUsersPOST(ctx, settings)
+	})
+
 	app.Get("/api/consumption", jwtMiddleware.Serve, func(ctx iris.Context) {
 		gatesentryWebserverEndpoints.GSApiConsumptionGET(ctx, settings, runtime)
 	})

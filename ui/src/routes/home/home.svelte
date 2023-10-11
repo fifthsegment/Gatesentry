@@ -1,10 +1,9 @@
 <script lang="ts">
-  import { Column, Grid, Row } from "carbon-components-svelte";
+  import { Column, Row } from "carbon-components-svelte";
   import { store } from "../../store/apistore";
   import { _ } from "svelte-i18n";
   import imageBin from "../../assets/front.jpg?inline";
   import { Laptop, Mobile } from "carbon-icons-svelte";
-  import { get } from "lodash";
   import Modal from "../../components/modal.svelte";
   import Instructionsphone from "./instructionsphone.svelte";
   import Instructionscomputer from "./instructionscomputer.svelte";
