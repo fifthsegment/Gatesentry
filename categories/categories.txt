@@ -1,0 +1,101 @@
+Website,Domain,Description,Category
+Wikipedia,wikipedia.org,"Free encyclopedia providing factual information on various topics.",Informational
+Britannica,britannica.com,"Online encyclopedia offering detailed articles on various subjects.",Informational
+Amazon,amazon.com,"E-commerce platform for buying and selling a variety of products.",E-commerce
+eBay,ebay.com,"Online marketplace for buying and selling goods and services.",E-commerce
+Facebook,facebook.com,"Social media platform for connecting and sharing with others.",Social
+Twitter,twitter.com,"Microblogging platform for sharing and viewing short messages.",Social
+WordPress,wordpress.com,"Blogging platform for creating and publishing personal blogs.",Blogging
+Blogger,blogger.com,"Platform for creating, publishing, and sharing blogs.",Blogging
+BBC,bbc.com,"News platform providing current news and updates on various topics.",News
+CNN,cnn.com,"News outlet providing latest updates on various global events.",News
+Khan Academy,khanacademy.org,"Educational platform offering free online courses and learning materials.",Educational
+Coursera,coursera.org,"Platform offering online courses from various universities and institutions.",Educational
+Netflix,netflix.com,"Entertainment platform for streaming movies and TV shows.",Entertainment
+Spotify,spotify.com,"Music streaming platform offering a vast library of songs.",Entertainment
+Reddit,reddit.com,"Community forum for discussions and sharing on various topics.",Community
+Stack Overflow,stackoverflow.com,"Community forum for programmers to share knowledge and collaborate.",Community
+USA.gov,usa.gov,"Official portal for U.S. government information and services.",Government
+IRS.gov,irs.gov,"Official website for the Internal Revenue Service, providing tax information.",Government
+Red Cross,redcross.org,"Nonprofit organization providing humanitarian aid and disaster relief.",Nonprofit
+WWF,worldwildlife.org,"Nonprofit organization dedicated to conserving nature and reducing threats.",Nonprofit
+Google,google.com,"Search engine for finding information and websites on the internet.",Search
+Bing,bing.com,"Search engine offering web, image, and video search.",Search
+Behance,behance.net,"Portfolio platform for showcasing creative work and projects.",Portfolio
+Dribbble,dribbble.com,"Platform for designers to showcase and share their work.",Portfolio
+YouTube,youtube.com,"Platform for streaming and viewing a variety of video content.",Streaming
+Twitch,twitch.tv,"Platform for streaming and watching live gaming content.",Streaming
+Dropbox,dropbox.com,"File sharing platform for uploading and downloading files.",File-Sharing
+Google Drive,drive.google.com,"Cloud storage service for storing and sharing files.",File-Sharing
+Calculator Soup,calculatorsoup.com,"Online tool providing various calculators for different purposes.",Utilities
+XE,xe.com,"Online tool for currency conversion and financial information.",Utilities
+Instagram,instagram.com,"Photo and video sharing social networking service.",Social
+LinkedIn,linkedin.com,"Professional networking platform for career and business connections.",Networking
+Pinterest,pinterest.com,"Visual discovery and bookmarking tool for finding ideas.",Discovery
+Quora,quora.com,"Platform for asking questions and connecting with people who contribute unique insights.",Community
+Vimeo,vimeo.com,"High-quality video content platform emphasizing user-generated videos.",Streaming
+Dacast,dacast.com,"Professional-grade video hosting platform offering streaming solutions.",Streaming
+Wistia,wistia.com,"Video hosting platform with additional marketing features.",Streaming
+Etsy,etsy.com,"E-commerce website focused on handmade or vintage items.",E-commerce
+Alibaba,alibaba.com,"Online commerce platform for global wholesale trade.",E-commerce
+Google,google.com,"Search engine for finding information and websites on the internet.",Search
+YouTube,youtube.com,"Platform for streaming and viewing a variety of video content.",Streaming
+VG,vg.no,"Norwegian news website providing latest updates on various global events.",News
+Facebook,facebook.com,"Social media platform for connecting and sharing with others.",Social
+NRK,nrk.no,"Norwegian Broadcasting Corporation providing news and entertainment content.",Broadcasting
+Finn,finn.no,"Online marketplace for buying and selling goods and services in Norway.",E-commerce
+Dagbladet,dagbladet.no,"Norwegian news outlet providing news and entertainment content.",News
+Wikipedia,wikipedia.org,"Free encyclopedia providing factual information on various topics.",Informational
+YR,yr.no,"Norwegian weather forecasting website.",Weather
+Reddit,reddit.com,"Community forum for discussions and sharing on various topics.",Community
+Difi,difi.no,"Norwegian website providing information on public services.",Government
+TV2,tv2.no,"Norwegian news and entertainment broadcasting website.",Broadcasting
+BankID,bankid.no,"Norwegian electronic identification service.",Finance
+DuckDuckGo,duckduckgo.com,"Search engine that emphasizes protecting searchers' privacy.",Search
+m.Facebook,m.facebook.com,"Mobile version of Facebook for connecting and sharing with others.",Social
+Instagram,instagram.com,"Photo and video sharing social networking service.",Social
+Asura,asura.gg,"Not specified.",Entertainment
+E24,e24.no,"Norwegian financial news website.",Finance
+Google (DE),google.de,"German version of the Google search engine.",Search
+Amazon (DE),amazon.de,"E-commerce platform for buying and selling a variety of products.",E-commerce
+eBay (DE),ebay.de,"Online marketplace for buying and selling goods and services.",E-commerce
+Google France,google.fr,"French version of Google's search engine.",Search
+Amazon France,amazon.fr,"Best e-commerce website in France in 2023.",E-commerce
+Live.com,live.com,"Web portal of Microsoft.",Web Services
+Leboncoin,leboncoin.fr,"E-commerce site in France.",E-commerce
+Facebook,facebook.com,"Social networking site.",Social
+Orange,orange.fr,"ICT company dealing with internet connections, mobile gadgets, IT infrastructure, etc.",Telecommunications
+Padlet,padlet.com,"Online bulletin board application.",Application
+Netflix,netflix.com,"Streaming service for movies and TV shows.",Streaming
+Impots.gouv.fr,impots.gouv.fr,"French government's official website for tax information.",Government
+Free,free.fr,"French wireless service provider, part of the Iliad group.",Telecommunications
+Cdiscount,cdiscount.com,"French e-commerce website with products such as tech, IT, household appliances, electronics, etc.",E-commerce
+Caf,caf.fr,"-",-
+Pole-emploi,pole-emploi.fr,"-",Employment
+Likbook,likbook.com,"User-friendly, free, and easy-to-use social website.",Social
+Credit Agricole,credit-agricole.fr,"World’s largest cooperative financial institution, sometimes called 'la banque verte' due to its historical ties to farming.",Finance
+BNP Paribas,group.bnpparibas,"One of the top investment banks in France, providing a wide range of financial services.",Investment
+J.P. Morgan,jpmorgan.com,"Renowned investment bank with a significant presence in France.",Investment
+Lazard,lazard.com,"Global investment bank with operations in France.",Investment
+Goldman Sachs,goldmansachs.com,"Leading global investment bank with a notable presence in France.",Investment
+Rothschild & Co,rothschildandco.com,"Prominent investment bank in France.",Investment
+Boursorama,boursorama-banque.com,"Most popular online bank in France in 2023 with the highest number of customers.",Online
+Sparebank 1 Sr-bank,sparebank1.no/sr-bank,"One of the largest banks in Norway, headquartered in Stavanger.",Bank
+Sparebank 1 Hallingdal Valdres,sparebank1.no/en/hallingdal-valdres,"A prominent bank in the Hallingdal and Valdres regions.",Bank
+Landkreditt Bank,landkredittbank.no,"A well-known bank in Norway, located in Oslo.",Bank
+Fana Sparebank,fanasparebank.no,"A reputable bank based in Bergen, Norway.",Bank
+Bank Norwegian,banknorwegian.no,"A significant bank in Norway, based in Sandvika.",Bank
+Bn Bank,bnbank.no,"A notable bank headquartered in Trondheim, Norway.",Bank
+Sandnes Sparebank,sandnes-sparebank.no,"A well-regarded bank located in Sandnes, Norway.",Bank
+Sparebank 1 Ringerike Hadeland,sparebank1.no/en/ringerike-hadeland,"A bank serving the Ringerike and Hadeland regions.",Bank
+Komplett Bank,komplettbank.no,"A bank known for its digital banking services.",Bank
+Sparebank 1 Nordmøre,sparebank1.no/en/nordmore,"A bank serving the Nordmøre region in Norway.",Bank
+Storebrand Bank,storebrand.no,"A leading bank offering a range of financial services.",Bank
+Sparebank 1 Østfold Akershus,sparebank1.no/en/ostfold-akershus,"A bank serving the Østfold and Akershus regions.",Bank
+Sparebanken Øst,sparebanken-ost.no,"A bank known for its services in the Hokksund region.",Bank
+Sparebank 1 Helgeland,sparebank1.no/en/helgeland,"A bank serving the Helgeland region in Norway.",Bank
+Sparebanken Sogn og Fjordane,sparebanken-sognogfjordane.no,"A bank located in Førde, serving the Sogn og Fjordane region.",Bank
+Sbanken,sbanken.no,"A Bergen-based bank offering a range of banking services.",Bank
+Sparebank 1 Sørøst-norge,sparebank1.no/en/sorost-norge,"A bank serving the Sørøst-norge region in Norway.",Bank
+Sparebanken Møre,sparebankenmore.no,"A bank headquartered in Ålesund, known for its local services.",Bank
+DNB Bank,dnb.no,"A major bank in Norway offering a full range of financial services, including loans, savings, advisory services, insurance and pension products for retail and corporate customers.",Bank
