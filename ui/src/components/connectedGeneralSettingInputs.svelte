@@ -12,8 +12,8 @@
   import { _ } from "svelte-i18n";
   import { notificationstore } from "../store/notifications";
   import {
-    buildNotificationError,
-    buildNotificationSuccess,
+    createNotificationError,
+    createNotificationSuccess,
   } from "../lib/utils";
   import { onDestroy, onMount } from "svelte";
 
@@ -43,11 +43,11 @@
     );
     if (response === false) {
       notificationstore.add(
-        buildNotificationError({ subtitle: $_("Unable to save setting") }, $_),
+        createNotificationError({ subtitle: $_("Unable to save setting") }, $_),
       );
     } else {
       notificationstore.add(
-        buildNotificationSuccess({ subtitle: $_("Setting updated") }, $_),
+        createNotificationSuccess({ subtitle: $_("Setting updated") }, $_),
       );
     }
   };

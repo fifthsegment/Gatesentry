@@ -7,13 +7,17 @@
   export let disabled = false;
   export let disableOnblur = false;
 
-  import { TextInput } from "carbon-components-svelte";
+  import {
+    RadioButtonGroup,
+    TextInput,
+    RadioButton,
+  } from "carbon-components-svelte";
   import { store } from "../store/apistore";
   import { _ } from "svelte-i18n";
   import { notificationstore } from "../store/notifications";
   import {
-    buildNotificationError,
-    buildNotificationSuccess,
+    createNotificationError,
+    createNotificationSuccess,
   } from "../lib/utils";
   import { onDestroy, onMount } from "svelte";
 
@@ -39,11 +43,11 @@
     const response = await $store.api.setSetting(keyName, keyValue);
     if (response === false) {
       notificationstore.add(
-        buildNotificationError({ subtitle: $_("Unable to save setting") }, $_),
+        createNotificationError({ subtitle: $_("Unable to save setting") }, $_),
       );
     } else {
       notificationstore.add(
-        buildNotificationSuccess({ subtitle: $_("Setting updated") }, $_),
+        createNotificationSuccess({ subtitle: $_("Setting updated") }, $_),
       );
     }
   };
@@ -57,17 +61,39 @@
     updateNetwork(internalFormValue);
   };
 
+  const updateFieldRadio = async (event) => {
+    internalFormValue = data;
+    if (disableOnblur) return;
+    updateNetwork(internalFormValue);
+  };
+
   onMount(() => {
     loadAPIData();
   });
+
+  onDestroy(() => {
+    data = null;
+    internalFormValue = null;
+  });
 </script>
 
-<TextInput
-  {title}
-  {labelText}
-  {helperText}
-  {type}
-  {disabled}
-  value={data ?? ""}
-  on:blur={updateField}
-/>
+{#if type == "radio"}
+  <RadioButtonGroup
+    legendText={labelText}
+    bind:selected={data}
+    on:change={updateFieldRadio}
+  >
+    <RadioButton value="true" labelText={$_("True")} />
+    <RadioButton value="false" labelText={$_("False")} />
+  </RadioButtonGroup>
+{:else}
+  <TextInput
+    {title}
+    {labelText}
+    {helperText}
+    {type}
+    {disabled}
+    value={data ?? ""}
+    on:blur={updateField}
+  />
+{/if}

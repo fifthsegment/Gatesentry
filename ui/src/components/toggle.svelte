@@ -8,7 +8,7 @@
   import { store } from "../store/apistore";
   import { onMount } from "svelte";
   import { notificationstore } from "../store/notifications";
-  import { buildNotificationSuccess } from "../lib/utils";
+  import { createNotificationSuccess } from "../lib/utils";
 
   export let settingValue = "";
   export let preClickEvent = null;
@@ -36,7 +36,7 @@
         return;
       }
       notificationstore.add(
-        buildNotificationSuccess(
+        createNotificationSuccess(
           {
             title: $_("Success"),
             subtitle: $_("Setting updated"),

@@ -5,8 +5,8 @@ type GSWebServerCommunicator struct {
 }
 
 type GSUser struct {
-	User         string `json:"user"`
-	Pass         string `json:"pass"`
+	User         string `json:"username"`
+	Pass         string `json:"password"`
 	Base64String string
 	DataConsumed uint64 `json:"dataconsumed"`
 	AllowAccess  bool   `json:"allowaccess"`

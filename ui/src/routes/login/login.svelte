@@ -15,7 +15,7 @@
   import { navigate } from "svelte-routing/src/history";
   import { afterUpdate } from "svelte";
   import { notificationstore } from "../../store/notifications";
-  import { buildNotificationError } from "../../lib/utils";
+  import { createNotificationError } from "../../lib/utils";
   import { _ } from "svelte-i18n";
 
   let username: string = localStorage.getItem("username") || "";
@@ -33,7 +33,7 @@
     $store.api.doCall("/auth/token", "post", datatosend).then(function (data) {
       if (data == undefined || data == null) {
         notificationstore.add(
-          buildNotificationError(
+          createNotificationError(
             { subtitle: $_("Unable to get a correct response from the api") },
             $_,
           ),

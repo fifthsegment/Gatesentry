@@ -43,8 +43,9 @@
         <Modal
           bind:open={modalOpenComputer}
           title={$_("1. Setup Gatesentry on your favorite browser.")}
-          children={Instructionscomputer}
-        />
+        >
+          <Instructionscomputer />
+        </Modal>
       </Column>
       <Column>
         <div
@@ -57,8 +58,9 @@
         <Modal
           bind:open={modalOpenPhone}
           title={$_("1. Setup Gatesentry on your favorite browser.")}
-          children={Instructionsphone}
-        />
+        >
+          <Instructionsphone />
+        </Modal>
       </Column>
     </Row>
     <Row>

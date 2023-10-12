@@ -1,44 +1,80 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { store } from "../../store/apistore";
-  import { Button, DataTable, Loading } from "carbon-components-svelte";
+  import {
+    Button,
+    DataTable,
+    Loading,
+    TextInput,
+  } from "carbon-components-svelte";
   import { _ } from "svelte-i18n";
-  import { AddAlt, RowDelete } from "carbon-icons-svelte";
+  import {
+    AddAlt,
+    Edit,
+    Pause,
+    Restart,
+    RowDelete,
+    Stop,
+    StopFilledAlt,
+  } from "carbon-icons-svelte";
+  import Usermodal from "./usermodal.svelte";
+  import Modal from "../../components/modal.svelte";
+  import type { UserType } from "../../types";
+  import { bytesToSize } from "../../lib/utils";
+  import ConnectedSettingInput from "../../components/connectedSettingInput.svelte";
 
-  type User = {
-    user: string;
-    dataconsumed: string;
-    allowaccess: boolean;
-  };
+  let showForm = false;
 
-  let users: Array<User> | null = null;
+  // type User = {
+  //   user: string;
+  //   dataconsumed: string;
+  //   allowaccess: boolean;
+  // };
 
+  let users: Array<UserType> | null = null;
+  let editingUser: UserType | null = null;
   const loadUsers = async () => {
     users = null;
-    users = (await $store.api.getUsers()).users;
+    users = (await $store.api.getUsers()).users ?? [];
   };
 
   onMount(loadUsers);
 
-  const addUser = async () => {
-    const user = prompt($_("Enter the name of the user to add"));
-    if (user) {
-      users = [...users, { user, dataconsumed: "0", allowaccess: true }];
-      await $store.api.updateUsers(users);
-      await loadUsers();
-    }
+  const editUser = (username: string) => {
+    // find user in users
+    editingUser = users?.find((user) => user.username === username);
+
+    showForm = true;
   };
 
   const deleteUser = async (user: string) => {
     if (confirm($_("Are you sure you want to delete this user?"))) {
-      users = users.filter((u) => u.user !== user);
-      await $store.api.updateUsers(users);
+      await $store.api.deleteUser(user);
       await loadUsers();
     }
   };
+
+  const handleCreateUser = async (
+    event: CustomEvent<{ username: string; password: string }>,
+  ) => {
+    showForm = false;
+    await loadUsers();
+  };
+
+  const handleUpdateUser = async (
+    event: CustomEvent<{ username: string; password: string }>,
+  ) => {
+    showForm = false;
+    await loadUsers();
+  };
+
+  const addUser = () => {
+    editingUser = null;
+    showForm = true;
+  };
 </script>
 
-<h3>{$_("Registered Users")}</h3>
+<h3>{$_("Users")}</h3>
 
 <br />
 
@@ -46,13 +82,42 @@
   <div><Loading /></div>
 {/if}
 
-{#if users}
-  <div style="display: flex; justify-content: flex-end; padding-bottom: 10px;">
-    <Button size="small" icon={AddAlt} on:click={addUser}>
-      {$_("Add User")}
-    </Button>
-  </div>
+<Modal
+  shouldSubmitOnEnter={true}
+  hasForm={true}
+  title={editingUser != null ? $_("Edit User") : $_("Add User")}
+  bind:open={showForm}
+  on:close={() => {
+    showForm = false;
+    editingUser = null;
+  }}
+  ><Usermodal
+    on:createuser={handleCreateUser}
+    on:updateuser={handleUpdateUser}
+    user={editingUser}
+  /></Modal
+>
 
+<ConnectedSettingInput
+  keyName="EnableUsers"
+  type="radio"
+  title={$_("Allow only registered users to access the proxy server")}
+  labelText={$_("Allow only registered users to access the proxy server")}
+  helperText=""
+/>
+{#if users}
+  <div style="padding-bottom: 10px;" class="content-right">
+    <Button
+      size="small"
+      icon={AddAlt}
+      on:click={() => {
+        addUser();
+      }}>{$_("Add User")}</Button
+    >
+  </div>
+  {#if users.length === 0}
+    <div>{$_("No users registered yet.")}</div>
+  {/if}
   <DataTable
     headers={[
       {
@@ -74,8 +139,8 @@
     ]}
     rows={users?.map((user) => {
       return {
-        id: user.user,
-        user: user.user,
+        id: user.username,
+        user: user.username,
         dataconsumed: user.dataconsumed,
         allowaccess: user.allowaccess,
       };
@@ -85,11 +150,49 @@
       {#if cell.key === "actions"}
         <div style="float:right;">
           <Button
+            size="small"
             icon={RowDelete}
             iconDescription={$_("Delete")}
-            on:click={() => deleteUser(row.id)}
-          />
+            on:click={() => deleteUser(row.id)}>{$_("Delete")}</Button
+          >
+          <Button
+            size="small"
+            icon={Edit}
+            iconDescription={$_("Edit User")}
+            on:click={() => editUser(row.id)}>{$_("Edit User")}</Button
+          >
+          {#if row.allowaccess}
+            <Button
+              size="small"
+              icon={Stop}
+              iconDescription={$_("Disable Internet Access")}
+              on:click={async () => {
+                await $store.api.updateUser({
+                  username: row.id,
+                  password: "",
+                  allowaccess: false,
+                });
+                loadUsers();
+              }}>{$_("Disable Internet Access")}</Button
+            >
+          {:else}
+            <Button
+              size="small"
+              icon={Restart}
+              iconDescription={$_("Enable Internet Access")}
+              on:click={async () => {
+                await $store.api.updateUser({
+                  username: row.id,
+                  password: "",
+                  allowaccess: true,
+                });
+                loadUsers();
+              }}>{$_("Enable Internet Access")}</Button
+            >
+          {/if}
         </div>
+      {:else if cell.key === "dataconsumed"}
+        {bytesToSize(cell.value)}
       {:else}
         {cell.value}
       {/if}

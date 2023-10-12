@@ -44,3 +44,12 @@
   text-decoration: underline;
   background-color: rgba(255, 255, 255, 0.5);
 }
+
+.content-right {
+  display: flex; 
+  justify-content: flex-end; 
+}
+
+.gatesentry-modal .bx--modal-footer {
+  display: none;
+}
