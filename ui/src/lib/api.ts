@@ -1,3 +1,5 @@
+import type { UserType } from "../types";
+
 // const apiBaseUrl = import.meta.env.VITE_APP_API_BASE_URL;
 const env = import.meta.env;
 
@@ -72,6 +74,62 @@ class AppAPI {
 
   }
 
+  deleteUser(username: string): Promise<any> {
+    return new Promise(async (resolve, reject) => {
+      const url = "/users/" + username  ;
+
+      this.doCall(url, "delete").then(function (json) {
+        resolve(json);
+      })
+      .catch(function (err) {
+        reject(err);
+      });
+
+    });
+  }
+
+  getUsers(): Promise<any> {
+    return new Promise(async (resolve, reject) => {
+      const url = "/users";
+
+      this.doCall(url).then(function (json) {
+        resolve(json);
+      })
+      .catch(function (err) {
+        reject(err);
+      });
+
+    });
+  }
+
+  createUser( userData: UserType ) : Promise<any> {
+    return new Promise(async (resolve, reject) => {
+      const url = "/users";
+      
+      this.doCall(url, "post", userData).then(function (json) {
+        resolve(json);
+      })
+      .catch(function (err) {
+        reject(err);
+      });
+
+    });
+  }
+
+  updateUser(user : UserType): Promise<any> {
+    return new Promise(async (resolve, reject) => {
+      const url = "/users";
+
+      this.doCall(url, "put", user).then(function (json) {
+        resolve(json);
+      })
+      .catch(function (err) {
+        reject(err);
+      });
+
+    });
+  }
+
   setSetting(settingName, settingValue, mapper? : (data:any) => any): Promise<any> {
 
     return new Promise(async (resolve, reject) => {
@@ -124,7 +182,7 @@ class AppAPI {
       method: method,
       headers: this.getHeaders(),
     };
-    if (method === "post") {
+    if (method === "post" || method === "put") {
       // @ts-ignore
       additionalHeaders.body = JSON.stringify(dataTosend);
     }

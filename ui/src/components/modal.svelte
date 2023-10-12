@@ -5,14 +5,20 @@
   export let on: { close: () => void } = { close: () => {} };
   export let title = "";
   export let children = null;
+  export let hasForm = false;
+  export let shouldSubmitOnEnter = false;
 </script>
 
-<Modal
-  bind:open
-  on:close={on.close}
-  modalHeading={title}
-  primaryButtonDisabled={true}
-  >{#if children}
-    <svelte:component this={children} />
-  {/if}</Modal
->
+{#if open}
+  <div class="gatesentry-modal">
+    <Modal
+      {shouldSubmitOnEnter}
+      {hasForm}
+      bind:open
+      on:close={on.close}
+      modalHeading={title}
+      primaryButtonDisabled={true}
+      ><slot />
+    </Modal>
+  </div>
+{/if}

@@ -15,7 +15,7 @@
   import { _ } from "svelte-i18n";
   import { AddAlt, Edit, RowDelete, Save } from "carbon-icons-svelte";
   import { notificationstore } from "../store/notifications";
-  import { buildNotificationError } from "../lib/utils";
+  import { createNotificationError } from "../lib/utils";
   let data = null;
   let domainText = "";
   let ipText = "";
@@ -61,7 +61,7 @@
     const existingIp = data.find((row) => row.ip === ipText);
     if (existingDomain) {
       notificationstore.add(
-        buildNotificationError(
+        createNotificationError(
           { title: $_("Error"), subtitle: $_("Domain already exists") },
           $_,
         ),
@@ -70,7 +70,7 @@
     }
     if (existingIp) {
       notificationstore.add(
-        buildNotificationError(
+        createNotificationError(
           { title: $_("Error"), subtitle: $_("IP already exists") },
           $_,
         ),

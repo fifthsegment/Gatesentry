@@ -1,0 +1,213 @@
+Website,Domain,Description,Category
+Wikipedia,wikipedia.org,"Free encyclopedia providing factual information on various topics.",Informational
+Britannica,britannica.com,"Online encyclopedia offering detailed articles on various subjects.",Informational
+Amazon,amazon.com,"E-commerce platform for buying and selling a variety of products.",E-commerce
+eBay,ebay.com,"Online marketplace for buying and selling goods and services.",E-commerce
+Facebook,facebook.com,"Social media platform for connecting and sharing with others.",Social
+Twitter,twitter.com,"Microblogging platform for sharing and viewing short messages.",Social
+WordPress,wordpress.com,"Blogging platform for creating and publishing personal blogs.",Blogging
+Blogger,blogger.com,"Platform for creating, publishing, and sharing blogs.",Blogging
+BBC,bbc.com,"News platform providing current news and updates on various topics.",News
+CNN,cnn.com,"News outlet providing latest updates on various global events.",News
+Khan Academy,khanacademy.org,"Educational platform offering free online courses and learning materials.",Educational
+Coursera,coursera.org,"Platform offering online courses from various universities and institutions.",Educational
+Netflix,netflix.com,"Entertainment platform for streaming movies and TV shows.",Entertainment
+Spotify,spotify.com,"Music streaming platform offering a vast library of songs.",Entertainment
+Reddit,reddit.com,"Community forum for discussions and sharing on various topics.",Discussion
+Stack Overflow,stackoverflow.com,"Community forum for programmers to share knowledge and collaborate.",Community
+USA.gov,usa.gov,"Official portal for U.S. government information and services.",Government
+IRS.gov,irs.gov,"Official website for the Internal Revenue Service, providing tax information.",Government
+Red Cross,redcross.org,"Nonprofit organization providing humanitarian aid and disaster relief.",Nonprofit
+WWF,worldwildlife.org,"Nonprofit organization dedicated to conserving nature and reducing threats.",Nonprofit
+Google,google.com,"Search engine for finding information and websites on the internet.",Search
+Bing,bing.com,"Search engine offering web, image, and video search.",Search
+Behance,behance.net,"Portfolio platform for showcasing creative work and projects.",Portfolio
+Dribbble,dribbble.com,"Platform for designers to showcase and share their work.",Portfolio
+YouTube,youtube.com,"Platform for streaming and viewing a variety of video content.",Streaming
+Twitch,twitch.tv,"Platform for streaming and watching live gaming content.",Streaming
+Dropbox,dropbox.com,"File sharing platform for uploading and downloading files.",File-Sharing
+Google Drive,drive.google.com,"Cloud storage service for storing and sharing files.",File-Sharing
+Calculator Soup,calculatorsoup.com,"Online tool providing various calculators for different purposes.",Utilities
+XE,xe.com,"Online tool for currency conversion and financial information.",Utilities
+Instagram,instagram.com,"Photo and video sharing social networking service.",Social
+LinkedIn,linkedin.com,"Professional networking platform for career and business connections.",Networking
+Pinterest,pinterest.com,"Visual discovery and bookmarking tool for finding ideas.",Discovery
+Quora,quora.com,"Platform for asking questions and connecting with people who contribute unique insights.",Community
+Vimeo,vimeo.com,"High-quality video content platform emphasizing user-generated videos.",Streaming
+Dacast,dacast.com,"Professional-grade video hosting platform offering streaming solutions.",Streaming
+Wistia,wistia.com,"Video hosting platform with additional marketing features.",Streaming
+Etsy,etsy.com,"E-commerce website focused on handmade or vintage items.",E-commerce
+Alibaba,alibaba.com,"Online commerce platform for global wholesale trade.",E-commerce
+Google,google.com,"Search engine for finding information and websites on the internet.",Search
+YouTube,youtube.com,"Platform for streaming and viewing a variety of video content.",Streaming
+VG,vg.no,"Norwegian news website providing latest updates on various global events.",News
+Facebook,facebook.com,"Social media platform for connecting and sharing with others.",Social
+NRK,nrk.no,"Norwegian Broadcasting Corporation providing news and entertainment content.",Broadcasting
+Finn,finn.no,"Online marketplace for buying and selling goods and services in Norway.",E-commerce
+Dagbladet,dagbladet.no,"Norwegian news outlet providing news and entertainment content.",News
+Wikipedia,wikipedia.org,"Free encyclopedia providing factual information on various topics.",Informational
+YR,yr.no,"Norwegian weather forecasting website.",Weather
+Reddit,reddit.com,"Community forum for discussions and sharing on various topics.",Community
+Difi,difi.no,"Norwegian website providing information on public services.",Government
+TV2,tv2.no,"Norwegian news and entertainment broadcasting website.",Broadcasting
+BankID,bankid.no,"Norwegian electronic identification service.",Finance
+DuckDuckGo,duckduckgo.com,"Search engine that emphasizes protecting searchers' privacy.",Search
+m.Facebook,m.facebook.com,"Mobile version of Facebook for connecting and sharing with others.",Social
+Instagram,instagram.com,"Photo and video sharing social networking service.",Social
+Asura,asura.gg,"Not specified.",Entertainment
+E24,e24.no,"Norwegian financial news website.",Finance
+Google (DE),google.de,"German version of the Google search engine.",Search
+Amazon (DE),amazon.de,"E-commerce platform for buying and selling a variety of products.",E-commerce
+eBay (DE),ebay.de,"Online marketplace for buying and selling goods and services.",E-commerce
+Google France,google.fr,"French version of Google's search engine.",Search
+Amazon France,amazon.fr,"Best e-commerce website in France in 2023.",E-commerce
+Live.com,live.com,"Web portal of Microsoft.",Web Services
+Leboncoin,leboncoin.fr,"E-commerce site in France.",E-commerce
+Facebook,facebook.com,"Social networking site.",Social
+Orange,orange.fr,"ICT company dealing with internet connections, mobile gadgets, IT infrastructure, etc.",Telecommunications
+Padlet,padlet.com,"Online bulletin board application.",Application
+Netflix,netflix.com,"Streaming service for movies and TV shows.",Streaming
+Impots.gouv.fr,impots.gouv.fr,"French government's official website for tax information.",Government
+Free,free.fr,"French wireless service provider, part of the Iliad group.",Telecommunications
+Cdiscount,cdiscount.com,"French e-commerce website with products such as tech, IT, household appliances, electronics, etc.",E-commerce
+Caf,caf.fr,"-",-
+Pole-emploi,pole-emploi.fr,"-",Employment
+Likbook,likbook.com,"User-friendly, free, and easy-to-use social website.",Social
+Credit Agricole,credit-agricole.fr,"World’s largest cooperative financial institution, sometimes called 'la banque verte' due to its historical ties to farming.",Finance
+BNP Paribas,group.bnpparibas,"One of the top investment banks in France, providing a wide range of financial services.",Investment
+J.P. Morgan,jpmorgan.com,"Renowned investment bank with a significant presence in France.",Investment
+Lazard,lazard.com,"Global investment bank with operations in France.",Investment
+Goldman Sachs,goldmansachs.com,"Leading global investment bank with a notable presence in France.",Investment
+Rothschild & Co,rothschildandco.com,"Prominent investment bank in France.",Investment
+Boursorama,boursorama-banque.com,"Most popular online bank in France in 2023 with the highest number of customers.",Online
+Sparebank 1 Sr-bank,sparebank1.no/sr-bank,"One of the largest banks in Norway, headquartered in Stavanger.",Bank
+Sparebank 1 Hallingdal Valdres,sparebank1.no/en/hallingdal-valdres,"A prominent bank in the Hallingdal and Valdres regions.",Bank
+Landkreditt Bank,landkredittbank.no,"A well-known bank in Norway, located in Oslo.",Bank
+Fana Sparebank,fanasparebank.no,"A reputable bank based in Bergen, Norway.",Bank
+Bank Norwegian,banknorwegian.no,"A significant bank in Norway, based in Sandvika.",Bank
+Bn Bank,bnbank.no,"A notable bank headquartered in Trondheim, Norway.",Bank
+Sandnes Sparebank,sandnes-sparebank.no,"A well-regarded bank located in Sandnes, Norway.",Bank
+Sparebank 1 Ringerike Hadeland,sparebank1.no/en/ringerike-hadeland,"A bank serving the Ringerike and Hadeland regions.",Bank
+Komplett Bank,komplettbank.no,"A bank known for its digital banking services.",Bank
+Sparebank 1 Nordmøre,sparebank1.no/en/nordmore,"A bank serving the Nordmøre region in Norway.",Bank
+Storebrand Bank,storebrand.no,"A leading bank offering a range of financial services.",Bank
+Sparebank 1 Østfold Akershus,sparebank1.no/en/ostfold-akershus,"A bank serving the Østfold and Akershus regions.",Bank
+Sparebanken Øst,sparebanken-ost.no,"A bank known for its services in the Hokksund region.",Bank
+Sparebank 1 Helgeland,sparebank1.no/en/helgeland,"A bank serving the Helgeland region in Norway.",Bank
+Sparebanken Sogn og Fjordane,sparebanken-sognogfjordane.no,"A bank located in Førde, serving the Sogn og Fjordane region.",Bank
+Sbanken,sbanken.no,"A Bergen-based bank offering a range of banking services.",Bank
+Sparebank 1 Sørøst-norge,sparebank1.no/en/sorost-norge,"A bank serving the Sørøst-norge region in Norway.",Bank
+Sparebanken Møre,sparebankenmore.no,"A bank headquartered in Ålesund, known for its local services.",Bank
+DNB Bank,dnb.no,"A major bank in Norway offering a full range of financial services, including loans, savings, advisory services, insurance and pension products for retail and corporate customers.",Bank
+BBC,bbc.co.uk,"British Broadcasting Corporation, a source for news and entertainment.",News/Entertainment
+Amazon,amazon.co.uk,"E-commerce platform for buying and selling a variety of products.",E-commerce
+Argos,argos.co.uk,"Retailer offering a variety of products, from tech to home goods.",Retail
+John Lewis,johnlewis.com,"Retailer known for home goods, fashion, and tech products.",Retail
+Screwfix,screwfix.com,"Retailer specializing in trade tools, accessories, and hardware products.",Retail
+Currys,currys.co.uk,"Retailer of technology and home appliance products.",Retail
+Next,next.co.uk,"Fashion retailer offering clothing, shoes, and home products.",Retail
+Wayfair,wayfair.co.uk,"Online retailer for home goods and furniture.",Retail
+B&Q,diy.com,"Home improvement and garden centre retailer.",Retail
+ASOS,asos.com,"Online fashion and cosmetic retailer.",Retail
+Boots,boots.com,"Pharmacy-led health and beauty retailer.",Retail
+Tesco,tesco.com,"Grocery retailer offering a variety of food and household products.",Retail
+The Range,therange.co.uk,"Retailer offering home, leisure, and garden products.",Retail
+IKEA,ikea.com,"Retailer known for modern furniture, home accessories, and kitchen appliances.",Retail
+Marks & Spencer,marksandspencer.com,"Retailer of clothing, home products, and luxury food products.",Retail
+Halfords,halfords.com,"Retailer of car parts, car enhancement, camping and touring equipment.",Retail
+Dunelm,dunelm.com,"Home furnishings retailer offering furniture, bedding, curtains, and more.",Retail
+Sports Direct,sportsdirect.com,"Sporting goods retailer offering a variety of sports gear.",Retail
+ASDA,asda.com,"Supermarket retailer offering groceries, clothing, and general merchandise.",Retail
+Very,very.co.uk,"Online retailer offering clothing, electronics, home, and garden products.",Retail
+Zoro,zoro.to,"Website providing free streaming of movies and TV shows.",Streaming
+Disney+,disneyplus.com,"Subscription-based streaming service offering Disney, Pixar, Marvel, Star Wars, and National Geographic content.",Streaming
+Dailymotion,dailymotion.com,"Platform for sharing and viewing video content.",Streaming
+Mangakakalot,mangakakalot.com,"Website for reading manga online.",Manga
+ReadComicOnline,readcomiconline.li,"Website for reading comics online.",Comics
+Webtoon,webtoon.xyz,"Platform for reading webtoons and other comics online.",Comics
+MangaFreak,mangafreak.net,"Website for reading manga online.",Manga
+MangaClash,mangaclash.com,"Website for reading manga online.",Manga
+Otto,otto.de,"German e-commerce company offering a wide range of products.",E-commerce
+Zalando,zalando.com,"Online fashion retailer based in Germany.",E-commerce
+ASOS,asos.com,"British retailer offering fashion and cosmetic products online.",E-commerce
+Boohoo,boohoo.com,"UK-based online fashion retailer offering trendy clothing and accessories.",E-commerce
+Marks & Spencer,marksandspencer.com,"British multinational retailer offering clothing, home products, and luxury food products.",Retail
+Tesco,tesco.com,"British multinational grocery and general merchandise retailer.",Retail
+Carrefour,carrefour.com,"French multinational retail corporation offering a variety of products.",Retail
+Snapchat,snapchat.com,"Multimedia messaging and social networking platform.",Social
+WordPress,wordpress.com,"Website creation and blogging platform.",Blogging
+Twitter,twitter.com,"Microblogging and social networking platform.",Social
+Tinder,tinder.com,"Online dating and networking platform.",Dating
+Tumblr,tumblr.com,"Microblogging and social networking platform.",Social
+Souq,souq.com,"'Amazon of the Middle East', acquired by Amazon 2017.",E-commerce
+AliExpress,aliexpress.com,"Sells cheap products internationally, owned by Alibaba Group.",E-commerce
+Amazon,amazon.ae,"Global e-commerce platform, operates as amazon.ae in UAE.",E-commerce
+Noon,noon.com,"Online retail platform in UAE, Saudi Arabia primarily.",E-commerce
+Namshi,namshi.com,"Dubai-based online store, trendy products, operates in GCC.",E-commerce
+OpenSooq,opensooq.com,"Online marketplace for various goods, operates in UAE.",E-commerce
+Al-Arabiya,alarabiya.net,"UAE-based news channel launched in March 2003 online.",News
+Al-Masry Al-Youm,almasryalyoum.com,"Cairo-based Arabic news website covering various topics daily.",News
+Arab News,arabnews.com,"Saudi-based English daily covering Middle East news since 1975.",News
+Al Jazeera,aljazeera.net,"Qatar-based international news organization, providing comprehensive news coverage.",News
+Reuters,reuters.com,"Global news organization, part of Thomson Reuters, covering news and financial markets.",News
+Middle East Eye,middleeasteye.net,"Independent online news organization focused on the Middle East.",News
+The New York Times,nytimes.com,"Prominent American newspaper offering news, analysis, and features.",News
+The Guardian,theguardian.com,"British news and media website known for its independent journalism.",News
+The Washington Post,washingtonpost.com,"Major American newspaper covering politics, world news, and more.",News
+Associated Press (AP),apnews.com,"Global news agency providing news content to media organizations worldwide.",News
+Euronews,euronews.com,"Multilingual news media, providing news from a European perspective.",News
+Xinhua News Agency,xinhuanet.com,"China's official news agency, offering news and information.",News
+China Daily,chinadaily.com.cn,"English-language news and information portal about China.",News
+People's Daily,peoplesdaily.pdnews.cn,"Official newspaper of the Central Committee of the Communist Party of China.",News
+Global Times,globaltimes.cn,"Chinese international news outlet, offering a global perspective.",News
+CCTV News,cctv.com/english,"English-language news division of China Central Television (CCTV).",News
+The Times of India,timesofindia.indiatimes.com,"Indian English-language daily newspaper, offering news and information.",News
+The Times (UK),thetimes.co.uk,"British newspaper known for its comprehensive news coverage.",News
+Le Monde (France),lemonde.fr,"Leading French newspaper offering news and analysis.",News
+Die Welt (Germany),welt.de,"German newspaper providing news and opinions on various topics.",News
+El País (Spain),elpais.com,"Major Spanish newspaper covering national and international news.",News
+Corriere della Sera (Italy),corriere.it,"Italian newspaper offering news, politics, and culture coverage.",News
+The Independent (UK),independent.co.uk,"British online newspaper providing independent journalism.",News
+The Telegraph (UK),telegraph.co.uk,"British newspaper known for its quality reporting and analysis.",News
+Aftonbladet (Sweden),aftonbladet.se,"Swedish tabloid newspaper offering news and entertainment.",News
+RTÉ News (Ireland),rte.ie/news,"Ireland's national broadcaster providing news and current affairs coverage.",News
+Gazeta Wyborcza (Poland),wyborcza.pl,"Leading Polish newspaper with a focus on politics and society.",News
+The Sydney Morning Herald (Australia),smh.com.au,"Australian newspaper offering news, analysis, and opinion.",News
+The Globe and Mail (Canada),theglobeandmail.com,"Canadian newspaper offering news, analysis, and opinion.",News
+The Japan Times,japantimes.co.jp,"English-language newspaper in Japan, offering news and analysis.",News
+The Straits Times (Singapore),straitstimes.com,"Singaporean newspaper offering news and analysis.",News
+The Korea Herald (South Korea),koreaherald.com,"South Korean newspaper offering news and analysis.",News
+The Jakarta Post (Indonesia),thejakartapost.com,"Indonesian newspaper offering news and analysis.",News
+Quora,quora.com,"Question-and-answer platform where users ask and answer questions on various topics.",Discussion
+Stack Exchange,stackexchange.com,"Network of Q&A websites covering a wide range of topics and communities.",Discussion
+Voat,voat.co,"User-powered news aggregator and discussion platform similar to Reddit.",Discussion
+Hacker News,news.ycombinator.com,"Community-driven news aggregation and discussion platform for tech enthusiasts.",Discussion
+4chan,4chan.org,"Imageboard-style discussion forum known for its diverse and anonymous user base.",Discussion
+Tumblr,tumblr.com,"Microblogging and social networking platform with user-generated content and discussions.",Discussion
+Digg,digg.com,"News aggregation website with user-submitted content and discussions.",Discussion
+Newgrounds,newgrounds.com,"Community-driven entertainment and art-sharing platform with forums.",Discussion
+Metacafe,metacafe.com,"Short-form video platform with a focus on entertainment and viral content.",Video
+Vevo,vevo.com,"Music video platform featuring official music videos and exclusive content.",Music
+TikTok,tiktok.com,"Short-video platform for creative and viral content, popular among younger users.",Video
+IGTV (Instagram TV),instagram.com/tv,"Video platform integrated with Instagram for sharing longer-form videos.",Video
+Vidyard,vidyard.com,"Video marketing and hosting platform for businesses and professionals.",Business
+PBS Kids,pbskids.org,"Educational games, videos, and activities featuring PBS characters.",Kids
+Disney Junior,disneynow.com,"Disney's online platform with games, videos, and content for preschoolers.",Kids
+National Geographic Kids,kids.nationalgeographic.com,"Educational content, games, and quizzes about nature and science.",Kids
+ABCmouse,abcmouse.com,"Early learning platform with interactive activities and lessons for young children.",Education
+Funbrain,funbrain.com,"Educational games, books, and comics for kids of various ages.",Education
+Coolmath Games,coolmathgames.com,"Math-focused games and puzzles suitable for kids.",Education
+Nick Jr.,nickjr.com,"Nickelodeon's website for preschoolers with games and videos featuring Nick Jr. characters.",Kids
+Sesame Street Workshop,support.sesamestreet.org,"Resources and activities inspired by Sesame Street for early childhood development.",Education
+Starfall,starfall.com,"Early literacy and mathematics activities and games for kids.",Education
+Poptropica,poptropica.com,"Virtual world adventure game designed for kids to explore and solve puzzles.",Kids
+NASA,nasa.gov,"Official website of NASA, providing space and science-related news and information.",Science
+National Institutes of Health (NIH),nih.gov,"Leading U.S. agency for medical and scientific research.",Research
+PubMed,pubmed.ncbi.nlm.nih.gov,"Database of biomedical literature and scientific research articles.",Research
+Nature,nature.com,"Publisher of high-impact scientific journals and news articles on various scientific topics.",Science
+ScienceDirect,sciencedirect.com,"Leading full-text scientific database offering research articles and journals.",Research
+Scientific American,scientificamerican.com,"Popular science magazine covering a wide range of scientific topics.",Science
+The Smithsonian Institution,si.edu,"Research institution and museum complex with extensive scientific collections.",Research
+The European Organization for Nuclear Research (CERN),cern.ch,"Leading research center for particle physics and fundamental science.",Research
+The Royal Society,royalsociety.org,"The UK's national academy of science, promoting scientific excellence.",Science
+Science News,sciencenews.org,"Independent source for news on scientific discoveries and developments.",Science

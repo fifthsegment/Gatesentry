@@ -25,6 +25,7 @@
   import AI from "./routes/ai/ai.svelte";
 
   import { register, init, _ } from "svelte-i18n";
+  import Users from "./routes/users/users.svelte";
   export let url = "";
 
   let loaded = false;
@@ -126,6 +127,9 @@
         </Route>
         <Route path="/ai">
           <AI />
+        </Route>
+        <Route path="/users">
+          <Users />
         </Route>
         <Route path="/" component={Home} />
       </div>

@@ -4,8 +4,8 @@
   import { store } from "../store/apistore";
   import { notificationstore } from "../store/notifications";
   import {
-    buildNotificationError,
-    buildNotificationSuccess,
+    createNotificationError,
+    createNotificationSuccess,
   } from "../lib/utils";
   let value = "";
   export let settingName;
@@ -24,14 +24,14 @@
     const response = await $store.api.setSetting(settingName, value);
     if (response === false) {
       notificationstore.add(
-        buildNotificationError(
+        createNotificationError(
           { subtitle: $_("Unable to save certificate data") },
           $_,
         ),
       );
     } else {
       notificationstore.add(
-        buildNotificationSuccess(
+        createNotificationSuccess(
           { subtitle: $_("Certificate data saved") },
           $_,
         ),

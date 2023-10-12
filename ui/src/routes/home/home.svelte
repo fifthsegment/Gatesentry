@@ -1,10 +1,9 @@
 <script lang="ts">
-  import { Column, Grid, Row } from "carbon-components-svelte";
+  import { Column, Row } from "carbon-components-svelte";
   import { store } from "../../store/apistore";
   import { _ } from "svelte-i18n";
   import imageBin from "../../assets/front.jpg?inline";
   import { Laptop, Mobile } from "carbon-icons-svelte";
-  import { get } from "lodash";
   import Modal from "../../components/modal.svelte";
   import Instructionsphone from "./instructionsphone.svelte";
   import Instructionscomputer from "./instructionscomputer.svelte";
@@ -44,8 +43,9 @@
         <Modal
           bind:open={modalOpenComputer}
           title={$_("1. Setup Gatesentry on your favorite browser.")}
-          children={Instructionscomputer}
-        />
+        >
+          <Instructionscomputer />
+        </Modal>
       </Column>
       <Column>
         <div
@@ -58,8 +58,9 @@
         <Modal
           bind:open={modalOpenPhone}
           title={$_("1. Setup Gatesentry on your favorite browser.")}
-          children={Instructionsphone}
-        />
+        >
+          <Instructionsphone />
+        </Modal>
       </Column>
     </Row>
     <Row>
@@ -89,7 +90,7 @@
       </Column>
     </Row>
   </Column><Column
-    ><div style="margin: 0 auto">
+    ><div style="margin: 0 auto" class="text-center">
       <img src={imageBin} style="width:500px; border:1px solid gray;" />
       <pre>Once properly setup, Gatesentry can filter traffic on all your devices.</pre>
     </div></Column

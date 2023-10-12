@@ -14,8 +14,8 @@
   import { _ } from "svelte-i18n";
   import { notificationstore } from "../store/notifications";
   import {
-    buildNotificationError,
-    buildNotificationSuccess,
+    createNotificationError,
+    createNotificationSuccess,
   } from "../lib/utils";
   let data = null;
   let editingRowId = null;
@@ -34,7 +34,7 @@
       );
 
       notificationstore.add(
-        buildNotificationSuccess(
+        createNotificationSuccess(
           {
             title: $_("Success"),
             subtitle: $_("Block list updated"),
@@ -44,7 +44,7 @@
       );
     } catch (error) {
       notificationstore.add(
-        buildNotificationError(
+        createNotificationError(
           {
             title: $_("Error"),
             subtitle: $_("Unable to save block list"),
