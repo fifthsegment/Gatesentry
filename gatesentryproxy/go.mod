@@ -2,6 +2,10 @@ module bitbucket.org/abdullah_irfan/gatesentryproxy
 
 go 1.17
 
-require golang.org/x/net v0.0.0-20210908191846-a5e095526f91
+require (
+	github.com/h2non/filetype v1.1.3
+	golang.org/x/image v0.13.0
+	golang.org/x/net v0.17.0
+)
 
-require golang.org/x/text v0.3.8 // indirect
+require golang.org/x/text v0.13.0 // indirect
