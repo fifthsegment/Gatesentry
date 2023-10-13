@@ -417,12 +417,23 @@ func RunGateSentry() {
 		if R.IsUserValid(base64string) {
 			rs.Changed = true
 		}
+		log.Println("Status of authuser in isauthuser = ", rs.Changed)
 	})
 
 	ngp.RegisterHandler("isaccessactive", func(bytesReceived *[]byte, rs *gatesentryproxy.GSResponder, gpt *gatesentryproxy.GSProxyPassthru) {
 		*bytesReceived = CannedResponseAccessNotActiveError
 		rs.Changed = false
-		if R.IsUserActive(gpt.User) {
+		rs.Data = []byte("NONE")
+		if R.UserExists(gpt.User) {
+			if R.IsUserActive(gpt.User) {
+				rs.Data = []byte("ACTIVE")
+				rs.Changed = true
+			} else {
+				rs.Data = []byte("INACTIVE")
+				rs.Changed = true
+			}
+		} else {
+			rs.Data = []byte("NOT_FOUND")
 			rs.Changed = true
 		}
 	})

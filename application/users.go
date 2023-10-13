@@ -1,12 +1,11 @@
 package gatesentryf
 
 import (
-	"encoding/base64"
 	"encoding/json"
+	"strings"
 
 	// "fmt"
 	"log"
-	"strings"
 	"time"
 
 	structures "bitbucket.org/abdullah_irfan/gatesentryf/structures"
@@ -72,19 +71,20 @@ func (R *GSRuntime) GSUserGetDataJSON() []byte {
 }
 
 func (R *GSRuntime) LoadUsers() {
-	log.Println("Loading users")
+	log.Println("Load users")
 	usersString := R.GSSettings.Get("authusers")
 	// fmt.Println( usersString );
 	users := []structures.GSUser{}
 	json.Unmarshal([]byte(usersString), &users)
 	// fmt.Println( users )
 	R.AuthUsers = users
-	for i := 0; i < len(R.AuthUsers); i++ {
-		user := R.AuthUsers[i]
-		auth := user.User + ":" + user.Pass
-		R.AuthUsers[i].Base64String = base64.StdEncoding.EncodeToString([]byte(auth))
-		// log.Println("Setting Base64String = "+R.AuthUsers[i].Base64String)
-	}
+	// for i := 0; i < len(R.AuthUsers); i++ {
+	// 	user := R.AuthUsers[i]
+	// 	auth := user.User + ":" + user.Pass
+	// 	log.Println("Setting Base64String = " + auth + " for user = " + user.User + " with pass = " + user.Pass)
+	// 	// R.AuthUsers[i].Base64String = base64.StdEncoding.EncodeToString([]byte(auth))
+	// 	// log.Println("Setting Base64String = "+R.AuthUsers[i].Base64String)
+	// }
 }
 
 func (R *GSRuntime) RemoveUser(data structures.GSUser) {
@@ -105,7 +105,6 @@ func (R *GSRuntime) RemoveUser(data structures.GSUser) {
 }
 
 func (R *GSRuntime) UpdatePassword(username string, password string) {
-	log.Println("Updating Password")
 	for i := 0; i < len(R.AuthUsers); i++ {
 		if R.AuthUsers[i].User == username {
 			R.AuthUsers[i].Pass = password
@@ -160,15 +159,11 @@ func (R *GSRuntime) AddUser(user string, pass string) bool {
 }
 
 func (R *GSRuntime) IsUserValid(base64string string) bool {
-	authheader := strings.SplitN(base64string, " ", 2)
-	if len(authheader) != 2 || authheader[0] != "Basic" {
-		return false
-	}
-	base64string = authheader[1]
+	base64Parts := strings.Split(base64string, " ")
+	base64Main := base64Parts[1]
 	for i := 0; i < len(R.AuthUsers); i++ {
 		user := R.AuthUsers[i]
-		log.Printf(user.Base64String + " == " + base64string)
-		if user.Base64String == base64string {
+		if user.Base64String == base64Main {
 			return true
 		}
 	}
@@ -180,6 +175,16 @@ func (R *GSRuntime) IsUserActive(username string) bool {
 	for i := 0; i < len(R.AuthUsers); i++ {
 		if R.AuthUsers[i].User == username {
 			return R.AuthUsers[i].AllowAccess
+		}
+	}
+	return false
+}
+
+func (R *GSRuntime) UserExists(username string) bool {
+	log.Println("Checking if user = " + username + " exists")
+	for i := 0; i < len(R.AuthUsers); i++ {
+		if R.AuthUsers[i].User == username {
+			return true
 		}
 	}
 	return false
