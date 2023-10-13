@@ -54,14 +54,17 @@ func RegisterEndpoints(
 
 	app.Put("/api/users", jwtMiddleware.Serve, func(ctx iris.Context) {
 		gatesentryWebserverEndpoints.GSApiUserPUT(ctx, settings)
+		runtime.Reload()
 	})
 
 	app.Delete("/api/users/:username", jwtMiddleware.Serve, func(ctx iris.Context) {
 		gatesentryWebserverEndpoints.GSApiUserDELETE(ctx, settings)
+		runtime.Reload()
 	})
 
 	app.Post("/api/users", jwtMiddleware.Serve, func(ctx iris.Context) {
 		gatesentryWebserverEndpoints.GSApiUserCreate(ctx, settings)
+		runtime.Reload()
 	})
 
 	app.Get("/api/consumption", jwtMiddleware.Serve, func(ctx iris.Context) {

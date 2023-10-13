@@ -184,20 +184,39 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// log.Println("Auth enabled = " + user)
+	// user, pass, ok := r.BasicAuth()
+	// log.Println("[GPT] User = " + user + " Pass = " + pass + " Ok = " + strconv.FormatBool(ok))
+	// if !ok || user != "user" || pass != "pass" {
+	// 	log.Println("Unauthorized access from " + client)
+	// 	w.Header().Set("WWW-Authenticate", `Basic realm="Please enter your username and password"`)
+	// 	w.WriteHeader(401)
+	// 	w.Write([]byte("You are unauthorized to access the application.\n"))
+	// 	return
+	// }
+
 	authEnabled := true
 	t := []byte(r.Header.Get("Proxy-Authorization"))
 	authEnabled, _ = IProxy.RunHandler("authenabled", "", &t, passthru)
-
 	user, _, authUser := HandleAuthAndAssignUser(r, passthru, h, authEnabled, client)
 	if authEnabled {
-		if user == "" {
+		if user == "" || user == "127.0.0.1" {
 			w.Header().Set("Proxy-Authenticate", "Basic realm="+"gsrealm")
 			http.Error(w, "Proxy authentication required", http.StatusProxyAuthRequired)
 			log.Printf("Missing required proxy authentication from %v to %v", r.RemoteAddr, r.URL)
 			return
 		} else {
-			isuseractive, _ := IProxy.RunHandler("isaccessactive", "", &EMPTY_BYTES, passthru)
-			if !isuseractive && !isHostLanAddress {
+			_, userAuthStatus := IProxy.RunHandler("isaccessactive", "", &EMPTY_BYTES, passthru)
+			userAuthStatusString := string(userAuthStatus)
+
+			log.Println("User auth status = ", userAuthStatusString, " For user = ", user)
+			if userAuthStatusString == "NOT_FOUND" {
+				w.Header().Set("Proxy-Authenticate", "Basic realm="+"gsrealm")
+				http.Error(w, "Proxy authentication required", http.StatusProxyAuthRequired)
+				log.Printf("Missing required proxy authentication from %v to %v", r.RemoteAddr, r.URL)
+				return
+			}
+			if userAuthStatusString != "ACTIVE" && !isHostLanAddress {
 				showBlockPage(w, r, nil, EMPTY_BYTES)
 				return
 			}

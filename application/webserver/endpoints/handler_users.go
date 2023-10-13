@@ -71,7 +71,7 @@ func GSApiUserCreate(ctx iris.Context, settingsStore *gatesentryWebserverTypes.S
 		// make the username lowercase
 		User:         strings.ToLower(userJson.Username),
 		Pass:         "",
-		Base64String: base64.StdEncoding.EncodeToString([]byte(userJson.Password)),
+		Base64String: base64.StdEncoding.EncodeToString([]byte(userJson.Username + ":" + userJson.Password)),
 		AllowAccess:  userJson.AllowAccess,
 	}
 
@@ -125,7 +125,7 @@ func GSApiUserPUT(ctx iris.Context, settingsStore *gatesentryWebserverTypes.Sett
 		if user.User == userJson.Username {
 			user.AllowAccess = userJson.AllowAccess
 			if len(userJson.Password) > 0 {
-				user.Base64String = base64.StdEncoding.EncodeToString([]byte(userJson.Password))
+				user.Base64String = base64.StdEncoding.EncodeToString([]byte(userJson.Username + ":" + userJson.Password))
 			}
 		}
 		users = append(users, user)
