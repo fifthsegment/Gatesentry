@@ -1,7 +1,6 @@
 package gatesentryproxy
 
 import (
-	"log"
 	"net/http"
 	"strings"
 )
@@ -37,8 +36,8 @@ func HandleAuthAndAssignUser(r *http.Request, passthru *GSProxyPassthru, h Proxy
 			isauth, _ := IProxy.RunHandler("isauthuser", "", &temp, passthru)
 			if !isauth {
 				user = ""
+				return user, pass, authUser
 			}
-			log.Println("Unable to verify user")
 			_ = pass
 		}
 

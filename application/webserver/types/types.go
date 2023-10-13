@@ -99,6 +99,7 @@ type TemporaryRuntime struct {
 	GetTotalConsumptionData func() (string, string)
 	GetApplicationVersion   func() string
 	Logger                  *gatesentryLogger.Log
+	Reload                  func()
 }
 
 type InputArgs struct {
@@ -109,6 +110,7 @@ type InputArgs struct {
 	GetInstallationId       func() string
 	GetTotalConsumptionData func() (string, string)
 	GetApplicationVersion   func() string
+	Reload                  func()
 }
 
 func NewTemporaryRuntime(args InputArgs) *TemporaryRuntime {
@@ -120,5 +122,6 @@ func NewTemporaryRuntime(args InputArgs) *TemporaryRuntime {
 		GetInstallationId:       args.GetInstallationId,
 		GetTotalConsumptionData: args.GetTotalConsumptionData,
 		GetApplicationVersion:   args.GetApplicationVersion,
+		Reload:                  args.Reload,
 	}
 }
