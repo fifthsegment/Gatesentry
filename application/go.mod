@@ -53,9 +53,9 @@ require (
 	github.com/tdewolff/minify/v2 v2.9.10 // indirect
 	github.com/tdewolff/parse/v2 v2.5.5 // indirect
 	github.com/tidwall/btree v0.6.1 // indirect
-	github.com/tidwall/gjson v1.9.0 // indirect
+	github.com/tidwall/gjson v1.9.3 // indirect
 	github.com/tidwall/grect v0.1.2 // indirect
-	github.com/tidwall/match v1.0.3 // indirect
+	github.com/tidwall/match v1.1.1 // indirect
 	github.com/tidwall/pretty v1.2.0 // indirect
 	github.com/tidwall/rtred v0.1.2 // indirect
 	github.com/tidwall/tinyqueue v0.1.1 // indirect
