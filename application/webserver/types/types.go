@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 
 	gatesentryLogger "bitbucket.org/abdullah_irfan/gatesentryf/logger"
-	structures "bitbucket.org/abdullah_irfan/gatesentryf/structures"
+	GatesentryTypes "bitbucket.org/abdullah_irfan/gatesentryf/types"
 )
 
 type GetSettings func(string) string
@@ -70,13 +70,13 @@ func (s *SettingsStore) OnMajorSettingsChange() {
 }
 
 type User struct {
-	Name string `json: "name"`
-	Mail string `json: "mail"`
-	Pass string `json: "pass"`
+	Name string `json:"name"`
+	Mail string `json:"mail"`
+	Pass string `json:"pass"`
 }
 type Login struct {
-	Username string `json: "username"`
-	Pass     string `json: "pass"`
+	Username string `json:"username"`
+	Pass     string `json:"pass"`
 }
 
 type GSGeneral_Settings struct {
@@ -86,15 +86,15 @@ type GSGeneral_Settings struct {
 }
 
 type Datareceiver struct {
-	Key   string `json:key`
-	Value string `json:value`
+	Key   string `json:"key"`
+	Value string `json:"value"`
 }
 
 type TemporaryRuntime struct {
 	GetUserGetJSON          func() []byte
-	AuthUsers               []structures.GSUser
-	RemoveUser              func(structures.GSUser)
-	UpdateUser              func(string, structures.GSUserPublic)
+	AuthUsers               []GatesentryTypes.GSUser
+	RemoveUser              func(GatesentryTypes.GSUser)
+	UpdateUser              func(string, GatesentryTypes.GSUserPublic)
 	GetInstallationId       func() string
 	GetTotalConsumptionData func() (string, string)
 	GetApplicationVersion   func() string
@@ -104,9 +104,9 @@ type TemporaryRuntime struct {
 
 type InputArgs struct {
 	GetUserGetJSON          func() []byte
-	AuthUsers               []structures.GSUser
-	RemoveUser              func(structures.GSUser)
-	UpdateUser              func(string, structures.GSUserPublic)
+	AuthUsers               []GatesentryTypes.GSUser
+	RemoveUser              func(GatesentryTypes.GSUser)
+	UpdateUser              func(string, GatesentryTypes.GSUserPublic)
 	GetInstallationId       func() string
 	GetTotalConsumptionData func() (string, string)
 	GetApplicationVersion   func() string

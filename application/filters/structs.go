@@ -15,8 +15,8 @@ type GSFilter struct {
 }
 
 type GSFILTERLINE struct {
-	Content string `json:Content`
-	Score   int    `json:Score`
+	Content string `json:"Content"`
+	Score   int    `json:"Score"`
 }
 
 // Structs for servicing api endpoints here

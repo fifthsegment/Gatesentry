@@ -3,43 +3,42 @@ package gatesentryWebserverEndpoints
 import (
 	"encoding/json"
 
-	structures "bitbucket.org/abdullah_irfan/gatesentryf/structures"
+	GatesentryTypes "bitbucket.org/abdullah_irfan/gatesentryf/types"
 	gatesentryWebserverTypes "bitbucket.org/abdullah_irfan/gatesentryf/webserver/types"
-
-	"github.com/kataras/iris/v12"
 )
 
-func GSApiConsumptionGET(ctx iris.Context, settings *gatesentryWebserverTypes.SettingsStore, runtime *gatesentryWebserverTypes.TemporaryRuntime) {
-	data := string(runtime.GetUserGetJSON())
+type Datareceiver struct {
+	EnableUsers bool   `json:EnableUsers`
+	Data        string `json:Data`
+}
+
+func GSApiConsumptionGET(data string, settings *gatesentryWebserverTypes.SettingsStore, runtime *gatesentryWebserverTypes.TemporaryRuntime) interface{} {
 	temp := settings.Get("EnableUsers")
 	enableusers := false
 	if temp == "true" {
 		enableusers = true
 	}
-	ctx.JSON(struct {
+	// ctx.JSON(struct {
+	// 	EnableUsers bool
+	// 	Data        string
+	// }{Data: data, EnableUsers: enableusers})
+	return struct {
 		EnableUsers bool
 		Data        string
-	}{Data: data, EnableUsers: enableusers})
+	}{Data: data, EnableUsers: enableusers}
+
 }
 
-func GSApiConsumptionPOST(ctx iris.Context, settings *gatesentryWebserverTypes.SettingsStore, runtime *gatesentryWebserverTypes.TemporaryRuntime) {
+func GSApiConsumptionPOST(temp Datareceiver, settings *gatesentryWebserverTypes.SettingsStore, runtime *gatesentryWebserverTypes.TemporaryRuntime) interface{} {
 	// data := string(R.GSUserGetDataJSON())
 	// ctx.JSON(200, struct{Data string}{Data: data})
-	type Datareceiver struct {
-		EnableUsers bool   `json:EnableUsers`
-		Data        string `json:Data`
-	}
-	var temp Datareceiver
-	err := ctx.ReadJSON(&temp)
-	if err != nil {
 
-	}
 	enableusersstring := "false"
 	if temp.EnableUsers {
 		enableusersstring = "true"
 	}
 	settings.Set("EnableUsers", enableusersstring)
-	users := []structures.GSUserPublic{}
+	users := []GatesentryTypes.GSUserPublic{}
 	json.Unmarshal([]byte(temp.Data), &users)
 	// R.AuthUsers
 	// Run tests for deleted users first
@@ -59,5 +58,6 @@ func GSApiConsumptionPOST(ctx iris.Context, settings *gatesentryWebserverTypes.S
 	for i := 0; i < len(users); i++ {
 		runtime.UpdateUser(users[i].User, users[i])
 	}
-	ctx.JSON(struct{ Data string }{Data: "ok"})
+	// ctx.JSON(struct{ Data string }{Data: "ok"})
+	return struct{ Data string }{Data: "ok"}
 }

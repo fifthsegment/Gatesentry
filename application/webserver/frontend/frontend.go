@@ -44,6 +44,6 @@ func GetFileSystem(useOS bool, dir string, fsys fs.FS) http.FileSystem {
 	return http.FS(fsys)
 }
 
-func GetIrisHandler() http.FileSystem {
+func GetFSHandler() http.FileSystem {
 	return GetFileSystem(false, "files", build)
 }

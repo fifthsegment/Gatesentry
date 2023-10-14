@@ -4,12 +4,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"os/exec"
 	"strconv"
 	"strings"
 	"time"
 
+	"bitbucket.org/abdullah_irfan/gatesentryf/internalfiles"
 	gatesentry2proxy "bitbucket.org/abdullah_irfan/gatesentryf/proxy"
-	structures "bitbucket.org/abdullah_irfan/gatesentryf/structures"
+	GatesentryTypes "bitbucket.org/abdullah_irfan/gatesentryf/types"
 	gatesentryWebserverTypes "bitbucket.org/abdullah_irfan/gatesentryf/webserver/types"
 
 	// "gatesentry2/internalfiles"
@@ -24,7 +26,6 @@ import (
 	"syscall"
 
 	gatesentry2filters "bitbucket.org/abdullah_irfan/gatesentryf/filters"
-	gatesentry2internalfiles "bitbucket.org/abdullah_irfan/gatesentryf/internalfiles"
 	gatesentry2logger "bitbucket.org/abdullah_irfan/gatesentryf/logger"
 	gatesentry2storage "bitbucket.org/abdullah_irfan/gatesentryf/storage"
 )
@@ -75,7 +76,7 @@ type GSRuntime struct {
 	GSUpdateLog                 *gatesentry2storage.MapStore
 	Logger                      *gatesentry2logger.Log
 	Proxy                       *gatesentry2proxy.GSProxy
-	AuthUsers                   []structures.GSUser
+	AuthUsers                   []GatesentryTypes.GSUser
 	FailedConsumptionUpdates    int
 	GSUserDataSaverRunning      bool
 	GSKeepSentryAliveRunning    bool
@@ -107,7 +108,7 @@ func (R *GSRuntime) UpdateConsumption(consumedBytes int64) {
 
 func InitTasks() {
 	if runtime.GOOS == "windows" {
-		data, err := gatesentry2internalfiles.Asset("zoneinfo.zip")
+		data, err := internalfiles.Asset("zoneinfo.zip")
 		if err == nil {
 			log.Println("Creating a zoneinfo file")
 			err = ioutil.WriteFile(GSBASEDIR+"zoneinfo.zip", data, 0755)
@@ -134,6 +135,23 @@ func (R *GSRuntime) init() {
     +-+-+-+-+-+-+-+-+-+-+`
 	fmt.Println(startuptext)
 
+	// kill process on port 53
+	if runtime.GOOS == "windows" {
+		cmd := exec.Command("netstat", "-ano", "|", "findstr", "53")
+		out, err := cmd.Output()
+		if err != nil {
+			log.Println(err.Error())
+		}
+		log.Println(string(out))
+	} else {
+		cmd := exec.Command("lsof", "-i", ":53")
+		out, err := cmd.Output()
+		if err != nil {
+			log.Println(err.Error())
+		}
+		log.Println(string(out))
+	}
+
 	InitTasks()
 	R.MemLogSz = 1024
 	R.MemLog = make([]GSFilterLog, R.MemLogSz)
@@ -141,7 +159,7 @@ func (R *GSRuntime) init() {
 	filters := []gatesentry2filters.GSFilter{}
 	gatesentry2filters.SetBaseDir(GSBASEDIR)
 	R.Filters = gatesentry2filters.LoadFilters(filters)
-	R.AuthUsers = []structures.GSUser{}
+	R.AuthUsers = []GatesentryTypes.GSUser{}
 	gatesentry2storage.SetBaseDir(GSBASEDIR)
 	log.Println("Making a new MapStore for GSSettings")
 	R.GSSettings = gatesentry2storage.NewMapStore("GSSettings", true)

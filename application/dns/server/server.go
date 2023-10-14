@@ -70,7 +70,7 @@ func StartDNSServer(basePath string, ilogger *gatesentryLogger.Log, blockedLists
 	err := server.ListenAndServe()
 	if err != nil {
 		fmt.Println(err)
-		os.Exit(1)
+		// os.Exit(1)
 		return
 	}
 

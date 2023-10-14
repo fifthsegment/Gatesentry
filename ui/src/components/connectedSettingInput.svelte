@@ -23,6 +23,7 @@
 
   let data = null;
   let internalFormValue = null;
+  let loaded = false;
 
   export const updateDataOnBackend = () => {
     updateNetwork(internalFormValue);
@@ -67,33 +68,37 @@
     updateNetwork(internalFormValue);
   };
 
-  onMount(() => {
-    loadAPIData();
+  onMount(async () => {
+    await loadAPIData();
+    loaded = true;
   });
 
   onDestroy(() => {
     data = null;
     internalFormValue = null;
+    loaded = false;
   });
 </script>
 
-{#if type == "radio"}
-  <RadioButtonGroup
-    legendText={labelText}
-    bind:selected={data}
-    on:change={updateFieldRadio}
-  >
-    <RadioButton value="true" labelText={$_("True")} />
-    <RadioButton value="false" labelText={$_("False")} />
-  </RadioButtonGroup>
-{:else}
-  <TextInput
-    {title}
-    {labelText}
-    {helperText}
-    {type}
-    {disabled}
-    value={data ?? ""}
-    on:blur={updateField}
-  />
+{#if loaded}
+  {#if type == "radio"}
+    <RadioButtonGroup
+      legendText={labelText}
+      bind:selected={data}
+      on:change={updateFieldRadio}
+    >
+      <RadioButton value="true" labelText={$_("True")} />
+      <RadioButton value="false" labelText={$_("False")} />
+    </RadioButtonGroup>
+  {:else}
+    <TextInput
+      {title}
+      {labelText}
+      {helperText}
+      {type}
+      {disabled}
+      value={data ?? ""}
+      on:blur={updateField}
+    />
+  {/if}
 {/if}

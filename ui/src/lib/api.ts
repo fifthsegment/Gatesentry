@@ -176,11 +176,12 @@ class AppAPI {
     return p;
   }
 
-  async doCall(endpoint = "/", method = "get", dataTosend = {}): Promise<any> {
+  async doCall(endpoint = "/", method = "get", dataTosend = {}, extraHeaders = {}): Promise<any> {
     const that = this;
     const additionalHeaders = {
       method: method,
       headers: this.getHeaders(),
+      ...extraHeaders
     };
     if (method === "post" || method === "put") {
       // @ts-ignore

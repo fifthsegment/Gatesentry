@@ -5,7 +5,6 @@ import (
 	"strconv"
 
 	gatesentryLogger "bitbucket.org/abdullah_irfan/gatesentryf/logger"
-	"github.com/kataras/iris/v12"
 )
 
 type URLGroup struct {
@@ -25,22 +24,25 @@ type HostGroupResponse struct {
 	All          HostGroupSet `json:"all"`
 }
 
-func ApiGetStats(ctx iris.Context, logger *gatesentryLogger.Log) {
-	fromTimeParam := ctx.URLParam("fromTime")
+func ApiGetStats(fromTimeParam string, logger *gatesentryLogger.Log) interface{} {
 
 	// Parse the fromTimeParam to an integer
 	fromTimeInt, err := strconv.Atoi(fromTimeParam)
 	if err != nil {
-		ctx.StatusCode(iris.StatusBadRequest)
-		ctx.JSON(iris.Map{"error": "Invalid fromTime parameter"})
-		return
+		// ctx.StatusCode(iris.StatusBadRequest)
+		// ctx.JSON(iris.Map{"error": "Invalid fromTime parameter"})
+		return struct {
+			Error string `json:"error"`
+		}{Error: "Invalid fromTime parameter"}
 	}
 
 	logEntriesInterface, err := logger.GetLastXSecondsDNSLogs(int64(fromTimeInt), false)
 	if err != nil {
-		ctx.StatusCode(iris.StatusInternalServerError)
-		ctx.JSON(iris.Map{"error": "Failed to retrieve logs"})
-		return
+		// ctx.StatusCode(iris.StatusInternalServerError)
+		// ctx.JSON(iris.Map{"error": "Failed to retrieve logs"})
+		return struct {
+			Error string `json:"error"`
+		}{Error: "Failed to retrieve logs"}
 	}
 
 	var logEntries []gatesentryLogger.LogEntry
@@ -52,18 +54,20 @@ func ApiGetStats(ctx iris.Context, logger *gatesentryLogger.Log) {
 			logEntries = append(logEntries, entries...)
 		}
 	default:
-		ctx.StatusCode(iris.StatusInternalServerError)
-		ctx.JSON(iris.Map{"error": "Invalid logs format"})
-		return
+		// ctx.StatusCode(iris.StatusInternalServerError)
+		// ctx.JSON(iris.Map{"error": "Invalid logs format"})
+		return struct {
+			Error string `json:"error"`
+		}{Error: "Invalid logs format"}
 	}
 
-	response := struct {
+	return struct {
 		Items []gatesentryLogger.LogEntry `json:"items"`
 	}{
 		Items: logEntries,
 	}
 
-	ctx.JSON(response)
+	// ctx.JSON(response)
 }
 
 func SliceEntries(logs map[string][]gatesentryLogger.LogEntry, dnsResponseType string) map[string]HostGroupWithTotal {
@@ -95,20 +99,24 @@ func SliceEntries(logs map[string][]gatesentryLogger.LogEntry, dnsResponseType s
 	return outputData
 }
 
-func ApiGetStatsByURL(ctx iris.Context, logger *gatesentryLogger.Log) {
+func ApiGetStatsByURL(logger *gatesentryLogger.Log) interface{} {
 	//DAY := 86400
 	WEEK := 604800
 	logEntriesInterface, err := logger.GetLastXSecondsDNSLogs(int64(WEEK), true)
 	if err != nil {
-		ctx.StatusCode(iris.StatusInternalServerError)
-		ctx.JSON(iris.Map{"error": "Failed to retrieve logs"})
-		return
+		// ctx.StatusCode(iris.StatusInternalServerError)
+		// ctx.JSON(iris.Map{"error": "Failed to retrieve logs"})
+		return struct {
+			Error string `json:"error"`
+		}{Error: "Failed to retrieve logs"}
 	}
 
 	if logEntriesInterface == nil {
-		ctx.StatusCode(iris.StatusInternalServerError)
-		ctx.JSON(iris.Map{"error": "Failed to retrieve logs"})
-		return
+		// ctx.StatusCode(iris.StatusInternalServerError)
+		// ctx.JSON(iris.Map{"error": "Failed to retrieve logs"})
+		return struct {
+			Error string `json:"error"`
+		}{Error: "Failed to retrieve logs"}
 	}
 
 	var logEntries []gatesentryLogger.LogEntry
@@ -116,20 +124,27 @@ func ApiGetStatsByURL(ctx iris.Context, logger *gatesentryLogger.Log) {
 	case []gatesentryLogger.LogEntry:
 		logEntries = logs
 	case map[string][]gatesentryLogger.LogEntry:
-		ctx.JSON(HostGroupResponse{
+		// ctx.JSON(HostGroupResponse{
+		// 	ItemsBlocked: SliceEntries(logs, "blocked"),
+		// 	All:          SliceEntries(logs, "all"),
+		// })
+		return HostGroupResponse{
 			ItemsBlocked: SliceEntries(logs, "blocked"),
 			All:          SliceEntries(logs, "all"),
-		})
-		return
+		}
 	default:
-		ctx.StatusCode(iris.StatusInternalServerError)
-		ctx.JSON(iris.Map{"error": "Invalid logs format"})
-		return
+		// ctx.StatusCode(iris.StatusInternalServerError)
+		// ctx.JSON(iris.Map{"error": "Invalid logs format"})
+		return struct {
+			Error string `json:"error"`
+		}{Error: "Invalid logs format"}
 	}
 	if err != nil {
-		ctx.StatusCode(iris.StatusInternalServerError)
-		ctx.JSON(iris.Map{"error": "Failed to retrieve logs"})
-		return
+		// ctx.StatusCode(iris.StatusInternalServerError)
+		// ctx.JSON(iris.Map{"error": "Failed to retrieve logs"})
+		return struct {
+			Error string `json:"error"`
+		}{Error: "Failed to retrieve logs"}
 	}
 
 	// Group log entries by URL and count occurrences
@@ -152,5 +167,6 @@ func ApiGetStatsByURL(ctx iris.Context, logger *gatesentryLogger.Log) {
 		URLGroups: groupedURLs,
 	}
 
-	ctx.JSON(response)
+	// ctx.JSON(response)
+	return response
 }

@@ -72,7 +72,9 @@ func GSwebserverStart(port int) {
 	}
 	runtime := gatesentryWebserverTypes.NewTemporaryRuntime(runtimeArgs)
 
-	gatesentryWebserver.RegisterEndpoints(app, settings, &R.Filters, R.Logger, runtime, R.BoundAddress)
+	// gatesentryWebserver.RegisterEndpoints(app, settings, &R.Filters, R.Logger, runtime, R.BoundAddress)
 
-	app.Listen(":" + strconv.Itoa(GSWebServerPort))
+	gatesentryWebserver.RegisterEndpointsStartServer(&R.Filters, runtime, settings, R.Logger, R.BoundAddress, strconv.Itoa(GSWebServerPort))
+
+	// app.Listen(":" + strconv.Itoa(GSWebServerPort))
 }

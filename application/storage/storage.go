@@ -3,7 +3,7 @@ package gatesentry2storage
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"os"
 	"strconv"
 	"sync"
 )
@@ -31,7 +31,7 @@ func NewStore(name string, encrypt bool) *Store {
 }
 
 func (s *Store) Load() {
-	data, err := ioutil.ReadFile(GSBASEDIR + s.Id)
+	data, err := os.ReadFile(GSBASEDIR + s.Id)
 	if err != nil {
 		fmt.Println("Unable to load Settings file: " + s.Id + " . Will create a new one.")
 		data = []byte{}
@@ -74,7 +74,7 @@ func (s *Store) Persist() {
 	mapJson, _ := json.Marshal(mm)
 
 	b := []byte(string(mapJson))
-	ioutil.WriteFile(GSBASEDIR+s.Id, b, 0644)
+	os.WriteFile(GSBASEDIR+s.Id, b, 0644)
 }
 
 func (s *Store) Set(data []byte) {
