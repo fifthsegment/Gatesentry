@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -101,7 +102,7 @@ var authenticationMiddleware mux.MiddlewareFunc = func(next http.Handler) http.H
 
 		if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
 			ctx := context.WithValue(r.Context(), "username", claims["username"].(string))
-			fmt.Println(claims["username"], claims["nbf"])
+			log.Println("Logged in with username = ", claims["username"])
 			next.ServeHTTP(w, r.WithContext(ctx))
 		} else {
 			SendError(w, err, http.StatusUnauthorized)
@@ -124,6 +125,16 @@ var verifyAuthHandler HttpHandlerFunc = func(w http.ResponseWriter, r *http.Requ
 	}{Validated: true, Jwtoken: "", Message: `Username : ` + username})
 }
 
+var indexHandler http.HandlerFunc = func(w http.ResponseWriter, r *http.Request) {
+	data := gatesentryWebserverFrontend.GetIndexHtml()
+	if data == nil {
+		SendError(w, errors.New("Error getting index.html"), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html")
+	w.Write(data)
+}
+
 func RegisterEndpointsStartServer(Filters *[]gatesentryFilters.GSFilter,
 	runtime *gatesentryWebserverTypes.TemporaryRuntime,
 	settings *gatesentryWebserverTypes.SettingsStore,
@@ -142,24 +153,41 @@ func RegisterEndpointsStartServer(Filters *[]gatesentryFilters.GSFilter,
 			return
 		}
 		if !VerifyAdminUser(data.Username, data.Pass, settings) {
-			w.WriteHeader(http.StatusUnauthorized)
-			w.Write([]byte("Invalid username or password"))
+
+			SendJSON(w, struct {
+				Validated bool
+			}{Validated: false})
+
 			return
 		}
 		ctx := context.WithValue(r.Context(), "username", data.Username)
-
 		tokenCreationHandler(w, r.WithContext(ctx))
 	}))
+
+	internalServer.Get("/api/about", HttpHandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		responseJson := gatesentryWebserverEndpoints.GSApiAboutGET(runtime)
+		SendJSON(w, responseJson)
+	}))
+
 	internalServer.Get("/api/auth/verify", authenticationMiddleware, verifyAuthHandler)
 
 	internalServer.Get("/api/filters", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
-		getAllFilters(w, r, Filters)
+		responseJson := gatesentryWebserverEndpoints.GetAllFilters(Filters)
+		SendJSON(w, responseJson)
 	})
 	internalServer.Get("/api/filters/{id}", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
-		getSingleFilter(w, r, Filters)
+		vars := mux.Vars(r)
+		requestedId := vars["id"]
+		responseJson := gatesentryWebserverEndpoints.GetSingleFilter(requestedId, Filters)
+		SendJSON(w, responseJson)
 	})
 	internalServer.Post("/api/filters/{id}", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
-		postSingleFilter(w, r, Filters)
+		vars := mux.Vars(r)
+		requestedId := vars["id"]
+		var dataReceived []gatesentryFilters.GSFILTERLINE
+		ParseJSONRequest(r, &dataReceived)
+		responseJson := gatesentryWebserverEndpoints.PostSingleFilter(requestedId, dataReceived, Filters)
+		SendJSON(w, responseJson)
 		runtime.Reload()
 	})
 
@@ -282,23 +310,6 @@ func RegisterEndpointsStartServer(Filters *[]gatesentryFilters.GSFilter,
 		SendJSON(w, output)
 	})
 
-	// internalServer.Get("/fs/bundle.js", HttpHandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-	// 	data, err := gatesentryWebserverBinarydata.Asset("fs/bundle.js")
-	// 	if err != nil {
-	// 		SendError(w, err, http.StatusInternalServerError)
-	// 		return
-	// 	}
-	// 	w.Header().Set("Content-Type", "text/javascript")
-	// 	w.Write(data)
-	// }))
-
-	// internalServer.router
-	// handle static files
-	// internalServer.router.PathPrefix("/fs").Handler(
-	// 	http.FileServer(
-	// 		gatesentryWebserverFrontend.GetFSHandler(),
-	// 	))
-
 	internalServer.router.PathPrefix("/fs/").Handler(
 		http.StripPrefix("/fs",
 			http.FileServer(
@@ -307,15 +318,12 @@ func RegisterEndpointsStartServer(Filters *[]gatesentryFilters.GSFilter,
 		),
 	)
 
-	internalServer.Get("/", HttpHandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		data := gatesentryWebserverFrontend.GetIndexHtml()
-		if data == nil {
-			SendError(w, errors.New("Error getting index.html"), http.StatusInternalServerError)
-			return
-		}
-		w.Header().Set("Content-Type", "text/html")
-		w.Write(data)
-	}))
+	internalServer.Get("/", indexHandler)
+	internalServer.Get("/login", indexHandler)
+	internalServer.Get("/stats", indexHandler)
+	internalServer.Get("/users", indexHandler)
+	internalServer.Get("/dns", indexHandler)
+	internalServer.Get("/settings", indexHandler)
 
 	internalServer.ListenAndServe(":" + port)
 

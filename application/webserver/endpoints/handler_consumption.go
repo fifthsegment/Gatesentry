@@ -8,8 +8,8 @@ import (
 )
 
 type Datareceiver struct {
-	EnableUsers bool   `json:EnableUsers`
-	Data        string `json:Data`
+	EnableUsers bool   `json:"EnableUsers"`
+	Data        string `json:"Data"`
 }
 
 func GSApiConsumptionGET(data string, settings *gatesentryWebserverTypes.SettingsStore, runtime *gatesentryWebserverTypes.TemporaryRuntime) interface{} {

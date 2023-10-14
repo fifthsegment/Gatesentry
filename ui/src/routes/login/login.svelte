@@ -39,7 +39,7 @@
           ),
         );
         return;
-      } else if (data?.Validated) {
+      } else if (data?.Validated && data.Validated == "true") {
         localStorage.removeItem("jwt");
         localStorage.setItem("jwt", data.Jwtoken);
         store.loginSuccesful(data.Jwtoken);
