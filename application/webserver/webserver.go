@@ -125,7 +125,7 @@ var verifyAuthHandler HttpHandlerFunc = func(w http.ResponseWriter, r *http.Requ
 	}{Validated: true, Jwtoken: "", Message: `Username : ` + username})
 }
 
-var indexHandler http.HandlerFunc = func(w http.ResponseWriter, r *http.Request) {
+var indexHandler HttpHandlerFunc = func(w http.ResponseWriter, r *http.Request) {
 	data := gatesentryWebserverFrontend.GetIndexHtml()
 	if data == nil {
 		SendError(w, errors.New("Error getting index.html"), http.StatusInternalServerError)
