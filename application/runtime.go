@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"os/exec"
-	"strconv"
 	"strings"
 	"time"
 
@@ -49,12 +48,10 @@ var GSAPIBASEPOINT = "a"
 var GSBASEDIR = "./"
 
 // const INSTALLATIONID = "3";
-var GSVer = float32(1.0)
-var GSVerString = "1.0"
+var GSVerString = ""
 
-func SetGSVer(v float32) {
-	GSVer = v
-	GSVerString = fmt.Sprintf("%f", GSVer)
+func SetGSVer(v string) {
+	GSVerString = v
 }
 
 func SetInstallationID(a string) {
@@ -284,8 +281,7 @@ func (R *GSRuntime) GetInstallationId() string {
 }
 
 func GetApplicationVersion() string {
-	ver := strconv.FormatFloat(float64(GSVer), 'g', -1, 32)
-	return ver
+	return GSVerString
 }
 
 func (R *GSRuntime) GetApplicationVersion() string {

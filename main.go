@@ -138,11 +138,8 @@ func main() {
 	_ = baseendpointforupdates
 
 	updaterInterval := time.Second * 60 * 30
-	version, err := strconv.ParseFloat(GATESENTRY_VERSION, 32)
-	if err != nil {
-		log.Fatal(err)
-	}
-	application.SetGSVer(float32(version))
+
+	application.SetGSVer(GATESENTRY_VERSION)
 	application.SetAPIBaseEndpoint(baseendpoint)
 	// macaddr:=getMac();
 	// APPLicense := BuildInstallationIDFromMac(macaddr)
