@@ -9,7 +9,6 @@ import (
 	gatesentry2storage "bitbucket.org/abdullah_irfan/gatesentryf/storage"
 	gatesentryWebserver "bitbucket.org/abdullah_irfan/gatesentryf/webserver"
 	gatesentryWebserverTypes "bitbucket.org/abdullah_irfan/gatesentryf/webserver/types"
-	"github.com/kataras/iris/v12"
 )
 
 func GSwebserverStart(port int) {
@@ -36,7 +35,7 @@ func GSwebserverStart(port int) {
 
 	fmt.Println("Webserver is listening on : " + ggport)
 
-	app := iris.New()
+	// app := iris.New()
 
 	gatesentry2storage.SetBaseDir(GSBASEDIR)
 	R.GSWebSettings = gatesentry2storage.NewMapStore("GSWebSettings", true)
