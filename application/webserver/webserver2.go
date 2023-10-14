@@ -11,7 +11,6 @@ import (
 	gatesentryFilters "bitbucket.org/abdullah_irfan/gatesentryf/filters"
 	gatesentry2logger "bitbucket.org/abdullah_irfan/gatesentryf/logger"
 	gatesentryTypes "bitbucket.org/abdullah_irfan/gatesentryf/types"
-	gatesentryWebserverBinarydata "bitbucket.org/abdullah_irfan/gatesentryf/webserver/binarydata"
 	gatesentryWebserverEndpoints "bitbucket.org/abdullah_irfan/gatesentryf/webserver/endpoints"
 	gatesentryWebserverFrontend "bitbucket.org/abdullah_irfan/gatesentryf/webserver/frontend"
 	gatesentryWebserverTypes "bitbucket.org/abdullah_irfan/gatesentryf/webserver/types"
@@ -283,32 +282,30 @@ func RegisterEndpointsStartServer(Filters *[]gatesentryFilters.GSFilter,
 		SendJSON(w, output)
 	})
 
-	internalServer.Get("/", HttpHandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		data, err := gatesentryWebserverBinarydata.Asset("fs/index.html")
-		if err != nil {
-			SendError(w, err, http.StatusInternalServerError)
-			return
-		}
-		w.Header().Set("Content-Type", "text/html")
-		w.Write(data)
-	}))
-
-	internalServer.Get("/fs/bundle.js", HttpHandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		data, err := gatesentryWebserverBinarydata.Asset("fs/bundle.js")
-		if err != nil {
-			SendError(w, err, http.StatusInternalServerError)
-			return
-		}
-		w.Header().Set("Content-Type", "text/javascript")
-		w.Write(data)
-	}))
+	// internalServer.Get("/fs/bundle.js", HttpHandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	// 	data, err := gatesentryWebserverBinarydata.Asset("fs/bundle.js")
+	// 	if err != nil {
+	// 		SendError(w, err, http.StatusInternalServerError)
+	// 		return
+	// 	}
+	// 	w.Header().Set("Content-Type", "text/javascript")
+	// 	w.Write(data)
+	// }))
 
 	// internalServer.router
 	// handle static files
-	internalServer.router.PathPrefix("/fs").Handler(
-		http.FileServer(
-			gatesentryWebserverFrontend.GetFSHandler(),
-		))
+	// internalServer.router.PathPrefix("/fs").Handler(
+	// 	http.FileServer(
+	// 		gatesentryWebserverFrontend.GetFSHandler(),
+	// 	))
+
+	internalServer.router.PathPrefix("/fs/").Handler(
+		http.StripPrefix("/fs",
+			http.FileServer(
+				gatesentryWebserverFrontend.GetFSHandler(),
+			),
+		),
+	)
 
 	internalServer.Get("/", HttpHandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		data := gatesentryWebserverFrontend.GetIndexHtml()
