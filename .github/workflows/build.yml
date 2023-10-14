@@ -1,9 +1,15 @@
 name: Go Build and Upload
 
+# on:
+#   push:
+#     branches:
+#       - master
+
 on:
-  push:
-    branches:
-      - master
+  workflow_run:
+    workflows: ["Bump Version"] # Name of the workflow in bump-version.yml
+    types:
+      - completed
 
 permissions:
   contents: write

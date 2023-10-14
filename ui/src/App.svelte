@@ -5,7 +5,7 @@
     Content,
     SideNav,
   } from "carbon-components-svelte";
-  import { afterUpdate } from "svelte";
+  import { afterUpdate, onMount } from "svelte";
 
   import { Router, Route } from "svelte-routing";
   import Login from "./routes/login/login.svelte";
@@ -26,6 +26,7 @@
 
   import { register, init, _ } from "svelte-i18n";
   import Users from "./routes/users/users.svelte";
+  import Globalheader from "./components/globalheader.svelte";
   export let url = "";
 
   let loaded = false;
@@ -43,7 +44,7 @@
   const setupResult = setup();
 
   let isSideNavOpen = false;
-  let version = "1.9.0";
+  let version = "-";
   let userProfilePanelOpen = false;
   let tokenVerified = false;
   // setupI18n();
@@ -72,25 +73,20 @@
   //     navigate("/login");
   //   }
   // });
+  // onMount(() => {});
+
+  // $: {
+  //   if (setupResult) {
+
+  //   }
+  // }
 </script>
 
 <Router {url}>
   {#await setupResult}
     Loading...
   {:then}
-    <Header
-      company="Gatesentry"
-      platformName={version}
-      bind:isSideNavOpen
-      persistentHamburgerMenu={true}
-    >
-      <svelte:fragment slot="skip-to-content">
-        <SkipToContent />
-      </svelte:fragment>
-      <Headermenu />
-
-      <Headerrightnav {userProfilePanelOpen} />
-    </Header>
+    <Globalheader bind:isSideNavOpen bind:userProfilePanelOpen />
 
     <SideNav bind:isOpen={isSideNavOpen} rail>
       <Sidenavmenu />

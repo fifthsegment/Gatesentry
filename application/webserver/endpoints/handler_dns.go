@@ -7,23 +7,11 @@ import (
 	gatesentryWebserverTypes "bitbucket.org/abdullah_irfan/gatesentryf/webserver/types"
 )
 
-// func BadResponse(ctx iris.Context, err error) {
-// 	ctx.StatusCode(iris.StatusBadRequest)
-// 	ctx.JSON(struct {
-// 		Ok      bool   `json:"ok"`
-// 		Message string `json:"message"`
-// 	}{Ok: false, Message: err.Error()})
-// }
-
 func GSApiDNSEntriesCustom(data string, settings *gatesentryWebserverTypes.SettingsStore, runtime *gatesentryWebserverTypes.TemporaryRuntime) interface{} {
 
 	// parse json string to struct
 	var customEntries []gatesentryTypes.DNSCustomEntry
 	json.Unmarshal([]byte(data), &customEntries)
-
-	// ctx.JSON(struct {
-	// 	Data []gatesentryTypes.DNSCustomEntry `json:"data"`
-	// }{Data: customEntries})
 
 	return struct {
 		Data []gatesentryTypes.DNSCustomEntry `json:"data"`

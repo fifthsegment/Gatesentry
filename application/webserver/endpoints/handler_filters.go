@@ -1,29 +1,55 @@
 package gatesentryWebserverEndpoints
 
-// func ApiFiltersGET(ctx iris.Context, filters *[]gatesentryFilters.GSFilter) {
-// 	comm := GatesentryTypes.GSWebServerCommunicator{Action: ""}
-// 	x := gatesentryFilters.GetAPIResponse("GET /filters", *filters, ctx, &comm)
-// 	ctx.JSON(x)
-// }
+import (
+	"encoding/json"
+	"log"
 
-// func GSApiFiltersGET(ctx iris.Context, filters *[]gatesentryFilters.GSFilter) {
-// 	comm := GatesentryTypes.GSWebServerCommunicator{Action: ""}
-// 	x := gatesentryFilters.GetAPIResponse("GET /filters", *filters, ctx, &comm)
-// 	ctx.JSON(x)
-// }
+	gatesentryFilters "bitbucket.org/abdullah_irfan/gatesentryf/filters"
+)
 
-// func ApiFilterSingleGET(ctx iris.Context, filters *[]gatesentryFilters.GSFilter) {
-// 	comm := GatesentryTypes.GSWebServerCommunicator{Action: ""}
-// 	x := gatesentryFilters.GetAPIResponse("GET /filters/:id", *filters, ctx, &comm)
-// 	ctx.JSON(x)
-// }
+var GetAllFilters = func(Filters *[]gatesentryFilters.GSFilter) interface{} {
+	filterList := []gatesentryFilters.GSAPIStructFilter{}
+	for _, v := range *Filters {
+		filterList = append(filterList, gatesentryFilters.GSAPIStructFilter{
+			Id:      v.Id,
+			Name:    v.FilterName,
+			Handles: v.Handles,
+			Entries: v.FileContents,
+		})
+	}
+	return filterList
+}
 
-// func ApiFilterSinglePOST(ctx iris.Context, filters *[]gatesentryFilters.GSFilter, initGatesentry func()) {
-// 	comm := GatesentryTypes.GSWebServerCommunicator{Action: ""}
-// 	gatesentryFilters.GetAPIResponse("POST /filters/:id", *filters, ctx, &comm)
-// 	if comm.Action == "RESTART" {
-// 		initGatesentry()
-// 	}
-// 	// The handler takes control from here so we don't need to write a response;
-// 	// ctx.JSON(iris.StatusOK, x )
-// }
+var GetSingleFilter = func(requestedId string, Filters *[]gatesentryFilters.GSFilter) interface{} {
+	filterList := []gatesentryFilters.GSAPIStructFilter{}
+	for _, v := range *Filters {
+		if v.Id == requestedId {
+			filterList = append(filterList, gatesentryFilters.GSAPIStructFilter{
+				Id:      v.Id,
+				Name:    v.FilterName,
+				Handles: v.Handles,
+				Entries: v.FileContents,
+			})
+		}
+	}
+	return filterList
+}
+
+var PostSingleFilter = func(requestedId string, dataReceived []gatesentryFilters.GSFILTERLINE, Filters *[]gatesentryFilters.GSFilter) interface{} {
+	for _, v := range *Filters {
+		if v.Id == requestedId {
+			data, err := json.MarshalIndent(dataReceived, "", "  ")
+			if err != nil {
+				return struct {
+					Response string `json:"response"`
+					Error    string `json:"error"`
+				}{Error: err.Error(), Response: "Error!"}
+			}
+			log.Println("Data received = " + string(data))
+			gatesentryFilters.GSSaveFilterFile(v.FileName, string(data))
+		}
+	}
+	return struct {
+		Response string `json:"response"`
+	}{"Ok!"}
+}

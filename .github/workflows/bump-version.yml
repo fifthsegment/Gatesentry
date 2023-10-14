@@ -1,0 +1,31 @@
+name: Bump Version
+on:
+  push:
+    branches:
+      - main # adjust this to your main development branch
+
+jobs:
+  bump-version:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Bump version in main.go
+        id: bump-version
+        run: |
+          VERSION=$(grep -oP 'var GATESENTRY_VERSION = "\K(.*?)(?=")' main.go)
+          IFS='.' read -r -a VERSION_ARRAY <<< "$VERSION"
+          NEW_MINOR=$(( ${VERSION_ARRAY[1]} + 1 ))
+          NEW_VERSION="${VERSION_ARRAY[0]}.${NEW_MINOR}.${VERSION_ARRAY[2]}"
+          sed -i -E "s/var GATESENTRY_VERSION = \"[0-9]+\.[0-9]+\.[0-9]+\"/var GATESENTRY_VERSION = \"$NEW_VERSION\"/" main.go
+          echo "::set-output name=new-version::$NEW_VERSION"
+
+      - name: Commit and tag
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git add main.go
+          git commit -m "Bump version to ${{ steps.bump-version.outputs.new-version }}"
+          git tag "v${{ steps.bump-version.outputs.new-version }}"
+          git push origin main --tags
