@@ -30,6 +30,7 @@ jobs:
       - name: Build
         id: build
         run: |
+          TAG=v$(awk -F'"' '/var GATESENTRY_VERSION =/ { print $2 }' main.go)
           mkdir bin
           go get -v
           ls -la
@@ -46,7 +47,6 @@ jobs:
           chmod +x gatesentry-macos
           git config user.name "GitHub Action"
           git config user.email "fifthsegment@github.com"
-          TAG=v$(date -Iseconds | sed 's/[T:\+]/-/g')
           echo "$TAG"
           echo "tag=$TAG" >> $GITHUB_OUTPUT
       - name: Setup Inno Setup
