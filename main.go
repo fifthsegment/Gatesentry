@@ -35,7 +35,7 @@ import (
 var GSPROXYPORT = "10413"
 var GSBASEDIR = ""
 var Baseendpointv2 = "https://www.applicationilter.com/api/"
-var GATESENTRY_VERSION = "1.12.0"
+var GATESENTRY_VERSION = "1.13.0"
 var GS_BOUND_ADDRESS = ":"
 
 var contentTypeToExt = map[string]string{
