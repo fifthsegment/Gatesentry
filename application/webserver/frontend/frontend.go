@@ -5,7 +5,6 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
-	"os"
 )
 
 //go:embed files
@@ -29,11 +28,11 @@ func GetIndexHtml() []byte {
 
 }
 
-func GetFileSystem(useOS bool, dir string, fsys fs.FS) http.FileSystem {
-	if useOS {
-		log.Println("[Webserver] using live mode")
-		return http.FS(os.DirFS(dir))
-	}
+func GetFileSystem(dir string, fsys fs.FS) http.FileSystem {
+	// if useOS {
+	// 	log.Println("[Webserver] using live mode")
+	// 	return http.FS(os.DirFS(dir))
+	// }
 
 	log.Print("[Webserver] using embed mode")
 	fsys, err := fs.Sub(fsys, dir)
@@ -45,5 +44,11 @@ func GetFileSystem(useOS bool, dir string, fsys fs.FS) http.FileSystem {
 }
 
 func GetFSHandler() http.FileSystem {
-	return GetFileSystem(false, "files", build)
+	log.Print("[Webserver] using embed mode")
+	fsys, err := fs.Sub(build, "files")
+	if err != nil {
+		panic(err)
+	}
+
+	return http.FS(fsys)
 }
