@@ -23,12 +23,12 @@ jobs:
           NEW_MINOR=$(( ${VERSION_ARRAY[1]} + 1 ))
           echo "New Minor: $NEW_MINOR"
           
-          NEW_VERSION="${VERSION_ARRAY[0]}.${NEW_MINOR}.${VERSION_ARRAY[2]}"
+          NEW_VERSION="${VERSION_ARRAY[0]}.${NEW_MINOR}.0"
           echo "New Version: $NEW_VERSION"
           
-          sed -i.bak -e "s/var GATESENTRY_VERSION = \"[0-9]+\.[0-9]+\.[0-9]+\"/var GATESENTRY_VERSION = \"$NEW_VERSION\"/" main.go && rm main.go.bak
-          SED_EXIT_CODE=$?
-          echo "Sed Exit Code: $SED_EXIT_CODE"
+          perl -i -pe "s/var GATESENTRY_VERSION = \"[0-9]+\.[0-9]+\.[0-9]+\"/var GATESENTRY_VERSION = \"$NEW_VERSION\"/" main.go
+          PERL_EXIT_CODE=$?
+          echo "Perl Exit Code: $PERL_EXIT_CODE"
           
           cat main.go  # This will output the contents of main.go to the log, so you can verify the substitution
           
