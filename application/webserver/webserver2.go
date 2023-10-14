@@ -125,11 +125,11 @@ var verifyAuthHandler HttpHandlerFunc = func(w http.ResponseWriter, r *http.Requ
 	}{Validated: true, Jwtoken: "", Message: `Username : ` + username})
 }
 
-func RunWebServer2(Filters *[]gatesentryFilters.GSFilter,
+func RegisterEndpointsStartServer(Filters *[]gatesentryFilters.GSFilter,
 	runtime *gatesentryWebserverTypes.TemporaryRuntime,
 	settings *gatesentryWebserverTypes.SettingsStore,
 	logger *gatesentry2logger.Log,
-	boundAddress *string) {
+	boundAddress *string, port string) {
 
 	// newRouter := mux.NewRouter()
 
@@ -320,6 +320,6 @@ func RunWebServer2(Filters *[]gatesentryFilters.GSFilter,
 		w.Write(data)
 	}))
 
-	internalServer.ListenAndServe(":9090")
+	internalServer.ListenAndServe(":" + port)
 
 }
