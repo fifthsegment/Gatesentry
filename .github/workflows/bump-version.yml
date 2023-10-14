@@ -2,7 +2,7 @@ name: Bump Version
 on:
   push:
     branches:
-      - main # adjust this to your main development branch
+      - master # adjust this to your main development branch
 
 jobs:
   bump-version:
