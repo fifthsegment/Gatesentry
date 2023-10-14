@@ -7,7 +7,8 @@ import (
 	"log"
 	"strings"
 
-	structures "bitbucket.org/abdullah_irfan/gatesentryf/structures"
+	GatesentryTypes "bitbucket.org/abdullah_irfan/gatesentryf/types"
+
 	gatesentryWebserverTypes "bitbucket.org/abdullah_irfan/gatesentryf/webserver/types"
 
 	"github.com/kataras/iris/v12"
@@ -16,7 +17,7 @@ import (
 const ERROR_FAILED_VALIDATION = "Username or password too short. Username must be at least 3 characters and password must be at least 10 characters"
 
 type UserEndpointJson struct {
-	Users []structures.GSUser `json:"users"`
+	Users []GatesentryTypes.GSUser `json:"users"`
 }
 
 type UserInputJsonSingle struct {
@@ -46,28 +47,28 @@ func HandleError(ctx iris.Context, errorMessage string) {
 	ctx.StatusCode(iris.StatusBadRequest)
 }
 
-func GSApiUsersGET(ctx iris.Context, runtime *gatesentryWebserverTypes.TemporaryRuntime, usersString string) {
-	users := []structures.GSUser{}
+func GSApiUsersGET(runtime *gatesentryWebserverTypes.TemporaryRuntime, usersString string) interface{} {
+	users := []GatesentryTypes.GSUser{}
 	json.Unmarshal([]byte(usersString), &users)
 
-	ctx.JSON(UserEndpointJson{Users: users})
+	return UserEndpointJson{Users: users}
 }
 
-func GSApiUserCreate(ctx iris.Context, settingsStore *gatesentryWebserverTypes.SettingsStore) {
-	var userJson UserInputJsonSingle
-	err := ctx.ReadJSON(&userJson)
+func GSApiUserCreate(userJson UserInputJsonSingle, settingsStore *gatesentryWebserverTypes.SettingsStore) interface{} {
+
 	// check if username and password are greater than 3 characters
 	if ValidateUserInputJsonSingle(userJson) == false {
-		HandleError(ctx, ERROR_FAILED_VALIDATION)
-		return
+		// HandleError(ctx, ERROR_FAILED_VALIDATION)
+		// return
+		return struct{ Error string }{Error: ERROR_FAILED_VALIDATION}
 	}
 
-	if err != nil {
-		HandleError(ctx, err.Error())
-		return
-	}
+	// if err != nil {
+	// 	HandleError(ctx, err.Error())
+	// 	return
+	// }
 
-	var newUser = structures.GSUser{
+	var newUser = GatesentryTypes.GSUser{
 		// make the username lowercase
 		User:         strings.ToLower(userJson.Username),
 		Pass:         "",
@@ -76,14 +77,15 @@ func GSApiUserCreate(ctx iris.Context, settingsStore *gatesentryWebserverTypes.S
 	}
 
 	var existingJson = settingsStore.GetSettings("authusers")
-	var existingUsers []structures.GSUser
+	var existingUsers []GatesentryTypes.GSUser
 	json.Unmarshal([]byte(existingJson), &existingUsers)
 
 	// check if user exists
 	for _, user := range existingUsers {
 		if user.User == newUser.User {
-			HandleError(ctx, "User already exists")
-			return
+			// HandleError(ctx, "User already exists")
+			// return
+			return struct{ Error string }{Error: "User already exists"}
 		}
 	}
 
@@ -92,35 +94,29 @@ func GSApiUserCreate(ctx iris.Context, settingsStore *gatesentryWebserverTypes.S
 	usersString, err := json.Marshal(newUsers)
 
 	if err != nil {
-		HandleError(ctx, err.Error())
-		return
+		// HandleError(ctx, err.Error())
+		// return
+		return struct{ Error string }{Error: err.Error()}
 	}
 
 	log.Println(fmt.Sprintf("Users: %s", usersString))
 	settingsStore.SetSettings("authusers", string(usersString))
-	ctx.JSON(UserEndpointJsonOk{Ok: true})
+	// ctx.JSON(UserEndpointJsonOk{Ok: true})
+	return UserEndpointJsonOk{Ok: true}
 }
 
-func GSApiUserPUT(ctx iris.Context, settingsStore *gatesentryWebserverTypes.SettingsStore) {
-	var userJson UserInputJsonSingle
-	err := ctx.ReadJSON(&userJson)
-
-	if err != nil {
-		HandleError(ctx, err.Error())
-		return
-	}
+func GSApiUserPUT(settingsStore *gatesentryWebserverTypes.SettingsStore, userJson UserInputJsonSingle) interface{} {
 
 	if len(userJson.Password) > 0 && ValidateUserInputJsonSingle(userJson) == false {
-		HandleError(ctx, ERROR_FAILED_VALIDATION)
-		return
+		return struct{ Error string }{Error: ERROR_FAILED_VALIDATION}
 	}
 
 	var existingJson = settingsStore.GetSettings("authusers")
-	var existingUsers []structures.GSUser
+	var existingUsers []GatesentryTypes.GSUser
 	json.Unmarshal([]byte(existingJson), &existingUsers)
 
 	// update the user in existing users
-	var users []structures.GSUser
+	var users []GatesentryTypes.GSUser
 	for _, user := range existingUsers {
 		if user.User == userJson.Username {
 			user.AllowAccess = userJson.AllowAccess
@@ -134,24 +130,22 @@ func GSApiUserPUT(ctx iris.Context, settingsStore *gatesentryWebserverTypes.Sett
 	usersString, err := json.Marshal(users)
 	if err != nil {
 		log.Println(fmt.Sprintf("Error marshalling users: %s", err.Error()))
-		HandleError(ctx, err.Error())
-		return
+		return struct{ Error string }{Error: err.Error()}
 	}
 	log.Printf("Users: %s", usersString)
 	settingsStore.SetSettings("authusers", string(usersString))
 
-	ctx.JSON(UserEndpointJsonOk{Ok: true})
+	return UserEndpointJsonOk{Ok: true}
 }
 
-func GSApiUserDELETE(ctx iris.Context, settingsStore *gatesentryWebserverTypes.SettingsStore) {
-	var username = ctx.Params().Get("username")
+func GSApiUserDELETE(username string, settingsStore *gatesentryWebserverTypes.SettingsStore) interface{} {
 
 	var existingJson = settingsStore.GetSettings("authusers")
-	var existingUsers []structures.GSUser
+	var existingUsers []GatesentryTypes.GSUser
 	json.Unmarshal([]byte(existingJson), &existingUsers)
 
 	// update the user in existing users
-	var users []structures.GSUser
+	var users []GatesentryTypes.GSUser
 	for _, user := range existingUsers {
 		if user.User != username {
 			users = append(users, user)
@@ -160,10 +154,12 @@ func GSApiUserDELETE(ctx iris.Context, settingsStore *gatesentryWebserverTypes.S
 
 	usersString, err := json.Marshal(users)
 	if err != nil {
-		HandleError(ctx, err.Error())
-		return
+		// HandleError(ctx, err.Error())
+		// return
+		return struct{ Error string }{Error: err.Error()}
 	}
 
 	settingsStore.SetSettings("authusers", string(usersString))
-	ctx.JSON(UserEndpointJsonOk{Ok: true})
+	// ctx.JSON(UserEndpointJsonOk{Ok: true})
+	return UserEndpointJsonOk{Ok: true}
 }

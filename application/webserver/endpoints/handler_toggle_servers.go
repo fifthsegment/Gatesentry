@@ -2,23 +2,31 @@ package gatesentryWebserverEndpoints
 
 import (
 	gatesentryLogger "bitbucket.org/abdullah_irfan/gatesentryf/logger"
-	"github.com/kataras/iris/v12"
 )
 
-func ApiToggleServer(ctx iris.Context, logger *gatesentryLogger.Log) {
-	id := ctx.Params().Get("id")
+func ApiToggleServer(id string, logger *gatesentryLogger.Log) interface{} {
 
 	switch id {
 	case "dns":
-		ctx.StatusCode(iris.StatusOK)
-		ctx.JSON(iris.Map{"success": true})
+		// ctx.StatusCode(iris.StatusOK)
+		// ctx.JSON(iris.Map{"success": true})
+		return struct {
+			Success bool `json:"success"`
+		}{Success: true}
 	case "http":
-		ctx.StatusCode(iris.StatusOK)
-		ctx.JSON(iris.Map{"success": true})
+		// ctx.StatusCode(iris.StatusOK)
+		// ctx.JSON(iris.Map{"success": true})
+		return struct {
+			Success bool `json:"success"`
+		}{Success: true}
 	default:
-		ctx.StatusCode(iris.StatusBadRequest)
-		ctx.JSON(iris.Map{"error": "Invalid id"})
-		return
+		// ctx.StatusCode(iris.StatusBadRequest)
+		// ctx.JSON(iris.Map{"error": "Invalid id"})
+		// return
+		return struct {
+			Error string `json:"error"`
+		}{Error: "Invalid id"}
+
 	}
 
 }

@@ -4,7 +4,7 @@
 // zoneinfo.zip
 // DO NOT EDIT!
 
-package gatesentry2internalfiles
+package internalfiles
 
 import (
 	"bytes"

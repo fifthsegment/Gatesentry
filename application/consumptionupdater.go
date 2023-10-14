@@ -1,7 +1,7 @@
 package gatesentryf
 
 import (
-	gscommonweb "bitbucket.org/abdullah_irfan/gatesentryf/commonweb"
+	GatesentryTypes "bitbucket.org/abdullah_irfan/gatesentryf/types"
 
 	// "fmt"
 	"encoding/json"
@@ -21,7 +21,7 @@ type GSConsumptionContainer struct {
 
 func GSGetConsumptionData(installId string) (int64, string, error) {
 	log.Println("Obtaining consumption data ")
-	gscon := gscommonweb.GSConsumptionUpdater{Id: installId}
+	gscon := GatesentryTypes.GSConsumptionUpdater{Id: installId}
 	_, err := json.Marshal(gscon)
 	if err != nil {
 		// panic(err)

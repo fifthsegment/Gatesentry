@@ -6,7 +6,6 @@ require (
 	github.com/abourget/goproxy v0.0.0-20170220221050-fcf497103e7b
 	github.com/antonholmquist/jason v1.0.0
 	github.com/badoux/checkmail v1.2.1
-	github.com/dgrijalva/jwt-go v3.2.0+incompatible
 	github.com/elazarl/goproxy v0.0.0-20210801061803-8e322dfb79c4
 	github.com/iris-contrib/middleware/jwt v0.0.0-20210110101738-6d0a4d799b5d
 	github.com/kardianos/service v1.2.0

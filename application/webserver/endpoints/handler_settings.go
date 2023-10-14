@@ -7,11 +7,9 @@ import (
 
 	gatesentryWebserverTypes "bitbucket.org/abdullah_irfan/gatesentryf/webserver/types"
 	"github.com/badoux/checkmail"
-	"github.com/kataras/iris/v12"
 )
 
-func GSApiSettingsGET(ctx iris.Context, settings *gatesentryWebserverTypes.SettingsStore) {
-	requestedId := ctx.Params().Get("id")
+func GSApiSettingsGET(requestedId string, settings *gatesentryWebserverTypes.SettingsStore) interface{} {
 	switch requestedId {
 	case "general_settings":
 		value := settings.Get(requestedId)
@@ -24,38 +22,30 @@ func GSApiSettingsGET(ctx iris.Context, settings *gatesentryWebserverTypes.Setti
 		} else {
 			value = string(valueJson)
 		}
-		ctx.JSON(struct{ Value string }{Value: value})
+		return struct{ Value string }{Value: value}
 		break
 	case "blocktimes", "strictness", "timezone", "idemail", "enable_https_filtering", "capem", "keypem", "enable_dns_server", "dns_custom_entries", "ai_scanner_url", "enable_ai_image_filtering", "EnableUsers":
 		value := settings.Get(requestedId)
-		ctx.JSON(struct {
+		return struct {
 			Key   string
 			Value string
-		}{Key: requestedId, Value: value})
-		break
+		}{Key: requestedId, Value: value}
 	case "timenow":
 		t := time.Now()
 		loc, _ := time.LoadLocation(settings.Get("timezone"))
 		t = t.In(loc)
 		value := t.Format(time.UnixDate)
 
-		ctx.JSON(struct {
+		return struct {
 			Key   string
 			Value string
-		}{Key: requestedId, Value: value})
-		break
+		}{Key: requestedId, Value: value}
 	}
+	return nil
 }
 
-func GSApiSettingsPOST(ctx iris.Context, settings *gatesentryWebserverTypes.SettingsStore) {
-	requestedId := ctx.Params().Get("id")
-	_ = requestedId
+func GSApiSettingsPOST(requestedId string, settings *gatesentryWebserverTypes.SettingsStore, temp gatesentryWebserverTypes.Datareceiver) interface{} {
 
-	var temp gatesentryWebserverTypes.Datareceiver
-	err := ctx.ReadJSON(&temp)
-	if err != nil {
-		return
-	}
 	switch requestedId {
 	case "idemail":
 		err := checkmail.ValidateFormat(temp.Value)
@@ -63,8 +53,7 @@ func GSApiSettingsPOST(ctx iris.Context, settings *gatesentryWebserverTypes.Sett
 			temp.Value = "ERROR: Unable to Validate your email"
 			// fmt.Printf("Code: %s, Msg: %s", smtpErr.Code(), smtpErr)
 			// fmt.Fprint(w, "Unable to validate your email address.");
-			ctx.JSON(temp)
-			return
+			return temp
 		}
 	}
 
@@ -98,5 +87,5 @@ func GSApiSettingsPOST(ctx iris.Context, settings *gatesentryWebserverTypes.Sett
 
 	settings.InitGatesentry()
 	// fmt.Println( temp );
-	ctx.JSON(temp)
+	return temp
 }

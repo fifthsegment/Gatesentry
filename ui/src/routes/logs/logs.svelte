@@ -13,8 +13,9 @@
   import { format } from "timeago.js";
   import { store } from "../../store/apistore";
   import _ from "lodash";
+  import { onDestroy, onMount } from "svelte";
   let search = "";
-  let clear;
+  let interval = null;
   let logs = [];
   let logsToRender = [];
 
@@ -25,8 +26,6 @@
       logsToRender = [...logs.slice(0, 30).map(itemToDataItem)];
     });
   };
-
-  loadAPIData();
 
   const itemToDataItem = (item, index) => ({
     id: item.ip + item.time + index + item.url,
@@ -51,11 +50,16 @@
               .map((item, index) => itemToDataItem(item, index)),
           ]
         : logsToRender;
-
-    clearInterval(clear);
-
-    clear = setInterval(loadAPIData, 5000);
   }
+
+  onDestroy(() => {
+    if (interval) clearInterval(interval);
+  });
+
+  onMount(() => {
+    loadAPIData();
+    interval = setInterval(loadAPIData, 5000);
+  });
 </script>
 
 <Grid>

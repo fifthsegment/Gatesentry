@@ -35,8 +35,12 @@
   };
 
   const saveAPIData = () => {
+    const filteredData = data.map((item) => {
+      return { domain: item.domain, ip: item.ip };
+    });
+
     $store.api
-      .doCall(url, "post", data)
+      .doCall(url, "post", filteredData, { "Content-Type": "application/json" })
       .then(function (json) {
         if (json.ok == true) {
           loadAPIData();

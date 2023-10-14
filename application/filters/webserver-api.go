@@ -4,11 +4,11 @@ import (
 	"encoding/json"
 	"log"
 
-	gatesentry2structures "bitbucket.org/abdullah_irfan/gatesentryf/structures"
+	GatesentryTypes "bitbucket.org/abdullah_irfan/gatesentryf/types"
 	"github.com/kataras/iris/v12"
 )
 
-func GetAPIResponse(endpoint string, Filters []GSFilter, ctx iris.Context, comm *gatesentry2structures.GSWebServerCommunicator) interface{} {
+func GetAPIResponse(endpoint string, Filters []GSFilter, ctx iris.Context, comm *GatesentryTypes.GSWebServerCommunicator) interface{} {
 	switch endpoint {
 	case "GET /filters":
 		x := []GSAPIStructFilter{}

@@ -2,15 +2,10 @@ package gatesentryf
 
 import (
 	"fmt"
-	"os"
-
-	// "bufio"
 	"io/ioutil"
 	"net"
+	"os"
 	"strings"
-	// "net/http"
-	// "crypto/x509"
-	// "strconv"
 )
 
 var Baseendpointv2 string

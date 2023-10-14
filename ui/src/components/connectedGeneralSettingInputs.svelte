@@ -41,6 +41,7 @@
       SETTING_GENERAL_SETTINGS,
       JSON.stringify(updateData),
     );
+    console.log("response", response);
     if (response === false) {
       notificationstore.add(
         createNotificationError({ subtitle: $_("Unable to save setting") }, $_),
@@ -50,6 +51,7 @@
         createNotificationSuccess({ subtitle: $_("Setting updated") }, $_),
       );
     }
+    await loadAPIData();
   };
 
   const updateField = async (event) => {

@@ -2,13 +2,11 @@ package gatesentryf
 
 import (
 	"encoding/json"
-	"strings"
-
-	// "fmt"
 	"log"
+	"strings"
 	"time"
 
-	structures "bitbucket.org/abdullah_irfan/gatesentryf/structures"
+	GatesentryTypes "bitbucket.org/abdullah_irfan/gatesentryf/types"
 )
 
 var GSUserDataSaverRunning bool
@@ -35,7 +33,6 @@ func (R *GSRuntime) GSUserDataSaverMonitor() {
 * Saves user bandwidth data to the disk
  */
 func (R *GSRuntime) GSUserDataSaver() {
-
 	tempusers := R.AuthUsers
 	b, err := json.Marshal(tempusers)
 
@@ -50,17 +47,15 @@ func (R *GSRuntime) GSUserDataSaver() {
 func (R *GSRuntime) UpdateUserData(username string, data uint64) {
 	for i := 0; i < len(R.AuthUsers); i++ {
 		if R.AuthUsers[i].User == username {
-			// log.Println("Updating user data for user = " +username)
 			R.AuthUsers[i].DataConsumed += data
-			// fmt.Println(R.AuthUsers[i])
 		}
 	}
 }
 
 func (R *GSRuntime) GSUserGetDataJSON() []byte {
-	temp := []structures.GSUserPublic{}
+	temp := []GatesentryTypes.GSUserPublic{}
 	for i := 0; i < len(R.AuthUsers); i++ {
-		tuser := structures.GSUserPublic{User: R.AuthUsers[i].User, DataConsumed: R.AuthUsers[i].DataConsumed, AllowAccess: R.AuthUsers[i].AllowAccess}
+		tuser := GatesentryTypes.GSUserPublic{User: R.AuthUsers[i].User, DataConsumed: R.AuthUsers[i].DataConsumed, AllowAccess: R.AuthUsers[i].AllowAccess}
 		temp = append(temp, tuser)
 	}
 	b, err := json.Marshal(temp)
@@ -73,34 +68,24 @@ func (R *GSRuntime) GSUserGetDataJSON() []byte {
 func (R *GSRuntime) LoadUsers() {
 	log.Println("Load users")
 	usersString := R.GSSettings.Get("authusers")
-	// fmt.Println( usersString );
-	users := []structures.GSUser{}
+
+	users := []GatesentryTypes.GSUser{}
 	json.Unmarshal([]byte(usersString), &users)
-	// fmt.Println( users )
+
 	R.AuthUsers = users
-	// for i := 0; i < len(R.AuthUsers); i++ {
-	// 	user := R.AuthUsers[i]
-	// 	auth := user.User + ":" + user.Pass
-	// 	log.Println("Setting Base64String = " + auth + " for user = " + user.User + " with pass = " + user.Pass)
-	// 	// R.AuthUsers[i].Base64String = base64.StdEncoding.EncodeToString([]byte(auth))
-	// 	// log.Println("Setting Base64String = "+R.AuthUsers[i].Base64String)
-	// }
 }
 
-func (R *GSRuntime) RemoveUser(data structures.GSUser) {
-	// R.LoadUsers();
-	// found := false;
+func (R *GSRuntime) RemoveUser(data GatesentryTypes.GSUser) {
 	log.Println("Removing username = " + data.User)
-	newusers := []structures.GSUser{}
+
+	newusers := []GatesentryTypes.GSUser{}
 	for i := 0; i < len(R.AuthUsers); i++ {
 		if R.AuthUsers[i].User != data.User {
 			newusers = append(newusers, R.AuthUsers[i])
 		}
 	}
+
 	R.AuthUsers = newusers
-	// if ( !found ){
-	// 	R.AddUser(data.User, data.Password);
-	// }
 	R.GSUserDataSaver()
 }
 
@@ -114,7 +99,7 @@ func (R *GSRuntime) UpdatePassword(username string, password string) {
 	R.init()
 }
 
-func (R *GSRuntime) UpdateUser(username string, data structures.GSUserPublic) {
+func (R *GSRuntime) UpdateUser(username string, data GatesentryTypes.GSUserPublic) {
 	// R.LoadUsers();
 	found := false
 	for i := 0; i < len(R.AuthUsers); i++ {
@@ -145,7 +130,7 @@ func (R *GSRuntime) AddUser(user string, pass string) bool {
 	if len(user) == 0 || len(pass) == 0 {
 		return false
 	}
-	Guser := structures.GSUser{User: user, Pass: pass}
+	Guser := GatesentryTypes.GSUser{User: user, Pass: pass}
 	tempusers := append(R.AuthUsers, Guser)
 
 	b, err := json.Marshal(tempusers)
