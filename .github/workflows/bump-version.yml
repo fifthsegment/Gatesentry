@@ -40,5 +40,4 @@ jobs:
           git config user.email "actions@github.com"
           git add main.go
           git commit -m "Bump version to ${{ steps.bump-version.outputs.new-version }}"
-          git tag "v${{ steps.bump-version.outputs.new-version }}"
-          git push origin master --tags
+          git push origin master
