@@ -10,8 +10,6 @@ import (
 	GatesentryTypes "bitbucket.org/abdullah_irfan/gatesentryf/types"
 
 	gatesentryWebserverTypes "bitbucket.org/abdullah_irfan/gatesentryf/webserver/types"
-
-	"github.com/kataras/iris/v12"
 )
 
 const ERROR_FAILED_VALIDATION = "Username or password too short. Username must be at least 3 characters and password must be at least 10 characters"
@@ -42,10 +40,10 @@ func ValidateUserInputJsonSingle(userJson UserInputJsonSingle) bool {
 	return true
 }
 
-func HandleError(ctx iris.Context, errorMessage string) {
-	ctx.JSON(UserEndpointJsonError{Ok: false, Error: errorMessage})
-	ctx.StatusCode(iris.StatusBadRequest)
-}
+// func HandleError(ctx iris.Context, errorMessage string) {
+// 	ctx.JSON(UserEndpointJsonError{Ok: false, Error: errorMessage})
+// 	ctx.StatusCode(iris.StatusBadRequest)
+// }
 
 func GSApiUsersGET(runtime *gatesentryWebserverTypes.TemporaryRuntime, usersString string) interface{} {
 	users := []GatesentryTypes.GSUser{}

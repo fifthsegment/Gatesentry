@@ -48,7 +48,12 @@ var postSingleFilter = func(w http.ResponseWriter, r *http.Request, Filters *[]g
 
 	for _, v := range *Filters {
 		if v.Id == requestedId {
-			data, _ := json.MarshalIndent(dataReceived, "", "  ")
+			data, err := json.MarshalIndent(dataReceived, "", "  ")
+			if err != nil {
+				log.Println("Error marshalling data")
+				SendError(w, err, http.StatusInternalServerError)
+				return
+			}
 			log.Println("Data received = " + string(data))
 			gatesentryFilters.GSSaveFilterFile(v.FileName, string(data))
 		}

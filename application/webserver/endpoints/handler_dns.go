@@ -5,16 +5,15 @@ import (
 
 	gatesentryTypes "bitbucket.org/abdullah_irfan/gatesentryf/types"
 	gatesentryWebserverTypes "bitbucket.org/abdullah_irfan/gatesentryf/webserver/types"
-	"github.com/kataras/iris/v12"
 )
 
-func BadResponse(ctx iris.Context, err error) {
-	ctx.StatusCode(iris.StatusBadRequest)
-	ctx.JSON(struct {
-		Ok      bool   `json:"ok"`
-		Message string `json:"message"`
-	}{Ok: false, Message: err.Error()})
-}
+// func BadResponse(ctx iris.Context, err error) {
+// 	ctx.StatusCode(iris.StatusBadRequest)
+// 	ctx.JSON(struct {
+// 		Ok      bool   `json:"ok"`
+// 		Message string `json:"message"`
+// 	}{Ok: false, Message: err.Error()})
+// }
 
 func GSApiDNSEntriesCustom(data string, settings *gatesentryWebserverTypes.SettingsStore, runtime *gatesentryWebserverTypes.TemporaryRuntime) interface{} {
 
