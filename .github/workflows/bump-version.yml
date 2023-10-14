@@ -41,4 +41,4 @@ jobs:
           git add main.go
           git commit -m "Bump version to ${{ steps.bump-version.outputs.new-version }}"
           git tag "v${{ steps.bump-version.outputs.new-version }}"
-          git push origin main --tags
+          git push origin master --tags
