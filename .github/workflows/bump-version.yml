@@ -14,11 +14,11 @@ jobs:
       - name: Bump version in main.go
         id: bump-version
         run: |
-          VERSION=$(grep -oP 'var GATESENTRY_VERSION = "\K(.*?)(?=")' main.go)
+          VERSION=$(awk -F'"' '/var GATESENTRY_VERSION =/ { print $2 }' main.go)
           IFS='.' read -r -a VERSION_ARRAY <<< "$VERSION"
           NEW_MINOR=$(( ${VERSION_ARRAY[1]} + 1 ))
           NEW_VERSION="${VERSION_ARRAY[0]}.${NEW_MINOR}.${VERSION_ARRAY[2]}"
-          sed -i -E "s/var GATESENTRY_VERSION = \"[0-9]+\.[0-9]+\.[0-9]+\"/var GATESENTRY_VERSION = \"$NEW_VERSION\"/" main.go
+          sed -i.bak -e "s/var GATESENTRY_VERSION = \"[0-9]+\.[0-9]+\.[0-9]+\"/var GATESENTRY_VERSION = \"$NEW_VERSION\"/" main.go && rm main.go.bak
           echo "::set-output name=new-version::$NEW_VERSION"
 
       - name: Commit and tag
