@@ -5,9 +5,8 @@ import (
 	"net/http"
 
 	gatesentry2filters "bitbucket.org/abdullah_irfan/gatesentryf/filters"
-	gatesentry2proxy "bitbucket.org/abdullah_irfan/gatesentryf/proxy"
 	gatesentry2responder "bitbucket.org/abdullah_irfan/gatesentryf/responder"
-	"github.com/elazarl/goproxy"
+	"gopkg.in/elazarl/goproxy.v1"
 	// "strings"
 )
 
@@ -47,13 +46,13 @@ var FilterHosts goproxy.FuncReqHandler = func(r *http.Request, ctx *goproxy.Prox
 
 	responder = &gatesentry2responder.GSFilterResponder{Blocked: false}
 	RunFilter("url/all_exception_urls", r.URL.String(), responder)
-	if responder.Blocked {
-		gatesentry2proxy.SetSessionData(ctx, "DONT_TOUCH", true)
-		// A blocked here means the url is present in the list
-		// The list in this case happens to be the exception site list
-		// So a url on the list means to not to block it.
-		return r, nil
-	}
+	// if responder.Blocked {
+	// 	gatesentry2proxy.SetSessionData(ctx, "DONT_TOUCH", true)
+	// 	// A blocked here means the url is present in the list
+	// 	// The list in this case happens to be the exception site list
+	// 	// So a url on the list means to not to block it.
+	// 	return r, nil
+	// }
 
 	responder = &gatesentry2responder.GSFilterResponder{Blocked: false}
 	RunFilter("url/all_blocked_urls", r.URL.String(), responder)

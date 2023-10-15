@@ -30,7 +30,7 @@
     title: "Requests served",
     axes: {
       bottom: {
-        title: "DNS Requests in the past week",
+        title: "DNS + Proxy Requests in the past week",
         mapsTo: "date",
         scaleType: "time",
       },
