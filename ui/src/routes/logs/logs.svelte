@@ -19,10 +19,17 @@
   let logs = [];
   let logsToRender = [];
 
+  const queryParams = () => {
+    if (search.length > 0) {
+      return `?search=${search}`;
+    }
+    return "";
+  };
+
   const loadAPIData = () => {
-    $store.api.doCall("/logs/viewlive").then(function (json) {
+    $store.api.doCall("/logs/viewlive" + queryParams()).then(function (json) {
       logs = JSON.parse(json.Items) as Array<any>;
-      if (search.length > 0) return;
+      // if (search.length > 0) return;
       logsToRender = [...logs.slice(0, 30).map(itemToDataItem)];
     });
   };
@@ -32,6 +39,7 @@
     ip: item.ip,
     time: format(item.time * 1000),
     url: _.truncate(item.url, { length: 50 }),
+    proxyResponseType: item.proxyResponseType,
   });
 
   const clearSearch = () => {
@@ -39,18 +47,39 @@
     logsToRender = [...logs.slice(0, 30).map(itemToDataItem)];
   };
 
+  const startInterval = () => {
+    if (interval) clearInterval(interval);
+    interval = setInterval(loadAPIData, 5000);
+  };
+
   $: {
-    logsToRender =
-      search.length > 0
-        ? [
-            ...logs
-              .filter(
-                (item) => item.url.includes(search) || item.ip.includes(search),
-              )
-              .map((item, index) => itemToDataItem(item, index)),
-          ]
-        : logsToRender;
+    if (search.length > 0) {
+      clearInterval(interval);
+      loadAPIData();
+      startInterval();
+    } else {
+      loadAPIData();
+      startInterval();
+    }
   }
+
+  // $: {
+  //   logsToRender =
+  //     search.length > 0
+  //       ? [
+  //           ...logs
+  //             .filter(
+  //               (item) => item.url.includes(search) || item.ip.includes(search),
+  //             )
+  //             .map((item, index) => itemToDataItem(item, index)),
+  //         ]
+  //       : logsToRender;
+  //   if (search.length > 0) {
+  //     clearInterval(interval);
+  //   } else {
+  //     startInterval();
+  //   }
+  // }
 
   onDestroy(() => {
     if (interval) clearInterval(interval);
@@ -58,7 +87,7 @@
 
   onMount(() => {
     loadAPIData();
-    interval = setInterval(loadAPIData, 5000);
+    startInterval();
   });
 </script>
 
@@ -104,6 +133,10 @@
             {
               key: "url",
               value: "URL",
+            },
+            {
+              key: "proxyResponseType",
+              value: "Response Type",
             },
           ]}
           rows={logsToRender}

@@ -31,6 +31,7 @@ var httpTransport = &http.Transport{
 
 func NewGSProxyPassthru() *GSProxyPassthru {
 	p := GSProxyPassthru{}
+	p.ProxyActionToLog = ProxyActionFilterNone
 	return &p
 }
 
@@ -184,17 +185,6 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// log.Println("Auth enabled = " + user)
-	// user, pass, ok := r.BasicAuth()
-	// log.Println("[GPT] User = " + user + " Pass = " + pass + " Ok = " + strconv.FormatBool(ok))
-	// if !ok || user != "user" || pass != "pass" {
-	// 	log.Println("Unauthorized access from " + client)
-	// 	w.Header().Set("WWW-Authenticate", `Basic realm="Please enter your username and password"`)
-	// 	w.WriteHeader(401)
-	// 	w.Write([]byte("You are unauthorized to access the application.\n"))
-	// 	return
-	// }
-
 	authEnabled := true
 	t := []byte(r.Header.Get("Proxy-Authorization"))
 	authEnabled, _ = IProxy.RunHandler("authenabled", "", &t, passthru)
@@ -223,8 +213,11 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	timeblocked, _ := IProxy.RunHandler("timeallowed", "", &EMPTY_BYTES, passthru)
+	timeblocked, _ := IProxy.RunHandler(FILTER_TIME, "", &EMPTY_BYTES, passthru)
 	if timeblocked {
+		requestUrlBytes_log := []byte(r.URL.String())
+		passthru.ProxyActionToLog = ProxyActionBlockedTime
+		IProxy.RunHandler("log", "", &requestUrlBytes_log, passthru)
 		showBlockPage(w, r, nil, EMPTY_BYTES)
 		return
 	}
@@ -244,14 +237,20 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	action := ACTION_NONE
 
 	requestUrlBytes := []byte(r.URL.String())
-	isBlockedInternet, _ := IProxy.RunHandler("blockinternet", "", &requestUrlBytes, passthru)
+	isBlockedInternet, _ := IProxy.RunHandler(FILTER_USER_ACCESS_DISABLED, "", &requestUrlBytes, passthru)
 	if isBlockedInternet {
+		requestUrlBytes_log := []byte(r.URL.String())
+		passthru.ProxyActionToLog = ProxyActionBlockedInternetForUser
+		IProxy.RunHandler("log", "", &requestUrlBytes_log, passthru)
 		showBlockPage(w, r, nil, BLOCKED_INTERNET_BYTES)
 		return
 	}
 
-	isBlockedUrl, _ := IProxy.RunHandler("url", "", &requestUrlBytes, passthru)
+	isBlockedUrl, _ := IProxy.RunHandler(FILTER_ACCESS_URL, "", &requestUrlBytes, passthru)
 	if isBlockedUrl {
+		requestUrlBytes_log := []byte(r.URL.String())
+		passthru.ProxyActionToLog = ProxyActionBlockedUrl
+		IProxy.RunHandler("log", "", &requestUrlBytes_log, passthru)
 		showBlockPage(w, r, nil, BLOCKED_URL_BYTES)
 		return
 	}
@@ -279,18 +278,15 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		action = ACTION_NONE
 	}
 
-	IProxy.RunHandler("log", "", &requestUrlBytes, passthru)
-
-	switch action {
-	case ACTION_SSL_BUMP:
-		HandleSSLBump(r, w, user, authUser, passthru)
-		return
-	case ACTION_BLOCK_REQUEST:
-		showBlockPage(w, r, nil, EMPTY_BYTES)
+	if action == ACTION_SSL_BUMP {
+		HandleSSLBump(r, w, user, authUser, passthru, IProxy)
 		return
 	}
 
 	if r.Method == "CONNECT" {
+		requestUrlBytes_log := []byte(r.URL.String())
+		passthru.ProxyActionToLog = ProxyActionSSLDirect
+		IProxy.RunHandler("log", "", &requestUrlBytes_log, passthru)
 		HandleSSLConnectDirect(r, w, user, passthru)
 		return
 	}
@@ -343,16 +339,17 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	contentTypeStatusBlocked, _ := IProxy.RunHandler("contenttypeblocked", "", &contentTypeBytes, passthru)
 
 	if contentTypeStatusBlocked {
+		requestUrlBytes_log := []byte(r.URL.String())
+		passthru.ProxyActionToLog = ProxyActionBlockedFileType
+		IProxy.RunHandler("log", "", &requestUrlBytes_log, passthru)
 		showBlockPage(w, r, nil, BLOCKED_CONTENT_TYPE)
 		return
 	}
 
-	// Create a buffer to hold a copy of the data
 	var buf bytes.Buffer
 	limitedReader := &io.LimitedReader{R: resp.Body, N: int64(MaxContentScanSize)}
 	teeReader := io.TeeReader(limitedReader, &buf)
 
-	// Read the entire response from the TeeReader into a byte slice
 	localCopyData, err := io.ReadAll(teeReader)
 
 	if err != nil {
@@ -392,12 +389,17 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		log.Printf("File type: %s. MIME: %s\n", kind.Extension, kind.MIME.Value)
 		contentType = kind.MIME.Value
 	}
-
-	if ScanMedia(localCopyData, contentType, r, w, resp, buf, passthru) == true {
+	responseSentMedia, proxyActionTaken := ScanMedia(localCopyData, contentType, r, w, resp, buf, passthru)
+	if responseSentMedia == true {
+		passthru.ProxyActionToLog = proxyActionTaken
+		IProxy.RunHandler("log", "", &requestUrlBytes, passthru)
 		return
 	}
 
-	if ScanHTML(localCopyData, contentType, r, w, resp, buf, passthru) == true {
+	responseSentText, proxyActionTaken := ScanText(localCopyData, contentType, r, w, resp, buf, passthru)
+	if responseSentText == true {
+		passthru.ProxyActionToLog = proxyActionTaken
+		IProxy.RunHandler("log", "", &requestUrlBytes, passthru)
 		return
 	}
 
@@ -411,12 +413,10 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		destwithcounter.Write(localCopyData)
 		gzw.Close()
 	} else {
-		// log.Printf("No content encoding for = " + r.URL.String());
 		w.Header().Set("Content-Length", strconv.Itoa(len(localCopyData)))
 		copyResponseHeader(w, resp)
 		destwithcounter := &DataPassThru{Writer: w, Contenttype: contentType, Passthru: passthru}
 		destwithcounter.Write(localCopyData)
-		// w.Write(content)
 	}
 }
 

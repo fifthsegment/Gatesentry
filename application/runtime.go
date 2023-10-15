@@ -246,7 +246,11 @@ wR8g0gOPPV1l
 		log_location = GSBASEDIR + log_location
 	}
 
-	R.Logger = gatesentry2logger.NewLogger(log_location)
+	if R.Logger == nil {
+		R.Logger = gatesentry2logger.NewLogger(log_location)
+	} else {
+		log.Println("Gatesentry Logger already exists")
+	}
 
 	for i := 0; i < len(R.Filters); i++ {
 		// log.Println( R.GSSettings.GetInt("strictness") )

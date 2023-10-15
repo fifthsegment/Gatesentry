@@ -5,7 +5,13 @@ import (
 )
 
 func ApiLogsGET(logger *gatesentryLogger.Log) interface{} {
-	items := `[` + logger.GetLog(1) + `]`
+	items := `[` + logger.GetLog() + `]`
+	// ctx.JSON(struct{ Items string }{Items: items})
+	return struct{ Items string }{Items: items}
+}
+
+func ApiLogsSearchGET(logger *gatesentryLogger.Log, search string) interface{} {
+	items := `[` + logger.GetLogSearch(search) + `]`
 	// ctx.JSON(struct{ Items string }{Items: items})
 	return struct{ Items string }{Items: items}
 }

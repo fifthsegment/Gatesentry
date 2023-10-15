@@ -17,8 +17,14 @@ type ContentScannerInput struct {
 	Url         string
 }
 
-func ScanMedia(dataToScan []byte, contentType string, r *http.Request, w http.ResponseWriter, resp *http.Response, buf bytes.Buffer, passthru *GSProxyPassthru) bool {
+func ScanMedia(dataToScan []byte, contentType string,
+	r *http.Request,
+	w http.ResponseWriter,
+	resp *http.Response,
+	buf bytes.Buffer,
+	passthru *GSProxyPassthru) (bool, ProxyAction) {
 	var httpResponseSent bool = false
+	var proxyActionPerformed ProxyAction = ProxyActionFilterNone
 	if filetype.IsAudio(dataToScan) || filetype.IsVideo(dataToScan) || filetype.IsImage(dataToScan) || isImage(contentType) || isVideo(contentType) {
 		destwithcounter := &DataPassThru{
 			Writer:      w,
@@ -37,11 +43,12 @@ func ScanMedia(dataToScan []byte, contentType string, r *http.Request, w http.Re
 			log.Println(err)
 			showBlockPage(w, r, nil, PROXY_ERROR_UNABLE_TO_MARSHALL_DATA_FOR_SCANNING)
 			httpResponseSent = true
-			return httpResponseSent
+			return httpResponseSent, ProxyActionFilterError
 		}
 
 		isBlocked, reasonForBlock := IProxy.RunHandler("contentscannerMedia", "", &contentScannerInputBytes, passthru)
 		if isBlocked {
+			proxyActionPerformed = ProxyActionBlockedMediaContent
 			var reasonForBlockArray []string
 			err := json.Unmarshal(reasonForBlock, &reasonForBlockArray)
 			if err != nil {
@@ -62,14 +69,25 @@ func ScanMedia(dataToScan []byte, contentType string, r *http.Request, w http.Re
 		}
 		log.Println("IO Copy done for url = ", r.URL.String())
 	}
-	return httpResponseSent
+	return httpResponseSent, proxyActionPerformed
 }
 
-func ScanHTML(dataToScan []byte, contentType string, r *http.Request, w http.ResponseWriter, resp *http.Response, buf bytes.Buffer, passthru *GSProxyPassthru) bool {
+func ScanText(dataToScan []byte,
+	contentType string,
+	r *http.Request,
+	w http.ResponseWriter,
+	resp *http.Response,
+	buf bytes.Buffer,
+	passthru *GSProxyPassthru) (bool, ProxyAction) {
 	var httpResponseSent bool = false
+	var proxyActionPerformed ProxyAction = ProxyActionFilterNone
+
 	if strings.Contains(contentType, "html") || len(contentType) == 0 {
 		log.Printf("Content type is html")
-		modified, _ := IProxy.RunHandler("content", contentType, (&dataToScan), passthru)
+		isBlocked, _ := IProxy.RunHandler("content", contentType, (&dataToScan), passthru)
+		if isBlocked {
+			proxyActionPerformed = ProxyActionBlockedTextContent
+		}
 
 		// dataToScan = []byte(strings.Replace(string(dataToScan), "</html>", `<script>
 		// console.log('Gatesentry filtered');
@@ -83,9 +101,9 @@ func ScanHTML(dataToScan []byte, contentType string, r *http.Request, w http.Res
 		// </script>
 		// </html>`, 1))
 
-		if modified {
+		if isBlocked {
 			resp.Header.Set("Content-Type", "text/html; charset=utf-8")
 		}
 	}
-	return httpResponseSent
+	return httpResponseSent, proxyActionPerformed
 }

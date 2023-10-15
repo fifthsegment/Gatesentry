@@ -1,5 +1,26 @@
 package gatesentryproxy
 
+const FILTER_TIME = "timeallowed"
+const FILTER_USER_ACCESS_DISABLED = "blockinternet"
+const FILTER_ACCESS_URL = "url"
+const PROXY_ACTION_SSL_DIRECT = "ssldirect"
+const FILTER_FILE_TYPE = "contenttypeblocked"
+
+type ProxyAction string
+
+const (
+	ProxyActionBlockedTextContent     ProxyAction = "blocked_text_content"
+	ProxyActionBlockedMediaContent    ProxyAction = "blocked_media_content"
+	ProxyActionBlockedFileType        ProxyAction = "blocked_file_type"
+	ProxyActionBlockedTime            ProxyAction = "blocked_time"
+	ProxyActionBlockedInternetForUser ProxyAction = "blocked_internet_for_user"
+	ProxyActionBlockedUrl             ProxyAction = "blocked_url"
+	ProxyActionSSLDirect              ProxyAction = "ssldirect"
+	ProxyActionSSLBump                ProxyAction = "ssl-bump"
+	ProxyActionFilterError            ProxyAction = "filtererror"
+	ProxyActionFilterNone             ProxyAction = "filternone"
+)
+
 var EMPTY_BYTES = []byte("")
 var BLOCKED_URL_BYTES = []byte("Blocked URL")
 var BLOCKED_INTERNET_BYTES = []byte("Internet access has been blocked by your administrator")

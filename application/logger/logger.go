@@ -4,7 +4,6 @@ import (
 	// "gatesentry2/utils"
 	// "github.com/elazarl/goproxy"
 	"encoding/json"
-	"fmt"
 	"log"
 	"strings"
 	"time"
@@ -45,23 +44,31 @@ func NewLogger(LogLocation string) *Log {
 	log.Println("Creating a new log file = " + LogLocation)
 	db, err := buntdb.Open(LogLocation)
 	if err != nil {
+		log.Println("Gatesentry logger error" + err.Error())
 		log.Fatal(err)
+		return nil
 	}
 	var config buntdb.Config
 	if err := db.ReadConfig(&config); err != nil {
+		log.Println("Gatesentry logger error" + err.Error())
 		log.Fatal(err)
+		return nil
 	}
 	config.SyncPolicy = buntdb.Never
 	if err := db.SetConfig(config); err != nil {
+		log.Println("Gatesentry logger error" + err.Error())
 		log.Fatal(err)
+		return nil
 	}
 	if err := db.ReadConfig(&config); err != nil {
+		log.Println("Gatesentry logger error" + err.Error())
 		log.Fatal(err)
+		return nil
 	}
 	// fmt.Println( config );
-	if err != nil {
-		log.Println("GS-LOGGER ERROR" + err.Error())
-	}
+	// if err != nil {
+	// 	log.Println("GS-LOGGER ERROR" + err.Error())
+	// }
 	db.CreateIndex("entries", "*", buntdb.IndexJSON("time"))
 	// defer db.Close()
 
@@ -85,7 +92,6 @@ func (L *Log) LogDNS(domain string, user string, responseType string) {
 		timestring := gatesentry2utils.Int64toString(secs)
 		logJson := `{"time": ` + timestring + `, "ip":"` + ip + `","url":"` + domain + `","type":"dns", "dnsResponseType":"` + responseType + `"}`
 		key := gatesentry2utils.RandomString(25) + timestring
-		fmt.Println(logJson)
 
 		err := L.Database.Update(func(tx *buntdb.Tx) error {
 			_, _, err := tx.Set(key, logJson, &buntdb.SetOptions{Expires: true, TTL: Log_Entry_Expires})
@@ -95,10 +101,9 @@ func (L *Log) LogDNS(domain string, user string, responseType string) {
 		// fmt.Println( err );
 		_ = err
 	}()
-
 }
 
-func (L *Log) Log(url string, user string) {
+func (L *Log) LogProxy(url string, user string, actionType string) {
 	ip := user
 	// url:=url;
 	go func() {
@@ -109,7 +114,7 @@ func (L *Log) Log(url string, user string) {
 		// logitem := "[GS-Logger] " + ctx.Req.RemoteAddr + " - " + ctx.Req.URL.String();
 
 		timestring := gatesentry2utils.Int64toString(secs)
-		logJson := `{"time": ` + timestring + `, "ip":"` + ip + `","url":"` + url + `"}`
+		logJson := `{"time": ` + timestring + `, "ip":"` + ip + `","url":"` + url + `", "type":"proxy", "proxyResponseType":"` + actionType + `"}`
 		key := gatesentry2utils.RandomString(25) + timestring
 		// fmt.Println( logJson );
 
@@ -124,8 +129,8 @@ func (L *Log) Log(url string, user string) {
 
 }
 
-func (L *Log) GetLog(entries int64) string {
-	result := ``
+func (L *Log) GetLog() string {
+	outputs := []string{}
 	now := time.Now()
 	totime := now.Unix()
 	fromtime := totime - 100
@@ -134,19 +139,66 @@ func (L *Log) GetLog(entries int64) string {
 	to := gatesentry2utils.Int64toString(totime)
 	// fmt.Println("Viewing from " + from  + " to " + to );
 	// , `{"time":30}`, `{"time":50}`
+	limitEntries := 100
+	index := 0
 	err := L.Database.View(func(tx *buntdb.Tx) error {
 		err := tx.DescendRange("entries", `{"time":`+to+`}`, `{"time":`+from+`}`, func(key, value string) bool {
+			if index >= limitEntries {
+				return false
+			}
 			// fmt.Printf("key: %s, value: %s\n", key, value)
-			result += value + ","
-
+			outputs = append(outputs, value)
+			index++
 			return true
 		})
 		return err
 	})
 	_ = err
 
-	result = strings.TrimSuffix(result, ",")
-	return result
+	return strings.Join(outputs, ",")
+}
+
+func (L *Log) GetLogSearch(search string) string {
+	now := time.Now()
+	totime := now.Unix()
+	fromtime := totime - 100
+
+	from := gatesentry2utils.Int64toString(fromtime)
+	to := gatesentry2utils.Int64toString(totime)
+	// fmt.Println("Viewing from " + from  + " to " + to );
+	// , `{"time":30}`, `{"time":50}`
+	limitEntries := 100
+	index := 0
+	outputs := []string{}
+	err := L.Database.View(func(tx *buntdb.Tx) error {
+		err := tx.DescendRange("entries", `{"time":`+to+`}`, `{"time":`+from+`}`, func(key, value string) bool {
+			if index >= limitEntries {
+				return false
+			}
+
+			var parsedValue map[string]interface{}
+			if err := json.Unmarshal([]byte(value), &parsedValue); err != nil {
+				return true // Continue iterating
+			}
+
+			index++
+			if v, ok := parsedValue["url"]; ok && (strings.Contains(v.(string), search)) {
+				// result += value + ","
+				outputs = append(outputs, value)
+			}
+
+			if v, ok := parsedValue["ip"]; ok && (strings.Contains(v.(string), search)) {
+				// result += value + ","
+				outputs = append(outputs, value)
+			}
+			return true
+		})
+		return err
+	})
+	_ = err
+
+	// result = strings.TrimSuffix(result, ",")
+	return strings.Join(outputs, ",")
 }
 
 func (L *Log) GetLastXSecondsDNSLogs(fromSeconds int64, groupByDate bool) (interface{}, error) {
@@ -159,7 +211,7 @@ func (L *Log) GetLastXSecondsDNSLogs(fromSeconds int64, groupByDate bool) (inter
 	from := gatesentry2utils.Int64toString(fromtime)
 	to := gatesentry2utils.Int64toString(totime)
 
-	fmt.Println("Viewing from " + from + " to " + to)
+	log.Println("[LogViewer] Viewing from " + from + " to " + to)
 
 	L.Database.View(func(tx *buntdb.Tx) error {
 		return tx.DescendRange("entries", `{"time":`+to+`}`, `{"time":`+from+`}`, func(key, value string) bool {
@@ -168,12 +220,19 @@ func (L *Log) GetLastXSecondsDNSLogs(fromSeconds int64, groupByDate bool) (inter
 				return true // Continue iterating
 			}
 
-			if v, ok := parsedValue["type"]; ok && v == "dns" {
+			if v, ok := parsedValue["type"]; ok && (v == "dns" || v == "proxy") {
 				var logEntry LogEntry
 				if err := json.Unmarshal([]byte(value), &logEntry); err != nil {
+					log.Println("[LogViewer] Error parsing log entry: " + err.Error() + " - " + value)
 					return true // Continue iterating
 				}
+				if logEntry.Type == "proxy" {
+					logEntry.URL = strings.Replace(logEntry.URL, "http://", "", -1)
+					logEntry.URL = strings.Replace(logEntry.URL, ":443", "", -1)
+					// log.Println( logEntry );
+					log.Println("[LogViewer] Proxy log entry : " + logEntry.URL)
 
+				}
 				if groupByDate {
 					// Group entries by date
 					if logs == nil {

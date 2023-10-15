@@ -126,29 +126,27 @@ func newHijackedConn(w http.ResponseWriter) (*hijackedConn, error) {
 	}, nil
 }
 
-func HandleSSLBump(r *http.Request, w http.ResponseWriter, user string, authUser string, passthru *GSProxyPassthru) {
+func HandleSSLBump(r *http.Request, w http.ResponseWriter, user string, authUser string, passthru *GSProxyPassthru, gsproxy *GSProxy) {
 	conn, err := newHijackedConn(w)
 	if err != nil {
-		log.Println("Error hijacking connection for CONNECT request to %s: %v", r.URL.Host, err)
+		log.Printf("Error hijacking connection for CONNECT request to %s: %v", r.URL.Host, err)
 		showBlockPage(w, r, nil, BLOCKED_ERROR_HIJACK_BYTES)
 		return
 	}
 	fmt.Fprint(conn, "HTTP/1.1 200 Connection Established\r\n\r\n")
-	SSLBump(conn, r.URL.Host, user, authUser, r, passthru)
+	SSLBump(conn, r.URL.Host, user, authUser, r, passthru, gsproxy)
 }
 
 func HandleSSLConnectDirect(r *http.Request, w http.ResponseWriter, user string, passthru *GSProxyPassthru) {
 	conn, err := newHijackedConn(w)
 	if err != nil {
-		log.Println("Error hijacking connection for CONNECT request to %s: %v", r.URL.Host, err)
+		log.Printf("Error hijacking connection for CONNECT request to %s: %v", r.URL.Host, err)
 		return
 	}
 	fmt.Fprint(conn, "HTTP/1.1 200 Connection Established\r\n\r\n")
 	// logAccess(r, nil, 0, false, user, tally, scores, thisRule, "", ignored)
 	// conf = nil // Allow it to be garbage-collected, since we won't use it any more.
-	log.Printf("Running a CONNECTDIRECT")
 	ConnectDirect(conn, r.URL.Host, nil, passthru)
-
 }
 
 // ConnectDirect connects to serverAddr and copies data between it and conn.
@@ -156,7 +154,7 @@ func HandleSSLConnectDirect(r *http.Request, w http.ResponseWriter, user string,
 func ConnectDirect(conn net.Conn, serverAddr string, extraData []byte, gpt *GSProxyPassthru) (uploaded, downloaded int64) {
 	// activeConnections.Add(1)
 	// defer activeConnections.Done()
-
+	log.Println("Running a CONNECTDIRECT TCP to " + serverAddr)
 	serverConn, err := net.Dial("tcp", serverAddr)
 
 	if err != nil {
@@ -237,7 +235,7 @@ func ConnectDirect(conn net.Conn, serverAddr string, extraData []byte, gpt *GSPr
 // traffic. serverAddr is the address (host:port) of the server the client was
 // trying to connect to. user is the username to use for logging; authUser is
 // the authenticated user, if any; r is the CONNECT request, if any.
-func SSLBump(conn net.Conn, serverAddr, user, authUser string, r *http.Request, gpt *GSProxyPassthru) {
+func SSLBump(conn net.Conn, serverAddr, user, authUser string, r *http.Request, gpt *GSProxyPassthru, gsproxy *GSProxy) {
 	log.Printf("[SSL] Performing a SSL Bump")
 	defer func() {
 		if err := recover(); err != nil {
@@ -252,8 +250,10 @@ func SSLBump(conn net.Conn, serverAddr, user, authUser string, r *http.Request, 
 	// Read the client hello so that we can find out the name of the server (not
 	// just the address).
 	clientHello, err := gsClientHello.ReadClientHello(conn)
+
 	if err != nil {
 		GSLogSSL(user, serverAddr, "", fmt.Errorf("error reading client hello: %v", err), false)
+
 		if _, ok := err.(net.Error); ok {
 			conn.Close()
 			return
@@ -279,7 +279,6 @@ func SSLBump(conn net.Conn, serverAddr, user, authUser string, r *http.Request, 
 	serverName := ""
 	if !obsoleteVersion {
 		if sn, ok := clientHelloServerName(clientHello); ok {
-			log.Println("[SSL] Server Name = " + sn)
 			serverName = sn
 		}
 	}
@@ -294,20 +293,17 @@ func SSLBump(conn net.Conn, serverAddr, user, authUser string, r *http.Request, 
 			}
 		}
 	}
-	log.Println("[SSL] Server Name = " + serverName)
 	//
 	// CACHE CERT HERE
 	//
 	cert, rt := CertCache.Get(serverName, serverAddr)
 	cachedCert := rt != nil
-	log.Println("[SSL] Cached Cert existence = " + strconv.FormatBool(cachedCert))
 
 	if !cachedCert {
 		log.Println("[SSL] Starting process to cache certificate")
-		log.Println("[SSL] Dialing connection to = " + serverAddr)
 		serverConn, err := tls.Dial("tcp", serverAddr, &tls.Config{
 			ServerName:         serverName,
-			InsecureSkipVerify: true,
+			InsecureSkipVerify: false,
 			NextProtos:         []string{"h2", "http/1.1"},
 		})
 		if err != nil {
@@ -322,7 +318,6 @@ func SSLBump(conn net.Conn, serverAddr, user, authUser string, r *http.Request, 
 		serverCert := state.PeerCertificates[0]
 
 		valid := validCert(serverCert, state.PeerCertificates[1:])
-		log.Println("[SSL] Validating certificate result = " + strconv.FormatBool(valid))
 
 		cert, err = signCertificate(serverCert, !valid)
 		if err != nil {
@@ -333,6 +328,9 @@ func SSLBump(conn net.Conn, serverAddr, user, authUser string, r *http.Request, 
 			ConnectDirect(conn, serverAddr, clientHello, gpt)
 			return
 		}
+		requestUrlBytes_log := []byte(serverAddr)
+		gpt.ProxyActionToLog = ProxyActionSSLBump
+		gsproxy.RunHandler("log", "", &requestUrlBytes_log, gpt)
 
 		_, err = serverCert.Verify(x509.VerifyOptions{
 			Intermediates: certPoolWith(state.PeerCertificates[1:]),
