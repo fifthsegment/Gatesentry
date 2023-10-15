@@ -1,6 +1,6 @@
 package gatesentry2proxy
 
-import "github.com/elazarl/goproxy"
+import "gopkg.in/elazarl/goproxy.v1"
 
 // import (
 // 	"gopkg.in/elazarl/goproxy.v1"
