@@ -81,12 +81,15 @@ func ScanText(dataToScan []byte,
 	passthru *GSProxyPassthru) (bool, ProxyAction) {
 	var httpResponseSent bool = false
 	var proxyActionPerformed ProxyAction = ProxyActionFilterNone
-
+	log.Println("ScanText called for url = " + r.URL.String() + " content type = " + contentType)
 	if strings.Contains(contentType, "html") || len(contentType) == 0 {
-		log.Printf("Content type is html")
 		isBlocked, _ := IProxy.RunHandler("content", contentType, (&dataToScan), passthru)
 		if isBlocked {
 			proxyActionPerformed = ProxyActionBlockedTextContent
+			httpResponseSent = true
+			//dataToScan gets modified to contain the blocked page
+			showBlockPage(w, r, nil, *&dataToScan)
+			resp.Header.Set("Content-Type", "text/html; charset=utf-8")
 		}
 
 		// dataToScan = []byte(strings.Replace(string(dataToScan), "</html>", `<script>
@@ -101,9 +104,6 @@ func ScanText(dataToScan []byte,
 		// </script>
 		// </html>`, 1))
 
-		if isBlocked {
-			resp.Header.Set("Content-Type", "text/html; charset=utf-8")
-		}
 	}
 	return httpResponseSent, proxyActionPerformed
 }

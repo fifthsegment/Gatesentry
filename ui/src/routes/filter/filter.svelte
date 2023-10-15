@@ -10,10 +10,10 @@
 {#if type == "blockedfiletypes"}
   <Filtereditor
     filterId="JHGJiwjkGOeglsk"
-    title={$_("Blocked File Types")}
+    title={$_("Blocked Content Types")}
     showColumns={["content", "actions"]}
     description={$_(
-      "Add file extensions to block here. For example to block .jpg files add image/jpeg, to block .webp files add image/webp.",
+      "Add MIME types to block here. For example to block .jpg files add image/jpeg, to block .webp files add image/webp.",
     )}
   />
 {:else if type == "blockedkeywords"}

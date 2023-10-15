@@ -301,8 +301,8 @@ func RunGateSentry() {
 	proxyListener, err := net.Listen("tcp", addr)
 	proxyHandler := gatesentryproxy.ProxyHandler{Iproxy: ngp}
 
-	CannedResponsesAuthError := []byte(gresponder.BuildGeneralResponsePage([]string{"Your access has been disabled."}, -1))
-	CannedResponseAccessNotActiveError := []byte(gresponder.BuildGeneralResponsePage([]string{"Your access has been disabled by the administrator of this network."}, -1))
+	ResponseAuthError := []byte(gresponder.BuildGeneralResponsePage([]string{"Your access has been disabled."}, -1))
+	ResponseAccessNotActiveError := []byte(gresponder.BuildGeneralResponsePage([]string{"Your access has been disabled by the administrator of this network."}, -1))
 
 	// CONTENT FILTER
 	ngp.RegisterHandler("proxyerror", func(bytesReceived *[]byte, rs *gatesentryproxy.GSResponder, gpt *gatesentryproxy.GSProxyPassthru) {
@@ -367,13 +367,17 @@ func RunGateSentry() {
 		log.Println("Running content handler")
 		// log.Println("GPT = ", gpt)
 		responder := &gresponder.GSFilterResponder{Blocked: false}
-		if !gpt.DontTouch {
-			application.RunFilter("text/html", string(*bytesReceived), responder)
-			if responder.Blocked {
-				*bytesReceived = []byte(gresponder.BuildResponsePage(responder.Reasons, responder.Score))
-			}
-			rs.Changed = responder.Blocked
+		// if !gpt.DontTouch {
+		application.RunFilter("text/html", string(*bytesReceived), responder)
+		log.Printf("Content filter input = %v", string(*bytesReceived))
+
+		log.Printf("Content filter blocked status = %v", responder.Blocked)
+
+		if responder.Blocked {
+			*bytesReceived = []byte(gresponder.BuildResponsePage(responder.Reasons, responder.Score))
 		}
+		rs.Changed = responder.Blocked
+		// }
 
 	})
 
@@ -418,7 +422,7 @@ func RunGateSentry() {
 	})
 
 	ngp.RegisterHandler("isaccessactive", func(bytesReceived *[]byte, rs *gatesentryproxy.GSResponder, gpt *gatesentryproxy.GSProxyPassthru) {
-		*bytesReceived = CannedResponseAccessNotActiveError
+		*bytesReceived = ResponseAccessNotActiveError
 		rs.Changed = false
 		rs.Data = []byte("NONE")
 		if R.UserExists(gpt.User) {
@@ -436,14 +440,13 @@ func RunGateSentry() {
 	})
 
 	ngp.RegisterHandler("authenabled", func(bytesReceived *[]byte, rs *gatesentryproxy.GSResponder, gpt *gatesentryproxy.GSProxyPassthru) {
-		*bytesReceived = CannedResponsesAuthError
+		*bytesReceived = ResponseAuthError
 		temp := R.GSSettings.Get("EnableUsers")
 		enableusers := false
 		if temp == "true" {
 			enableusers = true
 		}
 		rs.Changed = enableusers
-
 	})
 
 	ngp.RegisterHandler("log", func(contentToLog *[]byte, rs *gatesentryproxy.GSResponder, gpt *gatesentryproxy.GSProxyPassthru) {

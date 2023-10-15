@@ -2,7 +2,6 @@ package gatesentry2logger
 
 import (
 	// "gatesentry2/utils"
-	// "github.com/elazarl/goproxy"
 	"encoding/json"
 	"log"
 	"strings"
@@ -23,11 +22,12 @@ type Log struct {
 }
 
 type LogEntry struct {
-	Time            int64  `json:"time"`
-	IP              string `json:"ip"`
-	URL             string `json:"url"`
-	Type            string `json:"type"`
-	DNSResponseType string `json:"dnsResponseType"`
+	Time              int64  `json:"time"`
+	IP                string `json:"ip"`
+	URL               string `json:"url"`
+	Type              string `json:"type"`
+	DNSResponseType   string `json:"dnsResponseType"`
+	ProxyResponseType string `json:"proxyResponseType"`
 	// Add more fields if needed
 }
 

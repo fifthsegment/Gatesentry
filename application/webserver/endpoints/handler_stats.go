@@ -5,6 +5,7 @@ import (
 	"strconv"
 
 	gatesentryLogger "bitbucket.org/abdullah_irfan/gatesentryf/logger"
+	gatesentryproxy "bitbucket.org/abdullah_irfan/gatesentryproxy"
 )
 
 type URLGroup struct {
@@ -70,15 +71,23 @@ func ApiGetStats(fromTimeParam string, logger *gatesentryLogger.Log) interface{}
 	// ctx.JSON(response)
 }
 
-func SliceEntries(logs map[string][]gatesentryLogger.LogEntry, dnsResponseType string) map[string]HostGroupWithTotal {
+func SliceEntries(logs map[string][]gatesentryLogger.LogEntry, responseType string) map[string]HostGroupWithTotal {
 	outputData := make(map[string]HostGroupWithTotal)
 	for currentDate, entries := range logs {
 		urlCounts := make(map[string]int)
 		for _, entry := range entries {
-			if (entry.Type == "dns" && dnsResponseType == "all") || (entry.Type == "proxy" && dnsResponseType == "all") {
+			if (entry.Type == "dns" && responseType == "all") || (entry.Type == "proxy" && responseType == "all") {
 				urlCounts[entry.URL]++
-			} else if entry.Type == "dns" && entry.DNSResponseType == dnsResponseType {
+			} else if entry.Type == "dns" && entry.DNSResponseType == responseType {
 				urlCounts[entry.URL]++
+			} else if entry.Type == "proxy" && responseType == "blocked" {
+				if entry.ProxyResponseType == string(gatesentryproxy.ProxyActionBlockedTextContent) ||
+					entry.ProxyResponseType == string(gatesentryproxy.ProxyActionBlockedMediaContent) ||
+					entry.ProxyResponseType == string(gatesentryproxy.ProxyActionBlockedFileType) ||
+					entry.ProxyResponseType == string(gatesentryproxy.ProxyActionBlockedTime) ||
+					entry.ProxyResponseType == string(gatesentryproxy.ProxyActionBlockedInternetForUser) {
+					urlCounts[entry.URL]++
+				}
 			}
 		}
 		groupedURLs := make([]URLGroup, 0, len(urlCounts))

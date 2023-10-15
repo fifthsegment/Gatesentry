@@ -55,7 +55,7 @@ let menuItems = [
       },
       {
         type: "link",
-        text: "Blocked file types",
+        text: "Blocked content types",
         href: "/blockedfiletypes",
         icon: Filter,
       },
