@@ -32,8 +32,7 @@ var ConditionalMitm goproxy.FuncHttpsHandler = func(host string, ctx *goproxy.Pr
 }
 
 var FilterHosts goproxy.FuncReqHandler = func(r *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
-	url := r.URL.String()
-	_ = url
+
 	// fmt.Println(url)
 	// if ( strings.Contains(url, "127.0.0.1") ){
 	// 	return r,nil

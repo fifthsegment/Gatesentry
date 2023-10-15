@@ -75,7 +75,7 @@ func SliceEntries(logs map[string][]gatesentryLogger.LogEntry, dnsResponseType s
 	for currentDate, entries := range logs {
 		urlCounts := make(map[string]int)
 		for _, entry := range entries {
-			if entry.Type == "dns" && dnsResponseType == "all" {
+			if (entry.Type == "dns" && dnsResponseType == "all") || (entry.Type == "proxy" && dnsResponseType == "all") {
 				urlCounts[entry.URL]++
 			} else if entry.Type == "dns" && entry.DNSResponseType == dnsResponseType {
 				urlCounts[entry.URL]++
@@ -104,8 +104,6 @@ func ApiGetStatsByURL(logger *gatesentryLogger.Log) interface{} {
 	WEEK := 604800
 	logEntriesInterface, err := logger.GetLastXSecondsDNSLogs(int64(WEEK), true)
 	if err != nil {
-		// ctx.StatusCode(iris.StatusInternalServerError)
-		// ctx.JSON(iris.Map{"error": "Failed to retrieve logs"})
 		return struct {
 			Error string `json:"error"`
 		}{Error: "Failed to retrieve logs"}

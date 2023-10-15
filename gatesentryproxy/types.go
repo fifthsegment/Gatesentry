@@ -1,9 +1,10 @@
 package gatesentryproxy
 
 type GSProxyPassthru struct {
-	UserData  interface{}
-	DontTouch bool
-	User      string
+	UserData         interface{}
+	DontTouch        bool
+	User             string
+	ProxyActionToLog ProxyAction
 }
 
 type GSResponder struct {

@@ -265,6 +265,15 @@ func RegisterEndpointsStartServer(Filters *[]gatesentryFilters.GSFilter,
 	})
 
 	internalServer.Get("/api/logs/{id}", HttpHandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		queryParams := r.URL.Query()
+		searchValue := queryParams.Get("search")
+
+		if searchValue != "" {
+			output := gatesentryWebserverEndpoints.ApiLogsSearchGET(logger, searchValue)
+			SendJSON(w, output)
+			return
+		}
+
 		output := gatesentryWebserverEndpoints.ApiLogsGET(logger)
 		SendJSON(w, output)
 	}))

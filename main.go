@@ -378,7 +378,7 @@ func RunGateSentry() {
 	})
 
 	// URL CHECKER
-	ngp.RegisterHandler("url", func(bytesReceived *[]byte, rs *gatesentryproxy.GSResponder, gpt *gatesentryproxy.GSProxyPassthru) {
+	ngp.RegisterHandler(gatesentryproxy.FILTER_ACCESS_URL, func(bytesReceived *[]byte, rs *gatesentryproxy.GSResponder, gpt *gatesentryproxy.GSProxyPassthru) {
 		host := string(*bytesReceived)
 		responder := &gresponder.GSFilterResponder{Blocked: false}
 		application.RunFilter("url/all_blocked_urls", host, responder)
@@ -446,13 +446,14 @@ func RunGateSentry() {
 
 	})
 
-	ngp.RegisterHandler("log", func(s *[]byte, rs *gatesentryproxy.GSResponder, gpt *gatesentryproxy.GSProxyPassthru) {
-		url := string(*s)
+	ngp.RegisterHandler("log", func(contentToLog *[]byte, rs *gatesentryproxy.GSResponder, gpt *gatesentryproxy.GSProxyPassthru) {
+		url := string(*contentToLog)
 		user := gpt.User
-		R.Logger.Log(url, user)
+		actionTaken := string(gpt.ProxyActionToLog)
+		R.Logger.LogProxy(url, user, actionTaken)
 	})
 
-	ngp.RegisterHandler("timeallowed", func(bytesReceived *[]byte, rs *gatesentryproxy.GSResponder, gpt *gatesentryproxy.GSProxyPassthru) {
+	ngp.RegisterHandler(gatesentryproxy.FILTER_TIME, func(bytesReceived *[]byte, rs *gatesentryproxy.GSResponder, gpt *gatesentryproxy.GSProxyPassthru) {
 		// url := string(*s)
 		rs.Changed = false
 		blockedtimes := R.GSSettings.Get("blocktimes")
