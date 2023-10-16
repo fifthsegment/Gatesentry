@@ -328,9 +328,14 @@ func SSLBump(conn net.Conn, serverAddr, user, authUser string, r *http.Request, 
 			ConnectDirect(conn, serverAddr, clientHello, gpt)
 			return
 		}
-		requestUrlBytes_log := []byte(serverAddr)
+		// requestUrlBytes_log := []byte(serverAddr)
 		gpt.ProxyActionToLog = ProxyActionSSLBump
-		gsproxy.RunHandler("log", "", &requestUrlBytes_log, gpt)
+		// gsproxy.RunHandler("log", "", &requestUrlBytes_log, gpt)
+		gsproxy.LogHandler(GSLogData{
+			User:   user,
+			Action: ProxyActionSSLBump,
+			Url:    serverAddr,
+		})
 
 		_, err = serverCert.Verify(x509.VerifyOptions{
 			Intermediates: certPoolWith(state.PeerCertificates[1:]),

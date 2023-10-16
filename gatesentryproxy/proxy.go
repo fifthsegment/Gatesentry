@@ -36,16 +36,17 @@ func NewGSProxyPassthru() *GSProxyPassthru {
 }
 
 func NewGSHandler(handlerid string, f func(*[]byte, *GSResponder, *GSProxyPassthru)) *GSHandler {
-	h := GSHandler{Id: handlerid, Handle: f}
+	// h := GSHandler{Id: handlerid, Handle: f}
 	// h.Handle = f;
-	return &h
+	// return &h
+	return nil
 }
 
 func NewGSProxy() *GSProxy {
-	p := GSProxy{}
-	IProxy = &p
+	proxy := GSProxy{}
+	IProxy = &proxy
 	IProxy.UsersCache = map[string]GSUserCached{}
-	return &p
+	return &proxy
 }
 
 func (p *GSProxy) RegisterHandler(id string, f func(*[]byte, *GSResponder, *GSProxyPassthru)) {
@@ -60,24 +61,26 @@ func (p *GSProxy) RegisterHandler(id string, f func(*[]byte, *GSResponder, *GSPr
 		p.Handlers[id] = mm
 	}
 	p.Handlers[id] = append(p.Handlers[id], h)
-
 }
 
-func (p *GSProxy) RunHandler(handlerid string, contentType string, content *[]byte, gpt *GSProxyPassthru) (bool, []byte) {
-	rs := GSResponder{
-		Changed: false,
-		Data:    []byte{},
-	}
+func (p *GSProxy) RegisterAuthHandler(f func(authheader string) bool) {
+	log.Println("Registering Auth Handler")
+	p.AuthHandler = f
+}
 
+func (p *GSProxy) RunHandler(handlerid string, content *GSContentFilterData) {
 	if p.Handlers[handlerid] != nil {
 		for i := 0; i < len(p.Handlers[handlerid]); i++ {
-			p.Handlers[handlerid][i].Handle(content, &rs, gpt)
-		}
-		if rs.Changed {
-			return true, rs.Data
+			p.Handlers[handlerid][i].Handle(content)
 		}
 	}
-	return false, rs.Data
+}
+
+func (p *GSProxy) RunAuthHandler(authheader string) bool {
+	if p.AuthHandler != nil {
+		return p.AuthHandler(authheader)
+	}
+	return false
 }
 
 func InitProxy() {
@@ -132,8 +135,13 @@ func (pt *DataPassThru) Write(p []byte) (int, error) {
 	n, err := pt.Writer.Write(p)
 	pt.Bytes = append(pt.Bytes, p...)
 	if err == nil {
-		bs := []byte(strconv.Itoa(n))
-		IProxy.RunHandler("contentlength", pt.Contenttype, &bs, pt.Passthru)
+		IProxy.ContentSizeHandler(
+			GSContentSizeFilterData{
+				Url:         "",
+				ContentType: pt.Contenttype,
+				ContentSize: int64(n),
+			},
+		)
 	}
 	return n, err
 }
@@ -155,18 +163,6 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		client = host
 	}
 
-	prereqmessage := []byte(r.Header.Get("Proxy-Authorization"))
-	prerequestblock, _ := IProxy.RunHandler("prerequest", "", &prereqmessage, passthru)
-	if prerequestblock {
-		if isHostLanAddress {
-			log.Println("Host IS LAN address = " + hostaddress)
-			// isHostLanAddress = true;
-		} else {
-			showBlockPage(w, r, nil, prereqmessage)
-			return
-		}
-	}
-
 	if r.URL.Scheme == "" {
 		if h.TLS {
 			r.URL.Scheme = "https"
@@ -186,8 +182,7 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	authEnabled := true
-	t := []byte(r.Header.Get("Proxy-Authorization"))
-	authEnabled, _ = IProxy.RunHandler("authenabled", "", &t, passthru)
+	authEnabled = IProxy.IsAuthEnabled()
 	user, _, authUser := HandleAuthAndAssignUser(r, passthru, h, authEnabled, client)
 	if authEnabled {
 		if user == "" || user == "127.0.0.1" {
@@ -196,8 +191,10 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			log.Printf("Missing required proxy authentication from %v to %v", r.RemoteAddr, r.URL)
 			return
 		} else {
-			_, userAuthStatus := IProxy.RunHandler("isaccessactive", "", &EMPTY_BYTES, passthru)
-			userAuthStatusString := string(userAuthStatus)
+			// _, userAuthStatus := IProxy.RunHandler("isaccessactive", "", &EMPTY_BYTES, passthru)
+			userAccessFilterData := GSUserAccessFilterData{User: user}
+			IProxy.UserAccessHandler(&userAccessFilterData)
+			userAuthStatusString := userAccessFilterData.FilterResponseAction
 
 			log.Println("User auth status = ", userAuthStatusString, " For user = ", user)
 			if userAuthStatusString == "NOT_FOUND" {
@@ -213,11 +210,12 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	timeblocked, _ := IProxy.RunHandler(FILTER_TIME, "", &EMPTY_BYTES, passthru)
-	if timeblocked {
-		requestUrlBytes_log := []byte(r.URL.String())
+	// timeblocked, _ := IProxy.RunHandler(FILTER_TIME, "", &EMPTY_BYTES, passthru)
+	timefilterData := GSTimeAccessFilterData{Url: r.URL.String(), User: user}
+	IProxy.TimeAccessHandler(&timefilterData)
+	if timefilterData.FilterResponseAction == string(ProxyActionBlockedTime) {
 		passthru.ProxyActionToLog = ProxyActionBlockedTime
-		IProxy.RunHandler("log", "", &requestUrlBytes_log, passthru)
+		IProxy.LogHandler(GSLogData{Url: r.URL.String(), User: user, Action: ProxyActionBlockedTime})
 		showBlockPage(w, r, nil, EMPTY_BYTES)
 		return
 	}
@@ -236,21 +234,28 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	action := ACTION_NONE
 
-	requestUrlBytes := []byte(r.URL.String())
-	isBlockedInternet, _ := IProxy.RunHandler(FILTER_USER_ACCESS_DISABLED, "", &requestUrlBytes, passthru)
-	if isBlockedInternet {
-		requestUrlBytes_log := []byte(r.URL.String())
+	// requestUrlBytes := []byte(r.URL.String())
+	// isBlockedInternet, _ := IProxy.RunHandler(FILTER_USER_ACCESS_DISABLED, "", &requestUrlBytes, passthru)
+	userAccess := GSUserAccessFilterData{User: user}
+	IProxy.UserAccessHandler(&userAccess)
+	if userAccess.FilterResponseAction == string(ProxyActionBlockedInternetForUser) {
+		// requestUrlBytes_log := []byte(r.URL.String())
 		passthru.ProxyActionToLog = ProxyActionBlockedInternetForUser
-		IProxy.RunHandler("log", "", &requestUrlBytes_log, passthru)
+		// IProxy.RunHandler("log", "", &requestUrlBytes_log, passthru)
+		IProxy.LogHandler(GSLogData{Url: r.URL.String(), User: user, Action: ProxyActionBlockedInternetForUser})
 		showBlockPage(w, r, nil, BLOCKED_INTERNET_BYTES)
 		return
 	}
 
-	isBlockedUrl, _ := IProxy.RunHandler(FILTER_ACCESS_URL, "", &requestUrlBytes, passthru)
-	if isBlockedUrl {
-		requestUrlBytes_log := []byte(r.URL.String())
+	urlFilterData := GSUrlFilterData{Url: r.URL.String(), User: user}
+
+	// isBlockedUrl, _ := IProxy.RunHandler(FILTER_ACCESS_URL, "", &requestUrlBytes, passthru)
+	IProxy.UrlAccessHandler(&urlFilterData)
+	if urlFilterData.FilterResponseAction == ProxyActionBlockedUrl {
+		// requestUrlBytes_log := []byte(r.URL.String())
 		passthru.ProxyActionToLog = ProxyActionBlockedUrl
-		IProxy.RunHandler("log", "", &requestUrlBytes_log, passthru)
+		// IProxy.RunHandler("log", "", &requestUrlBytes_log, passthru)
+		IProxy.LogHandler(GSLogData{Url: r.URL.String(), User: user, Action: ProxyActionBlockedUrl})
 		showBlockPage(w, r, nil, BLOCKED_URL_BYTES)
 		return
 	}
@@ -259,9 +264,9 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		action = ACTION_SSL_BUMP
 	}
 
-	urlHostBytes := []byte(r.URL.Host)
-	shouldMitm, _ := IProxy.RunHandler("mitm", "", &urlHostBytes, passthru)
-
+	// urlHostBytes := []byte(r.URL.Host)
+	// shouldMitm, _ := IProxy.RunHandler("mitm", "", &urlHostBytes, passthru)
+	shouldMitm := IProxy.DoMitm(r.URL.Host)
 	log.Println("Should MITM = ", shouldMitm, " currentAction = "+action, " for ", r.URL.String())
 
 	if isHostLanAddress {
@@ -273,7 +278,8 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		action = ACTION_NONE
 	}
 
-	isExceptionUrl, _ := IProxy.RunHandler("except_urls", "", &requestUrlBytes, passthru)
+	// isExceptionUrl, _ := IProxy.RunHandler("except_urls", "", &requestUrlBytes, passthru)
+	isExceptionUrl := IProxy.IsExceptionUrl(r.URL.String())
 	if isExceptionUrl {
 		action = ACTION_NONE
 	}
@@ -284,9 +290,10 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if r.Method == "CONNECT" {
-		requestUrlBytes_log := []byte(r.URL.String())
+		// requestUrlBytes_log := []byte(r.URL.String())
 		passthru.ProxyActionToLog = ProxyActionSSLDirect
-		IProxy.RunHandler("log", "", &requestUrlBytes_log, passthru)
+		// IProxy.RunHandler("log", "", &requestUrlBytes_log, passthru)
+		IProxy.LogHandler(GSLogData{Url: r.URL.String(), User: user, Action: ProxyActionSSLDirect})
 		HandleSSLConnectDirect(r, w, user, passthru)
 		return
 	}
@@ -323,8 +330,9 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		log.Printf("error fetching %s: %s", r.URL, err)
 		errorBytes := []byte(err.Error())
-		IProxy.RunHandler("proxyerror", "", &errorBytes, passthru)
-		showBlockPage(w, r, nil, t)
+		// IProxy.RunHandler("proxyerror", "", &errorBytes, passthru)
+		IProxy.ProxyErrorHandler(err.Error())
+		showBlockPage(w, r, nil, errorBytes)
 		return
 	}
 	defer resp.Body.Close()
@@ -335,13 +343,17 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		contentType = t[0]
 	}
 	log.Println("Content type is = ", contentType, " for ", r.URL.String())
-	contentTypeBytes := []byte(contentType)
-	contentTypeStatusBlocked, _ := IProxy.RunHandler("contenttypeblocked", "", &contentTypeBytes, passthru)
+	// contentTypeBytes := []byte(contentType)
 
-	if contentTypeStatusBlocked {
-		requestUrlBytes_log := []byte(r.URL.String())
+	// contentTypeStatusBlocked, _ := IProxy.RunHandler("contenttypeblocked", "", &contentTypeBytes, passthru)
+	contentTypeData := GSContentTypeFilterData{Url: r.URL.String(), ContentType: contentType}
+	IProxy.ContentTypeHandler(&contentTypeData)
+
+	if contentTypeData.FilterResponseAction == ProxyActionBlockedFileType {
+		// requestUrlBytes_log := []byte(r.URL.String())
 		passthru.ProxyActionToLog = ProxyActionBlockedFileType
-		IProxy.RunHandler("log", "", &requestUrlBytes_log, passthru)
+		// IProxy.RunHandler("log", "", &requestUrlBytes_log, passthru)
+		IProxy.LogHandler(GSLogData{Url: r.URL.String(), User: user, Action: ProxyActionBlockedFileType})
 		showBlockPage(w, r, nil, BLOCKED_CONTENT_TYPE)
 		return
 	}
@@ -392,14 +404,16 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	responseSentMedia, proxyActionTaken := ScanMedia(localCopyData, contentType, r, w, resp, buf, passthru)
 	if responseSentMedia == true {
 		passthru.ProxyActionToLog = proxyActionTaken
-		IProxy.RunHandler("log", "", &requestUrlBytes, passthru)
+		// IProxy.RunHandler("log", "", &requestUrlBytes, passthru)
+		IProxy.LogHandler(GSLogData{Url: r.URL.String(), User: user, Action: proxyActionTaken})
 		return
 	}
 
 	responseSentText, proxyActionTaken := ScanText(localCopyData, contentType, r, w, resp, buf, passthru)
 	if responseSentText == true {
 		passthru.ProxyActionToLog = proxyActionTaken
-		IProxy.RunHandler("log", "", &requestUrlBytes, passthru)
+		// IProxy.RunHandler("log", "", &requestUrlBytes, passthru)
+		IProxy.LogHandler(GSLogData{Url: r.URL.String(), User: user, Action: proxyActionTaken})
 		return
 	}
 

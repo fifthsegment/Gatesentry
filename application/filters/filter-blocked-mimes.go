@@ -1,10 +1,9 @@
 package gatesentry2filters
 
 import (
-	gatesentry2responder "bitbucket.org/abdullah_irfan/gatesentryf/responder"
-	// "fmt"
 	"strings"
-	// "log"
+
+	gatesentry2responder "bitbucket.org/abdullah_irfan/gatesentryf/responder"
 )
 
 func FilterBlockedMimes(f *GSFilter, content string, responder *gatesentry2responder.GSFilterResponder) {

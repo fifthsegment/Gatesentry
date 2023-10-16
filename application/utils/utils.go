@@ -2,33 +2,15 @@ package gatesentry2utils
 
 import (
 	// "bytes"
-	"encoding/base64"
+
 	// "io/ioutil"
 	"math/rand"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 )
 
 var proxyAuthorizationHeader = "Proxy-Authorization"
-
-func GetUserFromAuthHeader(req *http.Request) (string, string) {
-	authheader := strings.SplitN(req.Header.Get(proxyAuthorizationHeader), " ", 2)
-	// req.Header.Del(proxyAuthorizationHeader)
-	if len(authheader) != 2 || authheader[0] != "Basic" {
-		return "", ""
-	}
-	userpassraw, err := base64.StdEncoding.DecodeString(authheader[1])
-	if err != nil {
-		return "", ""
-	}
-	userpass := strings.SplitN(string(userpassraw), ":", 2)
-	if len(userpass) != 2 {
-		return "", ""
-	}
-	return userpass[0], userpass[1]
-}
 
 func RemoveAuthorizationHeader(req *http.Request) {
 	req.Header.Del(proxyAuthorizationHeader)

@@ -256,6 +256,52 @@ func RunGateSentry() {
 	gatesentryproxy.InitProxy()
 	ngp := gatesentryproxy.NewGSProxy()
 
+	ngp.AuthHandler = func(authheader string) bool {
+		// log.Println("Auth header = " + authheader)
+		return false
+	}
+
+	ngp.ContentHandler = func(gafd *gatesentryproxy.GSContentFilterData) {
+		// log.Println("Content handler called")
+	}
+
+	ngp.ContentSizeHandler = func(gafd gatesentryproxy.GSContentSizeFilterData) {
+		// log.Println("Content size handler called")
+	}
+
+	ngp.ContentTypeHandler = func(gafd *gatesentryproxy.GSContentTypeFilterData) {
+
+	}
+
+	ngp.TimeAccessHandler = func(gafd *gatesentryproxy.GSTimeAccessFilterData) {
+
+	}
+
+	ngp.DoMitm = func(host string) bool {
+		enable_filtering := R.GSSettings.Get("enable_https_filtering")
+		return enable_filtering == "true"
+	}
+
+	ngp.IsExceptionUrl = func(url string) bool {
+		return false
+	}
+
+	ngp.UserAccessHandler = func(gafd *gatesentryproxy.GSUserAccessFilterData) {
+
+	}
+
+	ngp.IsAuthEnabled = func() bool {
+		return false
+	}
+
+	ngp.UrlAccessHandler = func(gafd *gatesentryproxy.GSUrlFilterData) {
+
+	}
+
+	ngp.LogHandler = func(gafd gatesentryproxy.GSLogData) {
+
+	}
+
 	// Making a comm channel for our internal dns server
 	go application.DNSServerThread(application.GetBaseDir(), R.Logger, R.DNSServerChannel, R.GSSettings)
 
@@ -302,7 +348,7 @@ func RunGateSentry() {
 	proxyHandler := gatesentryproxy.ProxyHandler{Iproxy: ngp}
 
 	ResponseAuthError := []byte(gresponder.BuildGeneralResponsePage([]string{"Your access has been disabled."}, -1))
-	ResponseAccessNotActiveError := []byte(gresponder.BuildGeneralResponsePage([]string{"Your access has been disabled by the administrator of this network."}, -1))
+	// ResponseAccessNotActiveError := []byte(gresponder.BuildGeneralResponsePage([]string{"Your access has been disabled by the administrator of this network."}, -1))
 
 	// CONTENT FILTER
 	ngp.RegisterHandler("proxyerror", func(bytesReceived *[]byte, rs *gatesentryproxy.GSResponder, gpt *gatesentryproxy.GSProxyPassthru) {
@@ -421,23 +467,35 @@ func RunGateSentry() {
 		log.Println("Status of authuser in isauthuser = ", rs.Changed)
 	})
 
-	ngp.RegisterHandler("isaccessactive", func(bytesReceived *[]byte, rs *gatesentryproxy.GSResponder, gpt *gatesentryproxy.GSProxyPassthru) {
-		*bytesReceived = ResponseAccessNotActiveError
-		rs.Changed = false
-		rs.Data = []byte("NONE")
-		if R.UserExists(gpt.User) {
-			if R.IsUserActive(gpt.User) {
-				rs.Data = []byte("ACTIVE")
-				rs.Changed = true
+	ngp.UserAccessHandler = func(gafd *gatesentryproxy.GSUserAccessFilterData) {
+		if R.UserExists(gafd.User) {
+			if R.IsUserActive(gafd.User) {
+				gafd.FilterResponseAction = "ACTIVE"
 			} else {
-				rs.Data = []byte("INACTIVE")
-				rs.Changed = true
+				gafd.FilterResponseAction = "INACTIVE"
 			}
 		} else {
-			rs.Data = []byte("NOT_FOUND")
-			rs.Changed = true
+			gafd.FilterResponseAction = "NOT_FOUND"
 		}
-	})
+	}
+
+	// ngp.RegisterHandler("isaccessactive", func(bytesReceived *[]byte, rs *gatesentryproxy.GSResponder, gpt *gatesentryproxy.GSProxyPassthru) {
+	// 	*bytesReceived = ResponseAccessNotActiveError
+	// 	rs.Changed = false
+	// 	rs.Data = []byte("NONE")
+	// 	if R.UserExists(gpt.User) {
+	// 		if R.IsUserActive(gpt.User) {
+	// 			rs.Data = []byte("ACTIVE")
+	// 			rs.Changed = true
+	// 		} else {
+	// 			rs.Data = []byte("INACTIVE")
+	// 			rs.Changed = true
+	// 		}
+	// 	} else {
+	// 		rs.Data = []byte("NOT_FOUND")
+	// 		rs.Changed = true
+	// 	}
+	// })
 
 	ngp.RegisterHandler("authenabled", func(bytesReceived *[]byte, rs *gatesentryproxy.GSResponder, gpt *gatesentryproxy.GSProxyPassthru) {
 		*bytesReceived = ResponseAuthError
@@ -470,9 +528,9 @@ func RunGateSentry() {
 		}
 	})
 
-	ngp.RegisterHandler("prerequest", func(bytesReceived *[]byte, rs *gatesentryproxy.GSResponder, gpt *gatesentryproxy.GSProxyPassthru) {
-		rs.Changed = false
-	})
+	// ngp.RegisterHandler("prerequest", func(bytesReceived *[]byte, rs *gatesentryproxy.GSResponder, gpt *gatesentryproxy.GSProxyPassthru) {
+	// 	rs.Changed = false
+	// })
 
 	ngp.RegisterHandler("youtube", func(bytesReceived *[]byte, rs *gatesentryproxy.GSResponder, gpt *gatesentryproxy.GSProxyPassthru) {
 		url1 := "mainvideo url"

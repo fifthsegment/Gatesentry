@@ -35,7 +35,7 @@ var GetSingleFilter = func(requestedId string, Filters *[]gatesentryFilters.GSFi
 	return filterList
 }
 
-var PostSingleFilter = func(requestedId string, dataReceived []gatesentryFilters.GSFILTERLINE, Filters *[]gatesentryFilters.GSFilter) interface{} {
+var PostSingleFilter = func(requestedId string, dataReceived []gatesentryFilters.GsFilterLine, Filters *[]gatesentryFilters.GSFilter) interface{} {
 	for _, v := range *Filters {
 		if v.Id == requestedId {
 			data, err := json.MarshalIndent(dataReceived, "", "  ")

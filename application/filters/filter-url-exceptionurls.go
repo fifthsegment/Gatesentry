@@ -1,8 +1,6 @@
 package gatesentry2filters
 
 import (
-
-	// "fmt"
 	"log"
 	"strings"
 
@@ -14,7 +12,6 @@ func FilterUrlExceptionUrls(f *GSFilter, content string, responder *gatesentry2r
 	for _, v := range f.FileContents {
 		// log.Println("Comparing ", content , " against ", v.Content );
 		if strings.Contains(v.Content, content) || strings.Contains(content, v.Content) || strings.Contains(content+":443", v.Content) {
-
 			responder.Blocked = true
 		}
 	}
