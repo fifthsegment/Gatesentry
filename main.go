@@ -262,7 +262,14 @@ func RunGateSentry() {
 	}
 
 	ngp.ContentHandler = func(gafd *gatesentryproxy.GSContentFilterData) {
-		// log.Println("Content handler called")
+		if strings.Contains(gafd.ContentType, "html") {
+			responder := &gresponder.GSFilterResponder{Blocked: false}
+			application.RunFilter("text/html", string(gafd.Content), responder)
+			if responder.Blocked {
+				gafd.FilterResponse = []byte(gresponder.BuildResponsePage(responder.Reasons, responder.Score))
+				gafd.FilterResponseAction = gatesentryproxy.ProxyActionBlockedTextContent
+			}
+		}
 	}
 
 	ngp.ContentSizeHandler = func(gafd gatesentryproxy.GSContentSizeFilterData) {
@@ -464,7 +471,7 @@ func RunGateSentry() {
 		if R.IsUserValid(base64string) {
 			rs.Changed = true
 		}
-		log.Println("Status of authuser in isauthuser = ", rs.Changed)
+		log.Println("Status of authuser in isauthuser= ", rs.Changed)
 	})
 
 	ngp.UserAccessHandler = func(gafd *gatesentryproxy.GSUserAccessFilterData) {

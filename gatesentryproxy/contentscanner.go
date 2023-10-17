@@ -100,7 +100,7 @@ func ScanText(dataToScan []byte,
 			proxyActionPerformed = ProxyActionBlockedTextContent
 			httpResponseSent = true
 			//dataToScan gets modified to contain the blocked page
-			showBlockPage(w, r, nil, *&dataToScan)
+			showBlockPage(w, r, nil, contentFilterData.FilterResponse)
 			resp.Header.Set("Content-Type", "text/html; charset=utf-8")
 		}
 
