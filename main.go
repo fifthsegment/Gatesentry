@@ -272,25 +272,56 @@ func RunGateSentry() {
 		}
 	}
 
+	ngp.DoMitm = func(host string) bool {
+		enable_filtering := R.GSSettings.Get("enable_https_filtering")
+		if enable_filtering == "true" {
+			responder := &gresponder.GSFilterResponder{Blocked: false}
+			application.RunFilter("url/https_dontbump", host, responder)
+			if responder.Blocked {
+				return false
+			}
+		}
+		return enable_filtering == "true"
+	}
+
 	ngp.ContentSizeHandler = func(gafd gatesentryproxy.GSContentSizeFilterData) {
 		// log.Println("Content size handler called")
+		length := gafd.ContentSize
+		go func() {
+			R.UpdateUserData(gafd.User, uint64(length))
+			R.UpdateConsumption(length)
+		}()
 	}
 
 	ngp.ContentTypeHandler = func(gafd *gatesentryproxy.GSContentTypeFilterData) {
-
+		contentType := gafd.ContentType
+		responder := &gresponder.GSFilterResponder{Blocked: false}
+		application.RunFilter("url/all_blocked_mimes", contentType, responder)
+		// dictionary of contentType to file extension
+		if responder.Blocked {
+			// rs.Changed = true
+			message := "This content type has been blocked on this network."
+			if contentType == "image/png" || contentType == "image/jpeg" || contentType == "image/jpg" || "image/gif" == contentType || "image/webp" == contentType {
+				transparentImageBytes, _ := filters.Asset("app/transparent.png")
+				gafd.FilterResponseAction = gatesentryproxy.ProxyActionBlockedFileType
+				gafd.FilterResponse = transparentImageBytes
+			} else {
+				gafd.FilterResponseAction = gatesentryproxy.ProxyActionBlockedFileType
+				gafd.FilterResponse = []byte(gresponder.BuildGeneralResponsePage([]string{message}, -1))
+			}
+		}
 	}
 
 	ngp.TimeAccessHandler = func(gafd *gatesentryproxy.GSTimeAccessFilterData) {
 
 	}
 
-	ngp.DoMitm = func(host string) bool {
-		enable_filtering := R.GSSettings.Get("enable_https_filtering")
-		return enable_filtering == "true"
-	}
-
 	ngp.IsExceptionUrl = func(url string) bool {
-		return false
+		host := url
+		log.Println("Running exception handler for = ", host)
+		responder := &gresponder.GSFilterResponder{Blocked: false}
+		application.RunFilter("url/all_exception_urls", host, responder)
+		return responder.Blocked
 	}
 
 	ngp.UserAccessHandler = func(gafd *gatesentryproxy.GSUserAccessFilterData) {
@@ -371,50 +402,50 @@ func RunGateSentry() {
 		*bytesReceived = []byte(gresponder.BuildGeneralResponsePage([]string{msg}, -1))
 	})
 
-	// Should the Proxy MITM this traffic or not
-	ngp.RegisterHandler("mitm", func(bytesReceived *[]byte, rs *gatesentryproxy.GSResponder, gpt *gatesentryproxy.GSProxyPassthru) {
-		log.Println("Running MITM handler")
-		// log.Println("GPT = ", gpt)
+	// // Should the Proxy MITM this traffic or not
+	// ngp.RegisterHandler("mitm", func(bytesReceived *[]byte, rs *gatesentryproxy.GSResponder, gpt *gatesentryproxy.GSProxyPassthru) {
+	// 	log.Println("Running MITM handler")
+	// 	// log.Println("GPT = ", gpt)
 
-		enable_filtering := R.GSSettings.Get("enable_https_filtering")
-		log.Println("MITM Handler - enable_https_filtering = " + enable_filtering)
-		if enable_filtering == "true" {
-			rs.Changed = true
-		} else {
-			rs.Changed = false
-		}
-		gpt.DontTouch = true
-		// if enable_filtering != "true" {
-		// 	gpt.DontTouch = true
-		// 	rs.Changed = true
-		// 	return
-		// }
-		// else {
-		// 	rs.Changed = false
-		// 	gpt.DontTouch = true
-		// }
-		// host := string(*bytesReceived)
-		// responder := &gresponder.GSFilterResponder{Blocked: false}
-		// application.RunFilter("url/https_dontbump", host, responder)
-		// if responder.Blocked {
-		// 	gpt.DontTouch = true
-		// 	rs.Changed = true
-		// 	return
-		// }
-	})
+	// 	enable_filtering := R.GSSettings.Get("enable_https_filtering")
+	// 	log.Println("MITM Handler - enable_https_filtering = " + enable_filtering)
+	// 	if enable_filtering == "true" {
+	// 		rs.Changed = true
+	// 	} else {
+	// 		rs.Changed = false
+	// 	}
+	// 	gpt.DontTouch = true
+	// 	// if enable_filtering != "true" {
+	// 	// 	gpt.DontTouch = true
+	// 	// 	rs.Changed = true
+	// 	// 	return
+	// 	// }
+	// 	// else {
+	// 	// 	rs.Changed = false
+	// 	// 	gpt.DontTouch = true
+	// 	// }
+	// 	// host := string(*bytesReceived)
+	// 	// responder := &gresponder.GSFilterResponder{Blocked: false}
+	// 	// application.RunFilter("url/https_dontbump", host, responder)
+	// 	// if responder.Blocked {
+	// 	// 	gpt.DontTouch = true
+	// 	// 	rs.Changed = true
+	// 	// 	return
+	// 	// }
+	// })
 
-	ngp.RegisterHandler("except_urls", func(bytesReceived *[]byte, rs *gatesentryproxy.GSResponder, gpt *gatesentryproxy.GSProxyPassthru) {
-		host := string(*bytesReceived)
-		log.Println("Running exception handler for = ", host)
-		responder := &gresponder.GSFilterResponder{Blocked: false}
-		application.RunFilter("url/all_exception_urls", host, responder)
-		if responder.Blocked {
-			gpt.DontTouch = true
-			log.Println("URL found in exception = ", host)
-			// *s = []byte(gresponder.BuildGeneralResponsePage( []string{"Unable to fulfill your request because it contains a <strong>blocked URL</strong>."}, -1));
-			rs.Changed = true
-		}
-	})
+	// ngp.RegisterHandler("except_urls", func(bytesReceived *[]byte, rs *gatesentryproxy.GSResponder, gpt *gatesentryproxy.GSProxyPassthru) {
+	// 	host := string(*bytesReceived)
+	// 	log.Println("Running exception handler for = ", host)
+	// 	responder := &gresponder.GSFilterResponder{Blocked: false}
+	// 	application.RunFilter("url/all_exception_urls", host, responder)
+	// 	if responder.Blocked {
+	// 		gpt.DontTouch = true
+	// 		log.Println("URL found in exception = ", host)
+	// 		// *s = []byte(gresponder.BuildGeneralResponsePage( []string{"Unable to fulfill your request because it contains a <strong>blocked URL</strong>."}, -1));
+	// 		rs.Changed = true
+	// 	}
+	// })
 	// CONTENT FILTER
 	ngp.RegisterHandler("content", func(bytesReceived *[]byte, rs *gatesentryproxy.GSResponder, gpt *gatesentryproxy.GSProxyPassthru) {
 		log.Println("Running content handler")
@@ -445,19 +476,19 @@ func RunGateSentry() {
 		}
 	})
 
-	ngp.RegisterHandler("contentlength", func(bytesReceived *[]byte, rs *gatesentryproxy.GSResponder, gpt *gatesentryproxy.GSProxyPassthru) {
-		length := string(*bytesReceived)
-		go func() {
-			i, err := strconv.ParseUint(length, 10, 64)
-			if err == nil {
-				R.UpdateUserData(gpt.User, i)
-			}
-			consumedBytes, err := strconv.ParseInt(length, 10, 64)
-			if err == nil {
-				R.UpdateConsumption(consumedBytes)
-			}
-		}()
-	})
+	// ngp.RegisterHandler("contentlength", func(bytesReceived *[]byte, rs *gatesentryproxy.GSResponder, gpt *gatesentryproxy.GSProxyPassthru) {
+	// 	length := string(*bytesReceived)
+	// 	go func() {
+	// 		i, err := strconv.ParseUint(length, 10, 64)
+	// 		if err == nil {
+	// 			R.UpdateUserData(gpt.User, i)
+	// 		}
+	// 		consumedBytes, err := strconv.ParseInt(length, 10, 64)
+	// 		if err == nil {
+	// 			R.UpdateConsumption(consumedBytes)
+	// 		}
+	// 	}()
+	// })
 
 	ngp.RegisterHandler("blockinternet", func(bytesReceived *[]byte, rs *gatesentryproxy.GSResponder, gpt *gatesentryproxy.GSProxyPassthru) {
 		if gpt.User == "admin" {
@@ -705,23 +736,23 @@ func RunGateSentry() {
 
 	})
 
-	ngp.RegisterHandler("contenttypeblocked", func(bytesReceived *[]byte, rs *gatesentryproxy.GSResponder, gpt *gatesentryproxy.GSProxyPassthru) {
-		contentType := string(*bytesReceived)
-		responder := &gresponder.GSFilterResponder{Blocked: false}
-		application.RunFilter("url/all_blocked_mimes", contentType, responder)
-		// dictionary of contentType to file extension
+	// ngp.RegisterHandler("contenttypeblocked", func(bytesReceived *[]byte, rs *gatesentryproxy.GSResponder, gpt *gatesentryproxy.GSProxyPassthru) {
+	// 	contentType := string(*bytesReceived)
+	// 	responder := &gresponder.GSFilterResponder{Blocked: false}
+	// 	application.RunFilter("url/all_blocked_mimes", contentType, responder)
+	// 	// dictionary of contentType to file extension
 
-		if responder.Blocked {
-			rs.Changed = true
-			message := "This content type has been blocked on this network."
-			if contentType == "image/png" || contentType == "image/jpeg" || contentType == "image/jpg" || "image/gif" == contentType || "image/webp" == contentType {
-				dat, _ := filters.Asset("app/transparent.png")
-				*bytesReceived = dat
-			} else {
-				*bytesReceived = []byte(gresponder.BuildGeneralResponsePage([]string{message}, -1))
-			}
-		}
-	})
+	// 	if responder.Blocked {
+	// 		rs.Changed = true
+	// 		message := "This content type has been blocked on this network."
+	// 		if contentType == "image/png" || contentType == "image/jpeg" || contentType == "image/jpg" || "image/gif" == contentType || "image/webp" == contentType {
+	// 			dat, _ := filters.Asset("app/transparent.png")
+	// 			*bytesReceived = dat
+	// 		} else {
+	// 			*bytesReceived = []byte(gresponder.BuildGeneralResponsePage([]string{message}, -1))
+	// 		}
+	// 	}
+	// })
 
 	server := http.Server{Handler: proxyHandler}
 	log.Printf("Starting up...Listening on = " + addr)

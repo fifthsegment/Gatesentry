@@ -52,12 +52,14 @@ type GSContentTypeFilterData struct {
 	Url                  string
 	ContentType          string
 	FilterResponseAction ProxyAction
+	FilterResponse       []byte
 }
 
 type GSContentSizeFilterData struct {
 	Url         string
 	ContentType string
 	ContentSize int64
+	User        string
 }
 
 type GSUserAccessFilterData struct {

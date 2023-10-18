@@ -140,6 +140,7 @@ func (pt *DataPassThru) Write(p []byte) (int, error) {
 				Url:         "",
 				ContentType: pt.Contenttype,
 				ContentSize: int64(n),
+				User:        pt.Passthru.User,
 			},
 		)
 	}
