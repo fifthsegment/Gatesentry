@@ -14,6 +14,8 @@ const (
 	ProxyActionBlockedFileType        ProxyAction = "blocked_file_type"
 	ProxyActionBlockedTime            ProxyAction = "blocked_time"
 	ProxyActionBlockedInternetForUser ProxyAction = "blocked_internet_for_user"
+	ProxyActionUserNotFound           ProxyAction = "user_not_found"
+	ProxyActionUserActive             ProxyAction = "user_active"
 	ProxyActionBlockedUrl             ProxyAction = "blocked_url"
 	ProxyActionSSLDirect              ProxyAction = "ssldirect"
 	ProxyActionSSLBump                ProxyAction = "ssl-bump"

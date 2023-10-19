@@ -198,18 +198,33 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			userAuthStatusString := userAccessFilterData.FilterResponseAction
 
 			log.Println("User auth status = ", userAuthStatusString, " For user = ", user)
-			if userAuthStatusString == "NOT_FOUND" {
+			if userAuthStatusString == ProxyActionUserNotFound {
 				w.Header().Set("Proxy-Authenticate", "Basic realm="+"gsrealm")
 				http.Error(w, "Proxy authentication required", http.StatusProxyAuthRequired)
 				log.Printf("Missing required proxy authentication from %v to %v", r.RemoteAddr, r.URL)
 				return
 			}
-			if userAuthStatusString != "ACTIVE" && !isHostLanAddress {
-				showBlockPage(w, r, nil, EMPTY_BYTES)
+			if userAuthStatusString != ProxyActionUserActive && !isHostLanAddress {
+				showBlockPage(w, r, nil, userAccessFilterData.FilterResponse)
 				return
 			}
 		}
 	}
+
+	action := ACTION_NONE
+
+	// requestUrlBytes := []byte(r.URL.String())
+	// isBlockedInternet, _ := IProxy.RunHandler(FILTER_USER_ACCESS_DISABLED, "", &requestUrlBytes, passthru)
+	// userAccess := GSUserAccessFilterData{User: user}
+	// IProxy.UserAccessHandler(&userAccess)
+	// if userAccess.FilterResponseAction == (ProxyActionBlockedInternetForUser) {
+	// 	// requestUrlBytes_log := []byte(r.URL.String())
+	// 	passthru.ProxyActionToLog = ProxyActionBlockedInternetForUser
+	// 	// IProxy.RunHandler("log", "", &requestUrlBytes_log, passthru)
+	// 	IProxy.LogHandler(GSLogData{Url: r.URL.String(), User: user, Action: ProxyActionBlockedInternetForUser})
+	// 	showBlockPage(w, r, nil, userAccess.FilterResponse)
+	// 	return
+	// }
 
 	// timeblocked, _ := IProxy.RunHandler(FILTER_TIME, "", &EMPTY_BYTES, passthru)
 	timefilterData := GSTimeAccessFilterData{Url: r.URL.String(), User: user}
@@ -217,7 +232,7 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if timefilterData.FilterResponseAction == string(ProxyActionBlockedTime) {
 		passthru.ProxyActionToLog = ProxyActionBlockedTime
 		IProxy.LogHandler(GSLogData{Url: r.URL.String(), User: user, Action: ProxyActionBlockedTime})
-		showBlockPage(w, r, nil, EMPTY_BYTES)
+		showBlockPage(w, r, nil, timefilterData.FilterResponse)
 		return
 	}
 
@@ -233,21 +248,6 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	action := ACTION_NONE
-
-	// requestUrlBytes := []byte(r.URL.String())
-	// isBlockedInternet, _ := IProxy.RunHandler(FILTER_USER_ACCESS_DISABLED, "", &requestUrlBytes, passthru)
-	userAccess := GSUserAccessFilterData{User: user}
-	IProxy.UserAccessHandler(&userAccess)
-	if userAccess.FilterResponseAction == string(ProxyActionBlockedInternetForUser) {
-		// requestUrlBytes_log := []byte(r.URL.String())
-		passthru.ProxyActionToLog = ProxyActionBlockedInternetForUser
-		// IProxy.RunHandler("log", "", &requestUrlBytes_log, passthru)
-		IProxy.LogHandler(GSLogData{Url: r.URL.String(), User: user, Action: ProxyActionBlockedInternetForUser})
-		showBlockPage(w, r, nil, BLOCKED_INTERNET_BYTES)
-		return
-	}
-
 	urlFilterData := GSUrlFilterData{Url: r.URL.String(), User: user}
 
 	// isBlockedUrl, _ := IProxy.RunHandler(FILTER_ACCESS_URL, "", &requestUrlBytes, passthru)
@@ -257,7 +257,7 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		passthru.ProxyActionToLog = ProxyActionBlockedUrl
 		// IProxy.RunHandler("log", "", &requestUrlBytes_log, passthru)
 		IProxy.LogHandler(GSLogData{Url: r.URL.String(), User: user, Action: ProxyActionBlockedUrl})
-		showBlockPage(w, r, nil, BLOCKED_URL_BYTES)
+		showBlockPage(w, r, nil, urlFilterData.FilterResponse)
 		return
 	}
 
@@ -330,10 +330,11 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	resp, err := rt.RoundTrip(r)
 	if err != nil {
 		log.Printf("error fetching %s: %s", r.URL, err)
-		errorBytes := []byte(err.Error())
+		// errorBytes := []byte(err.Error())
 		// IProxy.RunHandler("proxyerror", "", &errorBytes, passthru)
-		IProxy.ProxyErrorHandler(err.Error())
-		showBlockPage(w, r, nil, errorBytes)
+		errorData := &GSProxyErrorData{Error: err.Error()}
+		IProxy.ProxyErrorHandler(errorData)
+		showBlockPage(w, r, nil, errorData.FilterResponse)
 		return
 	}
 	defer resp.Body.Close()

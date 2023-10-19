@@ -65,12 +65,12 @@ let menuItems = [
         href: "/excludehosts",
         icon: Filter,
       },
-      {
-        type: "link",
-        text: "Excluded URLs",
-        href: "/excludeurls",
-        icon: Filter,
-      },
+      // {
+      //   type: "link",
+      //   text: "Excluded URLs",
+      //   href: "/excludeurls",
+      //   icon: Filter,
+      // },
     ],
   },
   {

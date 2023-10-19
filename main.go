@@ -257,8 +257,8 @@ func RunGateSentry() {
 	ngp := gatesentryproxy.NewGSProxy()
 
 	ngp.AuthHandler = func(authheader string) bool {
-		// log.Println("Auth header = " + authheader)
-		return false
+		log.Println("Auth header = " + authheader)
+		return R.IsUserValid(authheader)
 	}
 
 	ngp.ContentHandler = func(gafd *gatesentryproxy.GSContentFilterData) {
@@ -313,7 +313,14 @@ func RunGateSentry() {
 	}
 
 	ngp.TimeAccessHandler = func(gafd *gatesentryproxy.GSTimeAccessFilterData) {
-
+		blockedtimes := R.GSSettings.Get("blocktimes")
+		responder := &gresponder.GSFilterResponder{Blocked: false}
+		timezone := R.GSSettings.Get("timezone")
+		filters.RunTimeFilter(responder, blockedtimes, timezone)
+		// user := gpt.User
+		if responder.Blocked {
+			gafd.FilterResponse = []byte(gresponder.BuildGeneralResponsePage([]string{"Internet access on this network has been disabled because the current time has been specified as a blocked time period in GateSentry's settings."}, -1))
+		}
 	}
 
 	ngp.IsExceptionUrl = func(url string) bool {
@@ -329,15 +336,36 @@ func RunGateSentry() {
 	}
 
 	ngp.IsAuthEnabled = func() bool {
-		return false
+		// *bytesReceived = ResponseAuthError
+		temp := R.GSSettings.Get("EnableUsers")
+		return temp == "true"
 	}
 
 	ngp.UrlAccessHandler = func(gafd *gatesentryproxy.GSUrlFilterData) {
-
+		host := gafd.Url
+		responder := &gresponder.GSFilterResponder{Blocked: false}
+		application.RunFilter("url/all_blocked_urls", host, responder)
+		if responder.Blocked {
+			gafd.FilterResponseAction = gatesentryproxy.ProxyActionBlockedUrl
+			gafd.FilterResponse = []byte(gresponder.BuildGeneralResponsePage([]string{"Unable to fulfill your request because it contains a <strong>blocked URL</strong>."}, -1))
+		}
 	}
 
 	ngp.LogHandler = func(gafd gatesentryproxy.GSLogData) {
 
+	}
+
+	ngp.ProxyErrorHandler = func(gafd *gatesentryproxy.GSProxyErrorData) {
+		// clienterror := string(*bytesReceived)
+		msg := "Proxy Error. Unable to fulfill your request. <br/><strong>" + gafd.Error + "</strong>."
+		switch gafd.Error {
+		case "EOF":
+			msg = "Proxy Error. Unable to fulfill your request at this time. Please try again in a few seconds."
+			break
+		default:
+			break
+		}
+		*&gafd.FilterResponse = []byte(gresponder.BuildGeneralResponsePage([]string{msg}, -1))
 	}
 
 	// Making a comm channel for our internal dns server
@@ -385,22 +413,21 @@ func RunGateSentry() {
 	proxyListener, err := net.Listen("tcp", addr)
 	proxyHandler := gatesentryproxy.ProxyHandler{Iproxy: ngp}
 
-	ResponseAuthError := []byte(gresponder.BuildGeneralResponsePage([]string{"Your access has been disabled."}, -1))
+	// ResponseAuthError := []byte(gresponder.BuildGeneralResponsePage([]string{"Your access has been disabled."}, -1))
 	// ResponseAccessNotActiveError := []byte(gresponder.BuildGeneralResponsePage([]string{"Your access has been disabled by the administrator of this network."}, -1))
 
-	// CONTENT FILTER
-	ngp.RegisterHandler("proxyerror", func(bytesReceived *[]byte, rs *gatesentryproxy.GSResponder, gpt *gatesentryproxy.GSProxyPassthru) {
-		clienterror := string(*bytesReceived)
-		msg := "Proxy Error. Unable to fulfill your request. <br/><strong>" + clienterror + "</strong>."
-		switch clienterror {
-		case "EOF":
-			msg = "Proxy Error. Unable to fulfill your request at this time. Please try again in a few seconds."
-			break
-		default:
-			break
-		}
-		*bytesReceived = []byte(gresponder.BuildGeneralResponsePage([]string{msg}, -1))
-	})
+	// ngp.RegisterHandler("proxyerror", func(bytesReceived *[]byte, rs *gatesentryproxy.GSResponder, gpt *gatesentryproxy.GSProxyPassthru) {
+	// 	clienterror := string(*bytesReceived)
+	// 	msg := "Proxy Error. Unable to fulfill your request. <br/><strong>" + clienterror + "</strong>."
+	// 	switch clienterror {
+	// 	case "EOF":
+	// 		msg = "Proxy Error. Unable to fulfill your request at this time. Please try again in a few seconds."
+	// 		break
+	// 	default:
+	// 		break
+	// 	}
+	// 	*bytesReceived = []byte(gresponder.BuildGeneralResponsePage([]string{msg}, -1))
+	// })
 
 	// // Should the Proxy MITM this traffic or not
 	// ngp.RegisterHandler("mitm", func(bytesReceived *[]byte, rs *gatesentryproxy.GSResponder, gpt *gatesentryproxy.GSProxyPassthru) {
@@ -447,34 +474,34 @@ func RunGateSentry() {
 	// 	}
 	// })
 	// CONTENT FILTER
-	ngp.RegisterHandler("content", func(bytesReceived *[]byte, rs *gatesentryproxy.GSResponder, gpt *gatesentryproxy.GSProxyPassthru) {
-		log.Println("Running content handler")
-		// log.Println("GPT = ", gpt)
-		responder := &gresponder.GSFilterResponder{Blocked: false}
-		// if !gpt.DontTouch {
-		application.RunFilter("text/html", string(*bytesReceived), responder)
-		log.Printf("Content filter input = %v", string(*bytesReceived))
+	// ngp.RegisterHandler("content", func(bytesReceived *[]byte, rs *gatesentryproxy.GSResponder, gpt *gatesentryproxy.GSProxyPassthru) {
+	// 	log.Println("Running content handler")
+	// 	// log.Println("GPT = ", gpt)
+	// 	responder := &gresponder.GSFilterResponder{Blocked: false}
+	// 	// if !gpt.DontTouch {
+	// 	application.RunFilter("text/html", string(*bytesReceived), responder)
+	// 	log.Printf("Content filter input = %v", string(*bytesReceived))
 
-		log.Printf("Content filter blocked status = %v", responder.Blocked)
+	// 	log.Printf("Content filter blocked status = %v", responder.Blocked)
 
-		if responder.Blocked {
-			*bytesReceived = []byte(gresponder.BuildResponsePage(responder.Reasons, responder.Score))
-		}
-		rs.Changed = responder.Blocked
-		// }
+	// 	if responder.Blocked {
+	// 		*bytesReceived = []byte(gresponder.BuildResponsePage(responder.Reasons, responder.Score))
+	// 	}
+	// 	rs.Changed = responder.Blocked
+	// 	// }
 
-	})
+	// })
 
 	// URL CHECKER
-	ngp.RegisterHandler(gatesentryproxy.FILTER_ACCESS_URL, func(bytesReceived *[]byte, rs *gatesentryproxy.GSResponder, gpt *gatesentryproxy.GSProxyPassthru) {
-		host := string(*bytesReceived)
-		responder := &gresponder.GSFilterResponder{Blocked: false}
-		application.RunFilter("url/all_blocked_urls", host, responder)
-		if responder.Blocked {
-			*bytesReceived = []byte(gresponder.BuildGeneralResponsePage([]string{"Unable to fulfill your request because it contains a <strong>blocked URL</strong>."}, -1))
-			rs.Changed = true
-		}
-	})
+	// ngp.RegisterHandler(gatesentryproxy.FILTER_ACCESS_URL, func(bytesReceived *[]byte, rs *gatesentryproxy.GSResponder, gpt *gatesentryproxy.GSProxyPassthru) {
+	// 	host := string(*bytesReceived)
+	// 	responder := &gresponder.GSFilterResponder{Blocked: false}
+	// 	application.RunFilter("url/all_blocked_urls", host, responder)
+	// 	if responder.Blocked {
+	// 		*bytesReceived = []byte(gresponder.BuildGeneralResponsePage([]string{"Unable to fulfill your request because it contains a <strong>blocked URL</strong>."}, -1))
+	// 		rs.Changed = true
+	// 	}
+	// })
 
 	// ngp.RegisterHandler("contentlength", func(bytesReceived *[]byte, rs *gatesentryproxy.GSResponder, gpt *gatesentryproxy.GSProxyPassthru) {
 	// 	length := string(*bytesReceived)
@@ -496,24 +523,26 @@ func RunGateSentry() {
 		}
 	})
 
-	ngp.RegisterHandler("isauthuser", func(bytesReceived *[]byte, rs *gatesentryproxy.GSResponder, gpt *gatesentryproxy.GSProxyPassthru) {
-		base64string := string(*bytesReceived)
-		rs.Changed = false
-		if R.IsUserValid(base64string) {
-			rs.Changed = true
-		}
-		log.Println("Status of authuser in isauthuser= ", rs.Changed)
-	})
+	// ngp.RegisterHandler("isauthuser", func(bytesReceived *[]byte, rs *gatesentryproxy.GSResponder, gpt *gatesentryproxy.GSProxyPassthru) {
+	// 	base64string := string(*bytesReceived)
+	// 	rs.Changed = false
+	// 	if R.IsUserValid(base64string) {
+	// 		rs.Changed = true
+	// 	}
+	// 	log.Println("Status of authuser in isauthuser= ", rs.Changed)
+	// })
 
 	ngp.UserAccessHandler = func(gafd *gatesentryproxy.GSUserAccessFilterData) {
+		log.Println("Running user access handler")
 		if R.UserExists(gafd.User) {
 			if R.IsUserActive(gafd.User) {
-				gafd.FilterResponseAction = "ACTIVE"
+				gafd.FilterResponseAction = gatesentryproxy.ProxyActionUserActive
 			} else {
-				gafd.FilterResponseAction = "INACTIVE"
+				gafd.FilterResponseAction = gatesentryproxy.ProxyActionBlockedInternetForUser
+				gafd.FilterResponse = []byte(gresponder.BuildGeneralResponsePage([]string{"Your access has been disabled by the administrator of this network."}, -1))
 			}
 		} else {
-			gafd.FilterResponseAction = "NOT_FOUND"
+			gafd.FilterResponseAction = gatesentryproxy.ProxyActionUserNotFound
 		}
 	}
 
@@ -535,15 +564,15 @@ func RunGateSentry() {
 	// 	}
 	// })
 
-	ngp.RegisterHandler("authenabled", func(bytesReceived *[]byte, rs *gatesentryproxy.GSResponder, gpt *gatesentryproxy.GSProxyPassthru) {
-		*bytesReceived = ResponseAuthError
-		temp := R.GSSettings.Get("EnableUsers")
-		enableusers := false
-		if temp == "true" {
-			enableusers = true
-		}
-		rs.Changed = enableusers
-	})
+	// ngp.RegisterHandler("authenabled", func(bytesReceived *[]byte, rs *gatesentryproxy.GSResponder, gpt *gatesentryproxy.GSProxyPassthru) {
+	// 	*bytesReceived = ResponseAuthError
+	// 	temp := R.GSSettings.Get("EnableUsers")
+	// 	enableusers := false
+	// 	if temp == "true" {
+	// 		enableusers = true
+	// 	}
+	// 	rs.Changed = enableusers
+	// })
 
 	ngp.RegisterHandler("log", func(contentToLog *[]byte, rs *gatesentryproxy.GSResponder, gpt *gatesentryproxy.GSProxyPassthru) {
 		url := string(*contentToLog)
@@ -552,19 +581,19 @@ func RunGateSentry() {
 		R.Logger.LogProxy(url, user, actionTaken)
 	})
 
-	ngp.RegisterHandler(gatesentryproxy.FILTER_TIME, func(bytesReceived *[]byte, rs *gatesentryproxy.GSResponder, gpt *gatesentryproxy.GSProxyPassthru) {
-		// url := string(*s)
-		rs.Changed = false
-		blockedtimes := R.GSSettings.Get("blocktimes")
-		responder := &gresponder.GSFilterResponder{Blocked: false}
-		timezone := R.GSSettings.Get("timezone")
-		filters.RunTimeFilter(responder, blockedtimes, timezone)
-		// user := gpt.User
-		if responder.Blocked {
-			rs.Changed = true
-			*bytesReceived = []byte(gresponder.BuildGeneralResponsePage([]string{"Internet access on this network has been disabled because the current time has been specified as a blocked time period in GateSentry's settings."}, -1))
-		}
-	})
+	// ngp.RegisterHandler(gatesentryproxy.FILTER_TIME, func(bytesReceived *[]byte, rs *gatesentryproxy.GSResponder, gpt *gatesentryproxy.GSProxyPassthru) {
+	// 	// url := string(*s)
+	// 	rs.Changed = false
+	// 	blockedtimes := R.GSSettings.Get("blocktimes")
+	// 	responder := &gresponder.GSFilterResponder{Blocked: false}
+	// 	timezone := R.GSSettings.Get("timezone")
+	// 	filters.RunTimeFilter(responder, blockedtimes, timezone)
+	// 	// user := gpt.User
+	// 	if responder.Blocked {
+	// 		rs.Changed = true
+	// 		*bytesReceived = []byte(gresponder.BuildGeneralResponsePage([]string{"Internet access on this network has been disabled because the current time has been specified as a blocked time period in GateSentry's settings."}, -1))
+	// 	}
+	// })
 
 	// ngp.RegisterHandler("prerequest", func(bytesReceived *[]byte, rs *gatesentryproxy.GSResponder, gpt *gatesentryproxy.GSProxyPassthru) {
 	// 	rs.Changed = false
