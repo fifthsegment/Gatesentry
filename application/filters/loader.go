@@ -72,5 +72,16 @@ func LoadFilters(filters []GSFilter) []GSFilter {
 	f = NewGSFilter("text/html", "Keywords to Block", "bVxTPTOXiqGRbhF", basepath+"stopwords.json", true, "Whenever a blocked keyword is found on a webpage, it will be assigned a strength score based on each occurence. If the score exceeds the strictness threshold the page gets blocked.", FilterWords)
 	filters = append(filters, *f)
 
+	// f = NewGSFilter(
+	// 	"images",
+	// 	"Keywords to Block",
+	// 	"bVxTPTOXiqGRbhF",
+	// 	basepath+"stopwords.json",
+	// 	true,
+	// 	"Filter description.",
+	// 	FilterImagesAI,
+	// )
+	// filters = append(filters, *f)
+
 	return filters
 }
