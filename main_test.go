@@ -63,6 +63,7 @@ func TestProxyServer(t *testing.T) {
 	fmt.Println("Disabling DNS blacklist downloads")
 	disableDNSBlacklistDownloads()
 
+	time.Sleep(5 * time.Second)
 	t.Run("Test if the url block filter works", func(t *testing.T) {
 		proxyURL, err := url.Parse(proxyUrl)
 		if err != nil {
