@@ -448,10 +448,7 @@ func sendInsecureBlockPage(w http.ResponseWriter, r *http.Request, resp *http.Re
 
 func showBlockPage(w http.ResponseWriter, r *http.Request, resp *http.Response, content []byte) {
 	// check if request is https
-	fmt.Println("Checking if request is https", r.URL.Scheme, r.URL.String())
 	if strings.Contains(r.URL.String(), ":443") {
-		fmt.Println("Request is https")
-
 		conn, _, err := w.(http.Hijacker).Hijack()
 		if err != nil {
 			sendInsecureBlockPage(w, r, resp, content)

@@ -304,6 +304,121 @@ func TestProxyServer(t *testing.T) {
 			t.Fatalf("Expected status 200, got %d", resp.StatusCode)
 		}
 
+		jsonDataString := `
+		[{"Content":"google","Score":10000}]
+		`
+
+		req, err = http.NewRequest("POST", GATESENTRY_WEBSERVER_BASE_ENDPOINT+"/filters/bVxTPTOXiqGRbhF", bytes.NewBuffer([]byte(jsonDataString)))
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Content-Type", "application/json")
+		if err != nil {
+			t.Fatal("Failed to create request:", err)
+		}
+
+		// get response body
+		resp, err = client.Do(req)
+		if err != nil {
+			t.Fatal("Failed to post filters:", err)
+		}
+
+		defer resp.Body.Close()
+
+		body, err = io.ReadAll(resp.Body)
+		if err != nil {
+			t.Fatal("Failed to read body:", err)
+		}
+
+		fmt.Println("Response body after post = " + string(body))
+		fmt.Println("Waiting for the server to reload")
+
+		// time.Sleep(4 * time.Second)
+
+		for _, filter := range R.Filters {
+			fmt.Println("Filter name = " + filter.FilterName)
+			for _, line := range filter.FileContents {
+				fmt.Println("Line = " + line.Content)
+			}
+		}
+
+		req, err = http.NewRequest("GET", GATESENTRY_WEBSERVER_BASE_ENDPOINT+"/filters/bVxTPTOXiqGRbhF", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+
+		if err != nil {
+			t.Fatal("Failed to create request:", err)
+		}
+
+		// get response body
+		resp, err = client.Do(req)
+		if err != nil {
+			t.Fatal("Failed to get filters:", err)
+		}
+
+		defer resp.Body.Close()
+
+		body, err = io.ReadAll(resp.Body)
+		if err != nil {
+			t.Fatal("Failed to read body:", err)
+		}
+
+		fmt.Println("Response body = " + string(body))
+
+	})
+
+	t.Run("Test if keyword blocking works", func(t *testing.T) {
+		redirectLogs()
+		enable_filtering := R.GSSettings.Get("enable_https_filtering")
+		fmt.Println("Enable filtering = " + enable_filtering)
+		R.GSSettings.Update("enable_https_filtering", "true")
+		fmt.Println("Updated settings for https filtering")
+		time.Sleep(1 * time.Second)
+		enable_filtering = R.GSSettings.Get("enable_https_filtering")
+		fmt.Println("Enable filtering = " + enable_filtering)
+		R.Init()
+		time.Sleep(1 * time.Second)
+
+		proxyURL, err := url.Parse(proxyUrl)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		httpClient := &http.Client{
+			Transport: &http.Transport{
+				Proxy: http.ProxyURL(proxyURL),
+				TLSClientConfig: &tls.Config{
+					InsecureSkipVerify: true, // Don't check certificate
+				},
+			},
+		}
+
+		resp, err := httpClient.Get("https://www.google.com")
+		if err != nil {
+			t.Fatalf("Traffic was not bumped. Got error: %s", err.Error())
+		}
+		defer resp.Body.Close()
+
+		proxyCertSubject := resp.TLS.PeerCertificates[0].Subject.CommonName
+
+		isBumped := false
+		for _, cert := range resp.TLS.PeerCertificates {
+			if cert.Issuer.CommonName == GATESENTRY_CERTIFICATE_COMMON_NAME {
+				isBumped = true
+				break
+			}
+		}
+
+		if !isBumped {
+			t.Fatalf("Traffic was not bumped. Got cert subject: %s", proxyCertSubject)
+		}
+
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			t.Fatal("Failed to read body:", err)
+		}
+
+		if !strings.Contains(string(body), "<title>Blocked</title>") {
+			t.Fatal("Traffic was not blocked")
+		}
+
 	})
 
 }

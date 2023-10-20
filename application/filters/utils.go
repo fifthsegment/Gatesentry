@@ -1,6 +1,7 @@
 package gatesentry2filters
 
 import (
+	"fmt"
 	"io/ioutil"
 	"log"
 	"math/rand"
@@ -93,6 +94,7 @@ func GSFileSaver(file string, content string) {
 	err := ioutil.WriteFile(file, []byte(content), 0644)
 	// GSMirrorGSFiletoSquid(filename, squidfilename )
 	if err != nil {
+		fmt.Println("Unable to save file : " + file + " Error = " + err.Error())
 		// R.Logger.Error("Unable to save file ")
 	} else {
 		// LoadAllFiles(R)
