@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -23,6 +24,7 @@ import (
 )
 
 var GSPROXYPORT = "10413"
+var GSWEBADMINPORT = "10786"
 var GSBASEDIR = ""
 var Baseendpointv2 = "https://www.gatesentryfilter.com/api/"
 var GATESENTRY_VERSION = "1.16.0"
@@ -192,8 +194,12 @@ func GetRuntime() *application.GSRuntime {
 }
 
 func RunGateSentry() {
-
-	R = application.Start()
+	webadminport, err := strconv.Atoi(GSWEBADMINPORT)
+	if err != nil {
+		log.Fatal(err)
+		return
+	}
+	R = application.Start(webadminport)
 	R.BoundAddress = &GS_BOUND_ADDRESS
 
 	application.StartBonjour()

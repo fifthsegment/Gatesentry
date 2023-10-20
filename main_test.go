@@ -24,12 +24,13 @@ const HTTPS_EXCEPTION_SITE = "https://www.github.com"
 const HTTPS_BUMP_SITE = "https://www.google.com"
 const HTTP_BLOCKED_SITE = "http://www.snapads.com"
 const HTTPS_BLOCKED_SITE = "https://www.snapads.com"
-const GATESENTRY_WEBSERVER_BASE_ENDPOINT = "http://localhost:8080/api"
+
+var GATESENTRY_WEBSERVER_BASE_ENDPOINT = "http://localhost:" + GSWEBADMINPORT + "/api"
 
 func TestMain(m *testing.M) {
 	// Start your proxy server here
 	go main() // Assume startProxyServer starts your proxy
-	proxyUrl = "http://localhost:10413"
+	proxyUrl = "http://localhost:" + GSPROXYPORT
 
 	// Run tests
 	code := m.Run()
@@ -250,7 +251,7 @@ func TestProxyServer(t *testing.T) {
 	})
 
 	t.Run("Test if webserver login works with the default user", func(t *testing.T) {
-		resp, err := http.Post(GATESENTRY_WEBSERVER_BASE_ENDPOINT+"/auth/token", "application/json", bytes.NewBuffer([]byte(`{"username": "admin", "password": "admin"}`)))
+		resp, err := http.Post(GATESENTRY_WEBSERVER_BASE_ENDPOINT+"/auth/token", "application/json", bytes.NewBuffer([]byte(`{"username": "admin", "pass": "admin"}`)))
 		if err != nil {
 			t.Fatal("Failed to get token:", err)
 		}
