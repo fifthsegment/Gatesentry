@@ -27,6 +27,7 @@ var GSBASEDIR = ""
 var Baseendpointv2 = "https://www.gatesentryfilter.com/api/"
 var GATESENTRY_VERSION = "1.16.0"
 var GS_BOUND_ADDRESS = ":"
+var R *application.GSRuntime
 
 // func ConvertWebPToJPEG(webpData []byte) ([]byte, error) {
 // 	// Decode webp bytes to image.Image
@@ -186,9 +187,13 @@ func RunGateSentryServiceRunner(svcFlag string) {
 	}
 }
 
+func GetRuntime() *application.GSRuntime {
+	return application.R
+}
+
 func RunGateSentry() {
 
-	R := application.Start()
+	R = application.Start()
 	R.BoundAddress = &GS_BOUND_ADDRESS
 
 	application.StartBonjour()

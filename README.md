@@ -2,6 +2,8 @@
 
 An open source proxy server (supports SSL filtering / MITM) + DNS Server with a nice frontend.
 
+![Codecov](https://codecov.io/gh/fifthsegment/Gatesentry/branch/master/graph/badge.svg)
+
 Usages:
 
 - Privacy Protection: Users can use Gatesentry to prevent tracking by various online services by blocking tracking scripts and cookies.

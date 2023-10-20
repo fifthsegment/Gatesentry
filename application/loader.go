@@ -14,6 +14,6 @@ func LoadFilters() {
 }
 
 func RestartGS() {
-	R.init()
+	R.Init()
 	fmt.Println("-------------Restarting GateSentry-------------")
 }

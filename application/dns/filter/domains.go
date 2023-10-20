@@ -2,7 +2,7 @@ package gatesentryDnsFilter
 
 import (
 	"bufio"
-	"fmt"
+	"log"
 	"net/http"
 	"strings"
 	"sync"
@@ -18,7 +18,7 @@ func InitializeFilters(blockedDomains *map[string]bool, blockedLists *[]string, 
 
 func InitializeBlockedDomains(blockedDomains *map[string]bool, blocklists *[]string, mutex *sync.Mutex) {
 	var wg sync.WaitGroup
-	fmt.Println("Downloading blocklists...")
+	log.Println("[DNS] Downloading blocklists...")
 
 	for _, blocklistURL := range *blocklists {
 		wg.Add(1)
@@ -26,7 +26,7 @@ func InitializeBlockedDomains(blockedDomains *map[string]bool, blocklists *[]str
 			defer wg.Done()
 			domains, err := fetchDomainsFromBlocklist(url)
 			if err != nil {
-				fmt.Println("Error fetching blocklist:", err)
+				log.Println("[DNS] [Error] Failed to fetch blocklist:", err)
 				return
 			}
 			addDomainsToBlockedMap(blockedDomains, domains, mutex)
@@ -34,14 +34,14 @@ func InitializeBlockedDomains(blockedDomains *map[string]bool, blocklists *[]str
 	}
 
 	wg.Wait()
-	fmt.Println("Blocklists downloaded and processed.")
+	log.Println("[DNS] Blocklists downloaded and processed.")
 }
 
 func fetchDomainsFromBlocklist(url string) ([]string, error) {
-	fmt.Println("Downloading blocklist from:", url)
+	log.Println("[DNS] Downloading blocklist from:", url)
 	resp, err := http.Get(url)
 	if err != nil {
-		fmt.Println("Error downloading blocklist:", err)
+		log.Println("[DNS] [Error] downloading blocklist:", err)
 		return nil, err
 	}
 	defer resp.Body.Close()
@@ -68,7 +68,7 @@ func fetchDomainsFromBlocklist(url string) ([]string, error) {
 	}
 
 	if err := scanner.Err(); err != nil {
-		fmt.Println("Error reading blocklist:", err)
+		log.Println("[DNS] [Error] Reading blocklist:", err)
 		return nil, err
 	}
 
@@ -83,6 +83,6 @@ func addDomainsToBlockedMap(blockedDomains *map[string]bool, newDomains []string
 		(*blockedDomains)[domain] = true
 	}
 
-	fmt.Println("Added", len(newDomains), "domains to blocked map")
-	fmt.Println("Total domains in blocked map:", len(*blockedDomains))
+	log.Println("[DNS] Added", len(newDomains), "domains to blocked map")
+	log.Println("[DNS] Total domains in blocked map:", len(*blockedDomains))
 }

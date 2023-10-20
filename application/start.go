@@ -20,7 +20,7 @@ func Start() *GSRuntime {
 		// Proxy: proxy,
 		// FileContents : make(map[string][]GSFILTERLINE),
 	}
-	R.init()
+	R.Init()
 	LoadFilters()
 	// RegisterProxyHandlers();
 	fmt.Println("Starting GateSentry webserver on port " + strconv.Itoa(R.WebServerPort))

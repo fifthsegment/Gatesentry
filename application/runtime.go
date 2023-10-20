@@ -126,7 +126,7 @@ func InitTasks() {
 	}
 }
 
-func (R *GSRuntime) init() {
+func (R *GSRuntime) Init() {
 	startuptext := ` +-+-+-+-+-+-+-+-+-+-+
     |G|a|t|e|S|e|n|t|r|y|
     +-+-+-+-+-+-+-+-+-+-+`

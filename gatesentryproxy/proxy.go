@@ -3,7 +3,9 @@ package gatesentryproxy
 import (
 	"bytes"
 	"compress/gzip"
+	"crypto/tls"
 	"encoding/base64"
+	"fmt"
 	"io"
 	"log"
 	"net"
@@ -257,7 +259,9 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		passthru.ProxyActionToLog = ProxyActionBlockedUrl
 		// IProxy.RunHandler("log", "", &requestUrlBytes_log, passthru)
 		IProxy.LogHandler(GSLogData{Url: r.URL.String(), User: user, Action: ProxyActionBlockedUrl})
+
 		showBlockPage(w, r, nil, urlFilterData.FilterResponse)
+
 		return
 	}
 
@@ -436,10 +440,65 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func showBlockPage(w http.ResponseWriter, r *http.Request, resp *http.Response, content []byte) {
-	w.WriteHeader(http.StatusForbidden)
+func sendInsecureBlockPage(w http.ResponseWriter, r *http.Request, resp *http.Response, content []byte) {
+	w.WriteHeader(http.StatusOK)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Write(content)
+}
+
+func showBlockPage(w http.ResponseWriter, r *http.Request, resp *http.Response, content []byte) {
+	// check if request is https
+	fmt.Println("Checking if request is https", r.URL.Scheme, r.URL.String())
+	if strings.Contains(r.URL.String(), ":443") {
+		fmt.Println("Request is https")
+
+		conn, _, err := w.(http.Hijacker).Hijack()
+		if err != nil {
+			sendInsecureBlockPage(w, r, resp, content)
+			return
+		}
+		defer conn.Close()
+		conn.Write([]byte("HTTP/1.1 200 OK\r\n\r\n"))
+
+		// clientHello, err := gsClientHello.ReadClientHello(conn)
+
+		tlsConfig, err := createSelfSignedTLSConfig()
+		if err != nil {
+			fmt.Println("[Proxy][Error:showBlockPage] Error creating self-signed certificate:", err)
+			conn.Close()
+			return
+		}
+
+		tlsConn := tls.Server(conn, tlsConfig)
+		err = tlsConn.Handshake()
+		if err != nil {
+			log.Println("[Proxy][Error:showBlockPage] Handshake failed:", err)
+			conn.Close()
+			return
+		}
+
+		_, err = tlsConn.Write([]byte("HTTP/1.1 403 Forbidden\r\n"))
+		if err != nil {
+			log.Println("[Proxy][Error:showBlockPage] writing to connection", err)
+			return
+		}
+		_, err = tlsConn.Write([]byte("Content-Type: text/html\r\n\r\n"))
+		if err != nil {
+			log.Println("[Proxy][Error:showBlockPage] Error writing to connection", err)
+			conn.Close()
+			return
+		}
+		_, err = tlsConn.Write(content)
+		if err != nil {
+			conn.Close()
+			return
+		}
+
+		tlsConn.Close()
+	} else {
+		sendInsecureBlockPage(w, r, resp, content)
+	}
+
 }
 
 // copyResponseHeader writes resp's header and status code to w.
