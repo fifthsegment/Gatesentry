@@ -1,9 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"crypto/tls"
+	"encoding/json"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"log"
 	"net/http"
 	"net/url"
@@ -21,6 +24,7 @@ const HTTPS_EXCEPTION_SITE = "https://www.github.com"
 const HTTPS_BUMP_SITE = "https://www.google.com"
 const HTTP_BLOCKED_SITE = "http://www.snapads.com"
 const HTTPS_BLOCKED_SITE = "https://www.snapads.com"
+const GATESENTRY_WEBSERVER_BASE_ENDPOINT = "http://localhost:8080/api"
 
 func TestMain(m *testing.M) {
 	// Start your proxy server here
@@ -243,6 +247,48 @@ func TestProxyServer(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer resp.Body.Close()
+	})
+
+	t.Run("Test if webserver login works with the default user", func(t *testing.T) {
+		resp, err := http.Post(GATESENTRY_WEBSERVER_BASE_ENDPOINT+"/auth/token", "application/json", bytes.NewBuffer([]byte(`{"username": "admin", "password": "admin"}`)))
+		if err != nil {
+			t.Fatal("Failed to get token:", err)
+		}
+		defer resp.Body.Close()
+
+		body, err := ioutil.ReadAll(resp.Body)
+		if err != nil {
+			t.Fatal("Failed to read body:", err)
+		}
+
+		// Extract token from response
+		var result map[string]interface{}
+		if err := json.Unmarshal(body, &result); err != nil {
+			t.Fatal("Failed to unmarshal response:", err)
+		}
+		token, ok := result["Jwtoken"].(string)
+		if !ok {
+			t.Fatal("Token not found in response")
+		}
+
+		// Make GET request to /filters using the token
+		req, err := http.NewRequest("GET", GATESENTRY_WEBSERVER_BASE_ENDPOINT+"/filters", nil)
+		if err != nil {
+			t.Fatal("Failed to create request:", err)
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+
+		client := &http.Client{}
+		resp, err = client.Do(req)
+		if err != nil {
+			t.Fatal("Failed to get filters:", err)
+		}
+		defer resp.Body.Close()
+
+		// Check for 200 status code
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("Expected status 200, got %d", resp.StatusCode)
+		}
 
 	})
 

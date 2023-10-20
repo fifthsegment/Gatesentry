@@ -1,9 +1,14 @@
 name: Go Test and Coverage
 
 on:
+  push:
+    branches: ["master"]
+    paths:
+      - "**.go"
   pull_request:
-    branches: [main] # Replace with your target branch if different from main
-
+    branches: ["master"]
+    paths:
+      - "**.go"
 jobs:
   build:
     runs-on: ubuntu-latest
