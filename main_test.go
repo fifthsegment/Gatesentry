@@ -364,7 +364,7 @@ func TestProxyServer(t *testing.T) {
 
 	})
 
-	t.Run("Test if keyword blocking works", func(t *testing.T) {
+	t.Run("Test if keyword blocking works by adding the keyword google and visiting Google", func(t *testing.T) {
 		redirectLogs()
 		enable_filtering := R.GSSettings.Get("enable_https_filtering")
 		fmt.Println("Enable filtering = " + enable_filtering)
@@ -395,6 +395,8 @@ func TestProxyServer(t *testing.T) {
 			t.Fatalf("Traffic was not bumped. Got error: %s", err.Error())
 		}
 		defer resp.Body.Close()
+
+		time.Sleep(2 * time.Second)
 
 		proxyCertSubject := resp.TLS.PeerCertificates[0].Subject.CommonName
 
