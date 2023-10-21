@@ -1,12 +1,8 @@
 <script lang="ts">
   export let filterId;
-  export let title;
-  export let description;
   export let showColumns = ["content", "score", "actions"];
 
   import {
-    Breadcrumb,
-    BreadcrumbItem,
     Button,
     Column,
     DataTable,
@@ -126,129 +122,115 @@
   let enable_https_filtering = "";
 </script>
 
-<Grid>
-  <Row>
-    <Column>
-      <Breadcrumb style="margin-bottom: 10px;">
-        <BreadcrumbItem href="/">{$_("Dashboard")}</BreadcrumbItem>
-        <BreadcrumbItem>{$_("Filters")}</BreadcrumbItem>
-      </Breadcrumb>
-      <h2>{title}</h2>
-    </Column>
-  </Row>
-  <Toggle
-    bind:settingValue={enable_https_filtering}
-    settingName="enable_https_filtering"
-    hide={true}
-  />
-  <Row>
-    <Column>
-      <div style="margin: 20px 0px;">
-        {description}
-      </div>
-      {#if enable_https_filtering == "false"}
-        <InlineNotification
-          style="width:100%;"
-          hideCloseButton
-          kind="warning"
-          title={$_("Important: ")}
-          subtitle={$_(
-            "For these filters to take effect, you must enable HTTPS Filtering from the Settings Menu.",
-          )}
-        />
-      {/if}
-    </Column>
-  </Row>
-  <Row>
-    <Column>
-      <DataTable
-        sortable
-        size="medium"
+<Toggle
+  bind:settingValue={enable_https_filtering}
+  settingName="enable_https_filtering"
+  hide={true}
+/>
+<Row>
+  <Column>
+    {#if enable_https_filtering == "false"}
+      <InlineNotification
         style="width:100%;"
-        headers={[
-          {
-            key: "content",
-            value: $_("Content"),
-          },
-          {
-            key: "score",
-            value: $_("Score"),
-            width: "15%",
-          },
-          {
-            key: "actions",
-            value: $_("Actions"),
-            width: "15%",
-          },
-        ].filter((item) => showColumns.includes(item.key))}
-        rows={data
-          .map((item) => {
-            return {
-              id: item.id,
-              content: item.content,
-              score: item.score,
-              actions: "",
-            };
-          })
-          .sort((a, b) => b.id - a.id)}
-      >
-        <Toolbar size="sm">
-          <ToolbarContent>
-            <ToolbarSearch value="" shouldFilterRows bind:filteredRowIds />
-            <Button icon={AddAlt} on:click={addRow}>{$_("Insert")}</Button>
-          </ToolbarContent>
-        </Toolbar>
-        <svelte:fragment slot="cell" let:row let:cell>
-          {#if cell.key === "actions"}
-            <div style="float:right;">
-              <Button
-                icon={editingRowId != null && row.id === editingRowId
-                  ? Save
-                  : Edit}
-                iconDescription={$_("Edit")}
-                on:click={() => editRow(row.id)}
-              ></Button>
-              <Button
-                icon={RowDelete}
-                iconDescription={$_("Delete")}
-                on:click={() => removeRow(row.id)}
-              ></Button>
-            </div>
-          {:else if editingRowId && editingRowId === row.id}
-            {#if cell.key === "score"}
-              <TextInput
-                type="number"
-                value={cell.value}
-                on:input={(e) => handleScoreChange(row.id, e)}
-              />
-            {:else}
-              <TextInput
-                value={cell.value}
-                on:input={(e) => handleContentChange(row.id, e)}
-              />
-            {/if}
+        hideCloseButton
+        kind="warning"
+        title={$_("Important: ")}
+        subtitle={$_(
+          "For these filters to take effect, you must enable HTTPS Filtering from the Settings Menu.",
+        )}
+      />
+    {/if}
+  </Column>
+</Row>
+<Row>
+  <Column>
+    <DataTable
+      sortable
+      size="medium"
+      style="width:100%;"
+      headers={[
+        {
+          key: "content",
+          value: $_("Content"),
+        },
+        {
+          key: "score",
+          value: $_("Score"),
+          width: "15%",
+        },
+        {
+          key: "actions",
+          value: $_("Actions"),
+          width: "25%",
+        },
+      ].filter((item) => showColumns.includes(item.key))}
+      rows={data
+        .map((item) => {
+          return {
+            id: item.id,
+            content: item.content,
+            score: item.score,
+            actions: "",
+          };
+        })
+        .sort((a, b) => b.id - a.id)}
+    >
+      <Toolbar size="sm">
+        <ToolbarContent>
+          <ToolbarSearch value="" shouldFilterRows bind:filteredRowIds />
+          <Button icon={AddAlt} on:click={addRow}>{$_("Insert")}</Button>
+        </ToolbarContent>
+      </Toolbar>
+      <svelte:fragment slot="cell" let:row let:cell>
+        {#if cell.key === "actions"}
+          <div style="float:right;">
+            <Button
+              icon={editingRowId != null && row.id === editingRowId
+                ? Save
+                : Edit}
+              iconDescription={$_("Edit")}
+              on:click={() => editRow(row.id)}
+            ></Button>
+            <Button
+              icon={RowDelete}
+              iconDescription={$_("Delete")}
+              on:click={() => removeRow(row.id)}
+            ></Button>
+          </div>
+        {:else if editingRowId && editingRowId === row.id}
+          {#if cell.key === "score"}
+            <TextInput
+              type="number"
+              value={cell.value}
+              on:input={(e) => handleScoreChange(row.id, e)}
+            />
           {:else}
-            {cell.value}
+            <TextInput
+              value={cell.value}
+              on:input={(e) => handleContentChange(row.id, e)}
+            />
           {/if}
-        </svelte:fragment>
-      </DataTable>
-      {#if data.length == 0}
-        <div>
-          <Tile class="text-center">
-            <h3>{$_("No items")}</h3>
-            <div on:click={addRow} class="add-row-empty-state">
-              {$_("No items yet. Click the add button below to create one. ")}
-            </div>
-            <div class="add-icon">
-              <TaskAdd size="200" />
-            </div>
-            <Button icon={AddAlt} on:click={addRow}>{$_("Create Item")}</Button>
-          </Tile>
-        </div>
-      {/if}
-    </Column>
-  </Row>
-</Grid>
+        {:else}
+          {cell.value}
+        {/if}
+      </svelte:fragment>
+    </DataTable>
+    {#if data.length == 0}
+      <div>
+        <Tile class="text-center">
+          <h3>{$_("No items")}</h3>
+          <div on:click={addRow} class="add-row-empty-state">
+            {$_("No items yet. Click the add button below to create one. ")}
+          </div>
+          <div class="add-icon">
+            <TaskAdd size="200" />
+          </div>
+          <Button icon={AddAlt} on:click={addRow}>{$_("Create Item")}</Button>
+        </Tile>
+      </div>
+    {/if}
+  </Column>
+</Row>
 
 <style>
   .add-icon {

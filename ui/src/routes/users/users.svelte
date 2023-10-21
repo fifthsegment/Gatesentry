@@ -2,6 +2,8 @@
   import { onMount } from "svelte";
   import { store } from "../../store/apistore";
   import {
+    Breadcrumb,
+    BreadcrumbItem,
     Button,
     DataTable,
     Loading,
@@ -74,7 +76,11 @@
   };
 </script>
 
-<h3>{$_("Users")}</h3>
+<Breadcrumb style="margin-bottom: 10px;">
+  <BreadcrumbItem href="/">Dashboard</BreadcrumbItem>
+  <BreadcrumbItem>Users</BreadcrumbItem>
+</Breadcrumb>
+<h2>{$_("Users")}</h2>
 
 <br />
 

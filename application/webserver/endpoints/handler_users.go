@@ -7,6 +7,7 @@ import (
 	"log"
 	"strings"
 
+	gatesentry2storage "bitbucket.org/abdullah_irfan/gatesentryf/storage"
 	GatesentryTypes "bitbucket.org/abdullah_irfan/gatesentryf/types"
 
 	gatesentryWebserverTypes "bitbucket.org/abdullah_irfan/gatesentryf/webserver/types"
@@ -52,7 +53,7 @@ func GSApiUsersGET(runtime *gatesentryWebserverTypes.TemporaryRuntime, usersStri
 	return UserEndpointJson{Users: users}
 }
 
-func GSApiUserCreate(userJson UserInputJsonSingle, settingsStore *gatesentryWebserverTypes.SettingsStore) interface{} {
+func GSApiUserCreate(userJson UserInputJsonSingle, settingsStore *gatesentry2storage.MapStore) interface{} {
 
 	// check if username and password are greater than 3 characters
 	if ValidateUserInputJsonSingle(userJson) == false {
@@ -74,7 +75,7 @@ func GSApiUserCreate(userJson UserInputJsonSingle, settingsStore *gatesentryWebs
 		AllowAccess:  userJson.AllowAccess,
 	}
 
-	var existingJson = settingsStore.GetSettings("authusers")
+	var existingJson = settingsStore.Get("authusers")
 	var existingUsers []GatesentryTypes.GSUser
 	json.Unmarshal([]byte(existingJson), &existingUsers)
 
@@ -98,18 +99,18 @@ func GSApiUserCreate(userJson UserInputJsonSingle, settingsStore *gatesentryWebs
 	}
 
 	log.Println(fmt.Sprintf("Users: %s", usersString))
-	settingsStore.SetSettings("authusers", string(usersString))
+	settingsStore.Update("authusers", string(usersString))
 	// ctx.JSON(UserEndpointJsonOk{Ok: true})
 	return UserEndpointJsonOk{Ok: true}
 }
 
-func GSApiUserPUT(settingsStore *gatesentryWebserverTypes.SettingsStore, userJson UserInputJsonSingle) interface{} {
+func GSApiUserPUT(settingsStore *gatesentry2storage.MapStore, userJson UserInputJsonSingle) interface{} {
 
 	if len(userJson.Password) > 0 && ValidateUserInputJsonSingle(userJson) == false {
 		return struct{ Error string }{Error: ERROR_FAILED_VALIDATION}
 	}
 
-	var existingJson = settingsStore.GetSettings("authusers")
+	var existingJson = settingsStore.Get("authusers")
 	var existingUsers []GatesentryTypes.GSUser
 	json.Unmarshal([]byte(existingJson), &existingUsers)
 
@@ -131,14 +132,14 @@ func GSApiUserPUT(settingsStore *gatesentryWebserverTypes.SettingsStore, userJso
 		return struct{ Error string }{Error: err.Error()}
 	}
 	log.Printf("Users: %s", usersString)
-	settingsStore.SetSettings("authusers", string(usersString))
+	settingsStore.Update("authusers", string(usersString))
 
 	return UserEndpointJsonOk{Ok: true}
 }
 
-func GSApiUserDELETE(username string, settingsStore *gatesentryWebserverTypes.SettingsStore) interface{} {
+func GSApiUserDELETE(username string, settingsStore *gatesentry2storage.MapStore) interface{} {
 
-	var existingJson = settingsStore.GetSettings("authusers")
+	var existingJson = settingsStore.Get("authusers")
 	var existingUsers []GatesentryTypes.GSUser
 	json.Unmarshal([]byte(existingJson), &existingUsers)
 
@@ -157,7 +158,7 @@ func GSApiUserDELETE(username string, settingsStore *gatesentryWebserverTypes.Se
 		return struct{ Error string }{Error: err.Error()}
 	}
 
-	settingsStore.SetSettings("authusers", string(usersString))
+	settingsStore.Update("authusers", string(usersString))
 	// ctx.JSON(UserEndpointJsonOk{Ok: true})
 	return UserEndpointJsonOk{Ok: true}
 }

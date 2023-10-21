@@ -27,6 +27,7 @@
   import { register, init, _ } from "svelte-i18n";
   import Users from "./routes/users/users.svelte";
   import Globalheader from "./components/globalheader.svelte";
+  import Rules from "./routes/rules/rules.svelte";
   export let url = "";
 
   let loaded = false;
@@ -117,6 +118,9 @@
         </Route>
         <Route path="/services">
           <Services />
+        </Route>
+        <Route path="/rules">
+          <Rules />
         </Route>
         <Route path="/stats">
           <Stats />

@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## v1.18 (22nd October 2023)
+
+- Fix: DNS Server not updating list immediately after an update from the UI
+- Added link to download certificate on the login screen
+- Added DNS server info page which shows total blocked domains, last update time and next scheduled update for blocklists
+- Added filtering strictness field to the UI
+
 ## v1.17 (21st October 2023)
 
 - Fixed bug : Missing mapping of exception hosts in the Web UI

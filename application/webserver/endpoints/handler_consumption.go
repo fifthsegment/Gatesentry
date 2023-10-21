@@ -3,6 +3,7 @@ package gatesentryWebserverEndpoints
 import (
 	"encoding/json"
 
+	gatesentry2storage "bitbucket.org/abdullah_irfan/gatesentryf/storage"
 	GatesentryTypes "bitbucket.org/abdullah_irfan/gatesentryf/types"
 	gatesentryWebserverTypes "bitbucket.org/abdullah_irfan/gatesentryf/webserver/types"
 )
@@ -12,7 +13,7 @@ type Datareceiver struct {
 	Data        string `json:"Data"`
 }
 
-func GSApiConsumptionGET(data string, settings *gatesentryWebserverTypes.SettingsStore, runtime *gatesentryWebserverTypes.TemporaryRuntime) interface{} {
+func GSApiConsumptionGET(data string, settings *gatesentry2storage.MapStore, runtime *gatesentryWebserverTypes.TemporaryRuntime) interface{} {
 	temp := settings.Get("EnableUsers")
 	enableusers := false
 	if temp == "true" {
@@ -29,7 +30,7 @@ func GSApiConsumptionGET(data string, settings *gatesentryWebserverTypes.Setting
 
 }
 
-func GSApiConsumptionPOST(temp Datareceiver, settings *gatesentryWebserverTypes.SettingsStore, runtime *gatesentryWebserverTypes.TemporaryRuntime) interface{} {
+func GSApiConsumptionPOST(temp Datareceiver, settings *gatesentry2storage.MapStore, runtime *gatesentryWebserverTypes.TemporaryRuntime) interface{} {
 	// data := string(R.GSUserGetDataJSON())
 	// ctx.JSON(200, struct{Data string}{Data: data})
 
@@ -37,7 +38,7 @@ func GSApiConsumptionPOST(temp Datareceiver, settings *gatesentryWebserverTypes.
 	if temp.EnableUsers {
 		enableusersstring = "true"
 	}
-	settings.Set("EnableUsers", enableusersstring)
+	settings.Update("EnableUsers", enableusersstring)
 	users := []GatesentryTypes.GSUserPublic{}
 	json.Unmarshal([]byte(temp.Data), &users)
 	// R.AuthUsers

@@ -3,10 +3,15 @@
 
   import Toggle from "../../components/toggle.svelte";
   import ConnectedSettingInput from "../../components/connectedSettingInput.svelte";
+  import { Breadcrumb, BreadcrumbItem } from "carbon-components-svelte";
 
   let enable_ai_image_filtering = "";
 </script>
 
+<Breadcrumb style="margin-bottom: 10px;">
+  <BreadcrumbItem href="/">Dashboard</BreadcrumbItem>
+  <BreadcrumbItem>Gatesentry AI</BreadcrumbItem>
+</Breadcrumb>
 <h2>Gatesentry AI</h2>
 <br />
 <div>

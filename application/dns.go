@@ -1,13 +1,13 @@
 package gatesentryf
 
 import (
-	"encoding/json"
 	"fmt"
 	"log"
 
 	gatesentryDnsServer "bitbucket.org/abdullah_irfan/gatesentryf/dns/server"
 	gatesentry2logger "bitbucket.org/abdullah_irfan/gatesentryf/logger"
 	gatesentry2storage "bitbucket.org/abdullah_irfan/gatesentryf/storage"
+	gatesentryTypes "bitbucket.org/abdullah_irfan/gatesentryf/types"
 )
 
 var (
@@ -29,48 +29,20 @@ var (
 	}
 )
 
-func DNSServerThread(baseDir string, logger *gatesentry2logger.Log, c <-chan int, settings *gatesentry2storage.MapStore) {
+func DNSServerThread(baseDir string, logger *gatesentry2logger.Log, c <-chan int, settings *gatesentry2storage.MapStore, info *gatesentryTypes.DnsServerInfo) {
 	defer func() {
 		if r := recover(); r != nil {
 			fmt.Println("Recovered from panic:", r)
 		}
 	}()
 
-	custom_entries := settings.Get("dns_custom_entries")
-	log.Println("[DNS.SERVER] Custom entries found")
-	// unmarshall json array string to array
-	custom_entries_array := []string{}
-	//convert string to byte array
-	err := json.Unmarshal([]byte(custom_entries), &custom_entries_array)
-	if err != nil {
-		log.Println("[DNS.SERVER] Error unmarshalling custom entries:", err)
-	} else {
-		// check if blocklists already contains custom entries
-		entriesAdded := 0
-		for _, custom_entry := range custom_entries_array {
-			found := false
-			for _, blocklist := range blocklists {
-				if blocklist == custom_entry {
-					found = true
-					break
-				}
-			}
-			if !found {
-				blocklists = append(blocklists, custom_entry)
-				entriesAdded++
-			}
-		}
-		log.Println("[DNS.SERVER] Custom entries added to blocklists count:", entriesAdded)
-	}
-
 	for {
 		select {
 		case msg := <-c:
 			log.Println("[DNS.SERVER] Received message:", msg)
 			if msg == 1 {
-				// fmt.Println("ACTUAL Starting DNS server")
 				// Start the DNS server
-				go gatesentryDnsServer.StartDNSServer(baseDir, logger, blocklists, settings)
+				go gatesentryDnsServer.StartDNSServer(baseDir, logger, blocklists, settings, R.DnsServerInfo)
 				log.Println("[DNS.SERVER] started")
 			} else if msg == 2 {
 				log.Println("[DNS.SERVER] Stopping DNS server")
@@ -82,57 +54,3 @@ func DNSServerThread(baseDir string, logger *gatesentry2logger.Log, c <-chan int
 	}
 
 }
-
-// func DNSServerThread(baseDir string, logger *gatesentry2logger.Log, c chan int) {
-// 	fmt.Println("Inside DNS server thread")
-// 	select {
-// 	case msg := <-c:
-// 		fmt.Println("Received message: " + fmt.Sprint(msg))
-// 		if msg == 1 {
-// 			fmt.Println("ACTUAL Starting DNS server")
-// 			// Start the DNS server
-// 			// go gatesentryDnsServer.StartDNSServer(baseDir, logger, blocklists)
-// 			fmt.Println("ACTUAL DNS server started")
-// 		} else if msg == 2 {
-// 			fmt.Println("ACTUAL Stopping DNS server")
-// 			// Stop the DNS server
-// 			// go gatesentryDnsServer.StopDNSServer()
-// 			fmt.Println("ACTUAL DNS server stopped")
-// 		}
-// 	}
-// for {
-// 	fmt.Println("Waiting for message")
-// 	msg := <-c
-
-// 	fmt.Println("Received message: " + fmt.Sprint(msg))
-// 	if msg == 2 {
-// 		fmt.Println("Stopping DNS server")
-// 		// Stop the DNS server
-// 		gatesentryDnsServer.StopDNSServer()
-// 	} else if msg == 1 {
-// 		fmt.Println("Starting DNS server")
-// 		// Start the DNS server
-// 		gatesentryDnsServer.StartDNSServer(baseDir, logger, blocklists)
-// 		fmt.Println("DNS server started")
-// 	}
-// }
-// select {
-// case msg := <-c:
-// 	fmt.Println("Received message: " + msg)
-// 	switch msg {
-// 	case "stop":
-// 		fmt.Println("Stopping DNS server")
-// 		// Stop the DNS server
-// 		gatesentryDnsServer.StopDNSServer()
-
-// 	case "start":
-// 		fmt.Println("Starting DNS server")
-// 		// Start the DNS server
-// 		gatesentryDnsServer.StartDNSServer(baseDir, logger, blocklists)
-// 		fmt.Println("DNS server started")
-
-// 	default:
-// 		// Do nothing
-// 	}
-// }
-// }

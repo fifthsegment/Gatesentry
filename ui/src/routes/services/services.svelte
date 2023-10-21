@@ -1,10 +1,14 @@
 <script lang="ts">
-  import { Toggle } from "carbon-components-svelte";
+  import { Breadcrumb, BreadcrumbItem, Toggle } from "carbon-components-svelte";
   import { _ } from "svelte-i18n";
   import ToggleComponent from "../../components/toggle.svelte";
 </script>
 
-<h3>Toggle Services</h3>
+<Breadcrumb style="margin-bottom: 10px;">
+  <BreadcrumbItem href="/">Dashboard</BreadcrumbItem>
+  <BreadcrumbItem>Toggle Services</BreadcrumbItem>
+</Breadcrumb>
+<h2>Toggle Services</h2>
 
 <br />
 

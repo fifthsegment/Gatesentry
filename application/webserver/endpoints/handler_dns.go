@@ -2,12 +2,19 @@ package gatesentryWebserverEndpoints
 
 import (
 	"encoding/json"
+	"log"
 
+	gatesentry2storage "bitbucket.org/abdullah_irfan/gatesentryf/storage"
 	gatesentryTypes "bitbucket.org/abdullah_irfan/gatesentryf/types"
 	gatesentryWebserverTypes "bitbucket.org/abdullah_irfan/gatesentryf/webserver/types"
 )
 
-func GSApiDNSEntriesCustom(data string, settings *gatesentryWebserverTypes.SettingsStore, runtime *gatesentryWebserverTypes.TemporaryRuntime) interface{} {
+func GSApiDNSInfo(dnsServerInfo *gatesentryTypes.DnsServerInfo) interface{} {
+
+	return dnsServerInfo
+}
+
+func GSApiDNSEntriesCustom(data string, settings *gatesentry2storage.MapStore, runtime *gatesentryWebserverTypes.TemporaryRuntime) interface{} {
 
 	// parse json string to struct
 	var customEntries []gatesentryTypes.DNSCustomEntry
@@ -18,7 +25,7 @@ func GSApiDNSEntriesCustom(data string, settings *gatesentryWebserverTypes.Setti
 	}{Data: customEntries}
 }
 
-func GSApiDNSSaveEntriesCustom(customEntries []gatesentryTypes.DNSCustomEntry, settings *gatesentryWebserverTypes.SettingsStore, runtime *gatesentryWebserverTypes.TemporaryRuntime) interface{} {
+func GSApiDNSSaveEntriesCustom(customEntries []gatesentryTypes.DNSCustomEntry, settings *gatesentry2storage.MapStore, runtime *gatesentryWebserverTypes.TemporaryRuntime) interface{} {
 	// read json data from request body
 
 	// check if no two entries have same domain
@@ -28,7 +35,7 @@ func GSApiDNSSaveEntriesCustom(customEntries []gatesentryTypes.DNSCustomEntry, s
 			//create error
 			// BadResponse(ctx, errors.New("Two entries can't have the same domain"))
 			return struct {
-				Error string `json:"message"`
+				Error string `json:"error"`
 			}{Error: "Two entries can't have the same domain"}
 		}
 		customEntriesMap[entry.Domain] = true
@@ -44,7 +51,8 @@ func GSApiDNSSaveEntriesCustom(customEntries []gatesentryTypes.DNSCustomEntry, s
 	}
 
 	// save json string to settings
-	settings.Set("DNS_custom_entries", string(jsonData))
+	log.Println("[DNS] Saving custom entries = ", string(jsonData))
+	settings.Update("DNS_custom_entries", string(jsonData))
 
 	// ctx.JSON(struct {
 	// 	Ok bool `json:"ok"`

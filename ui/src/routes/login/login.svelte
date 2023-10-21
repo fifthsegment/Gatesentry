@@ -17,6 +17,7 @@
   import { notificationstore } from "../../store/notifications";
   import { createNotificationError } from "../../lib/utils";
   import { _ } from "svelte-i18n";
+  import DownloadCertificateLink from "../../components/downloadCertificateLink.svelte";
 
   let username: string = localStorage.getItem("username") || "";
   let password: string = localStorage.getItem("password") || "";
@@ -139,6 +140,10 @@
               </ButtonSet>
             </Column>
           </FluidForm>
+        </div>
+        <div class="text-center">
+          <br />
+          <DownloadCertificateLink />
         </div>
       {/if}
     </Column>

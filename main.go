@@ -337,7 +337,7 @@ func RunGateSentry() {
 	}
 
 	// Making a comm channel for our internal dns server
-	go application.DNSServerThread(application.GetBaseDir(), R.Logger, R.DNSServerChannel, R.GSSettings)
+	go application.DNSServerThread(application.GetBaseDir(), R.Logger, R.DNSServerChannel, R.GSSettings, R.DnsServerInfo)
 
 	addr := "0.0.0.0:"
 	addr += GSPROXYPORT

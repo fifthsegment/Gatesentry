@@ -5,11 +5,12 @@ import (
 	"log"
 	"time"
 
+	gatesentry2storage "bitbucket.org/abdullah_irfan/gatesentryf/storage"
 	gatesentryWebserverTypes "bitbucket.org/abdullah_irfan/gatesentryf/webserver/types"
 	"github.com/badoux/checkmail"
 )
 
-func GSApiSettingsGET(requestedId string, settings *gatesentryWebserverTypes.SettingsStore) interface{} {
+func GSApiSettingsGET(requestedId string, settings *gatesentry2storage.MapStore) interface{} {
 	switch requestedId {
 	case "general_settings":
 		value := settings.Get(requestedId)
@@ -23,7 +24,6 @@ func GSApiSettingsGET(requestedId string, settings *gatesentryWebserverTypes.Set
 			value = string(valueJson)
 		}
 		return struct{ Value string }{Value: value}
-		break
 	case "blocktimes", "strictness", "timezone", "idemail", "enable_https_filtering", "capem", "keypem", "enable_dns_server", "dns_custom_entries", "ai_scanner_url", "enable_ai_image_filtering", "EnableUsers":
 		value := settings.Get(requestedId)
 		return struct {
@@ -44,7 +44,7 @@ func GSApiSettingsGET(requestedId string, settings *gatesentryWebserverTypes.Set
 	return nil
 }
 
-func GSApiSettingsPOST(requestedId string, settings *gatesentryWebserverTypes.SettingsStore, temp gatesentryWebserverTypes.Datareceiver) interface{} {
+func GSApiSettingsPOST(requestedId string, settings *gatesentry2storage.MapStore, temp gatesentryWebserverTypes.Datareceiver) interface{} {
 
 	switch requestedId {
 	case "idemail":
@@ -63,16 +63,16 @@ func GSApiSettingsPOST(requestedId string, settings *gatesentryWebserverTypes.Se
 		json.Unmarshal([]byte(temp.Value), &general_settings_parsed)
 		pwd := general_settings_parsed.AdminPassword
 		if pwd != "" {
-			settings.Set(requestedId, temp.Value)
+			settings.Update(requestedId, temp.Value)
 		} else {
-			general_settings_parsed.AdminPassword = settings.GetAdminPassword()
+			general_settings_parsed.AdminPassword = gatesentryWebserverTypes.GetAdminPassword(settings)
 			// convert general_settings_parsed to json
 			valueJson, err := json.Marshal(general_settings_parsed)
 			if err != nil {
 				log.Fatal("Unable to marshal general settings")
 			} else {
 				//convert valuejSON to string
-				settings.Set(requestedId, string(valueJson))
+				settings.Update(requestedId, string(valueJson))
 			}
 		}
 	}
@@ -81,11 +81,10 @@ func GSApiSettingsPOST(requestedId string, settings *gatesentryWebserverTypes.Se
 		requestedId == "enable_dns_server" ||
 		requestedId == "enable_https_filtering" ||
 		requestedId == "enable_ai_image_filtering" ||
-		requestedId == "ai_scanner_url" || requestedId == "EnableUsers" {
-		settings.Set(requestedId, temp.Value)
+		requestedId == "ai_scanner_url" || requestedId == "EnableUsers" || requestedId == "strictness" {
+		settings.Update(requestedId, temp.Value)
 	}
 
-	settings.InitGatesentry()
 	// fmt.Println( temp );
 	return temp
 }

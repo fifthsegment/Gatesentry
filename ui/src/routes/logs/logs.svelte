@@ -91,57 +91,54 @@
   });
 </script>
 
-<Grid>
-  <Row>
-    <Column>
-      <Breadcrumb style="margin-bottom: 10px;">
-        <BreadcrumbItem href="/">Dashboard</BreadcrumbItem>
-        <BreadcrumbItem href="/logs">Logs</BreadcrumbItem>
-      </Breadcrumb>
-      <h2>Log viewer</h2>
-    </Column>
-  </Row>
-  <Row>
-    <Column>
-      <div style="margin: 20px 0px;">
-        Shows the past few requests to GateSentry.
-      </div>
-      <div style="margin-bottom: 15px;">
-        <Tag>
-          IMPORTANT: If you are using GateSentry on a Raspberry Pi please make
-          sure to change GateSentry's log file location to RAM. You can do that
-          by going to Settings and changing the log file location to
-          "/tmp/log.db".
-        </Tag>
-      </div>
-      <div>
-        <Search bind:value={search} on:clear={clearSearch} />
-        <br />
-        <DataTable
-          sortable
-          size="medium"
-          style="width:100%; min-height: 600px;"
-          headers={[
-            {
-              key: "ip",
-              value: "IP",
-            },
-            {
-              key: "time",
-              value: "Time",
-            },
-            {
-              key: "url",
-              value: "URL",
-            },
-            {
-              key: "proxyResponseType",
-              value: "Response Type",
-            },
-          ]}
-          rows={logsToRender}
-        ></DataTable>
-      </div>
-    </Column>
-  </Row>
-</Grid>
+<Row>
+  <Column>
+    <Breadcrumb style="margin-bottom: 10px;">
+      <BreadcrumbItem href="/">Dashboard</BreadcrumbItem>
+      <BreadcrumbItem>Logs</BreadcrumbItem>
+    </Breadcrumb>
+    <h2>Log viewer</h2>
+  </Column>
+</Row>
+<Row>
+  <Column>
+    <div style="margin: 20px 0px;">
+      Shows the past few requests to GateSentry.
+    </div>
+    <div style="margin-bottom: 15px;">
+      <Tag>
+        IMPORTANT: If you are using GateSentry on a Raspberry Pi please make
+        sure to change GateSentry's log file location to RAM. You can do that by
+        going to Settings and changing the log file location to "/tmp/log.db".
+      </Tag>
+    </div>
+    <div>
+      <Search bind:value={search} on:clear={clearSearch} />
+      <br />
+      <DataTable
+        sortable
+        size="medium"
+        style="width:100%; min-height: 600px;"
+        headers={[
+          {
+            key: "ip",
+            value: "IP",
+          },
+          {
+            key: "time",
+            value: "Time",
+          },
+          {
+            key: "url",
+            value: "URL",
+          },
+          {
+            key: "proxyResponseType",
+            value: "Response Type",
+          },
+        ]}
+        rows={logsToRender}
+      ></DataTable>
+    </div>
+  </Column>
+</Row>

@@ -80,6 +80,7 @@ type GSRuntime struct {
 	GSConsumptionUpdaterRunning bool
 	DNSServerChannel            chan int
 	BoundAddress                *string
+	DnsServerInfo               *GatesentryTypes.DnsServerInfo
 }
 
 func SetBaseDir(a string) {
@@ -152,6 +153,7 @@ func (R *GSRuntime) Init() {
 	InitTasks()
 	R.MemLogSz = 1024
 	R.MemLog = make([]GSFilterLog, R.MemLogSz)
+	R.DnsServerInfo = &GatesentryTypes.DnsServerInfo{}
 
 	filters := []gatesentry2filters.GSFilter{}
 	gatesentry2filters.SetBaseDir(GSBASEDIR)
@@ -222,7 +224,6 @@ wR8g0gOPPV1l
 -----END PRIVATE KEY-----`)
 	R.GSSettings.SetDefault("dns_custom_entries", `[
 		"https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts",
-		"https://easylist.to/easylist/easylist.txt",
 		"https://raw.githubusercontent.com/anudeepND/blacklist/master/adservers.txt",
 		"https://v.firebog.net/hosts/AdguardDNS.txt",
 		"https://raw.githubusercontent.com/PolishFiltersTeam/KADhosts/master/KADhosts.txt",
@@ -233,7 +234,9 @@ wR8g0gOPPV1l
 		"https://v.firebog.net/hosts/RPiList-Malware.txt",
 		"https://gitlab.com/quidsup/notrack-blocklists/raw/master/notrack-malware.txt",
 		"https://pgl.yoyo.org/adservers/serverlist.php?hostformat=hosts&showintro=0&mimetype=plaintext",
-		"https://bitbucket.org/ethanr/dns-blacklists/raw/8575c9f96e5b4a1308f2f12394abd86d0927a4a0/bad_lists/Mandiant_APT1_Report_Appendix_D.txt"
+		"https://bitbucket.org/ethanr/dns-blacklists/raw/8575c9f96e5b4a1308f2f12394abd86d0927a4a0/bad_lists/Mandiant_APT1_Report_Appendix_D.txt",
+		"https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/popupads-onlydomains.txt",
+		"https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/tif-onlydomains.txt",
 	]`)
 
 	general_settings := R.GSSettings.Get("general_settings")
