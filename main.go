@@ -253,7 +253,6 @@ func RunGateSentry() {
 		contentType := gafd.ContentType
 		responder := &gresponder.GSFilterResponder{Blocked: false}
 		application.RunFilter("url/all_blocked_mimes", contentType, responder)
-		// dictionary of contentType to file extension
 		if responder.Blocked {
 			// rs.Changed = true
 			message := "This content type has been blocked on this network."

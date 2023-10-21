@@ -10,7 +10,7 @@ import (
 //go:embed files
 var build embed.FS
 
-func GetStyles() []byte {
+func GetBlockPageMaterialUIStylesheet() []byte {
 	cssData, err := fs.ReadFile(build, "files/material.css")
 	if err != nil {
 		return nil

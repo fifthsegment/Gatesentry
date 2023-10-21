@@ -26,6 +26,15 @@ Usages:
 
 Gatesentry Installation and Configuration Guide
 
+By default Gatesentry uses the following ports
+
+| Port  | Purpose                                              |
+| ----- | ---------------------------------------------------- |
+| 10413 | For proxy                                            |
+| 10786 | For the web based administration panel               |
+| 53    | For the built-in DNS server                          |
+| 80    | For the built-in webserver (showing DNS block pages) |
+
 1.  Downloading Gatesentry:
 
     Navigate to the 'Releases' section of this repository.
@@ -44,7 +53,7 @@ Gatesentry Installation and Configuration Guide
     Replace `{platform}` with your operating system (linux or mac).
     Proceed to execute the binary file to initiate the server.
 
-    **Running as a Service**
+    **Running as a Service (Optional)**
 
     If you want Gatesentry to keep running in the background on your machine, install it as :
 

@@ -130,7 +130,11 @@ func HandleSSLBump(r *http.Request, w http.ResponseWriter, user string, authUser
 	conn, err := newHijackedConn(w)
 	if err != nil {
 		log.Printf("Error hijacking connection for CONNECT request to %s: %v", r.URL.Host, err)
-		showBlockPage(w, r, nil, BLOCKED_ERROR_HIJACK_BYTES)
+		errorData := &GSProxyErrorData{
+			Error: "Error hijacking connection for CONNECT request to " + r.URL.Host + ": " + err.Error(),
+		}
+		IProxy.ProxyErrorHandler(errorData)
+		sendBlockMessageBytes(w, r, nil, errorData.FilterResponse, nil)
 		return
 	}
 	fmt.Fprint(conn, "HTTP/1.1 200 Connection Established\r\n\r\n")

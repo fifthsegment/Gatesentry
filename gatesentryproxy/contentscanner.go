@@ -72,6 +72,7 @@ func ScanMedia(dataToScan []byte, contentType string,
 		} else {
 			// newBuf, _ := createTextOverlayOnImage(buf.Bytes(), []string{"", "Gatesentry filtered", "No reason(s) for blocking"})
 			io.Copy(destwithcounter, &buf)
+			httpResponseSent = true
 		}
 		log.Println("IO Copy done for url = ", r.URL.String())
 	}
@@ -100,7 +101,7 @@ func ScanText(dataToScan []byte,
 			proxyActionPerformed = ProxyActionBlockedTextContent
 			httpResponseSent = true
 			//dataToScan gets modified to contain the blocked page
-			showBlockPage(w, r, nil, contentFilterData.FilterResponse)
+			sendBlockMessageBytes(w, r, nil, contentFilterData.FilterResponse, nil)
 			resp.Header.Set("Content-Type", "text/html; charset=utf-8")
 		}
 

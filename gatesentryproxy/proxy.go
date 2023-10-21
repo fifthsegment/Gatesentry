@@ -207,7 +207,7 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			if userAuthStatusString != ProxyActionUserActive && !isHostLanAddress {
-				showBlockPage(w, r, nil, userAccessFilterData.FilterResponse)
+				sendBlockMessageBytes(w, r, nil, userAccessFilterData.FilterResponse, nil)
 				return
 			}
 		}
@@ -234,7 +234,7 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if timefilterData.FilterResponseAction == string(ProxyActionBlockedTime) {
 		passthru.ProxyActionToLog = ProxyActionBlockedTime
 		IProxy.LogHandler(GSLogData{Url: r.URL.String(), User: user, Action: ProxyActionBlockedTime})
-		showBlockPage(w, r, nil, timefilterData.FilterResponse)
+		sendBlockMessageBytes(w, r, nil, timefilterData.FilterResponse, nil)
 		return
 	}
 
@@ -254,15 +254,35 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// isBlockedUrl, _ := IProxy.RunHandler(FILTER_ACCESS_URL, "", &requestUrlBytes, passthru)
 	IProxy.UrlAccessHandler(&urlFilterData)
+
 	if urlFilterData.FilterResponseAction == ProxyActionBlockedUrl {
-		// requestUrlBytes_log := []byte(r.URL.String())
 		passthru.ProxyActionToLog = ProxyActionBlockedUrl
-		// IProxy.RunHandler("log", "", &requestUrlBytes_log, passthru)
 		IProxy.LogHandler(GSLogData{Url: r.URL.String(), User: user, Action: ProxyActionBlockedUrl})
-
-		showBlockPage(w, r, nil, urlFilterData.FilterResponse)
-
+		sendBlockMessageBytes(w, r, nil, urlFilterData.FilterResponse, nil)
 		return
+	}
+
+	fileExt := getFileExtensionFromUrl(r.URL.String())
+	fileMime := getMimeByExtension(fileExt)
+	contentTypeScan := &GSContentTypeFilterData{Url: r.URL.String(), ContentType: fileMime}
+	IProxy.ContentTypeHandler(contentTypeScan)
+
+	log.Println("Url File extension = ", fileExt, " mime ", fileMime)
+
+	if contentTypeScan.FilterResponseAction == ProxyActionBlockedFileType {
+		passthru.ProxyActionToLog = ProxyActionBlockedUrl
+		IProxy.LogHandler(GSLogData{Url: r.URL.String(), User: user, Action: ProxyActionBlockedUrl})
+		// sendBlockMessageBytes(w, r, nil, urlFilterData.FilterResponse, nil)
+		r.URL.Host = "blocked.gatesentryguard.com"
+		r.URL.Scheme = "https"
+		r.URL.Path = "/file/gatesentryguard/blocked.svg"
+		// query := r.URL.Query()
+		// query.Add("text", "Blocked")
+		// r.URL.RawQuery = query.Encode()
+		w.Header().Set("Location", r.URL.String())
+		w.WriteHeader(http.StatusMovedPermanently)
+		log.Println("Modified url = ", r.URL.String())
+		// return
 	}
 
 	if r.Method == "CONNECT" {
@@ -338,7 +358,7 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// IProxy.RunHandler("proxyerror", "", &errorBytes, passthru)
 		errorData := &GSProxyErrorData{Error: err.Error()}
 		IProxy.ProxyErrorHandler(errorData)
-		showBlockPage(w, r, nil, errorData.FilterResponse)
+		sendBlockMessageBytes(w, r, nil, errorData.FilterResponse, nil)
 		return
 	}
 	defer resp.Body.Close()
@@ -346,7 +366,9 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	contentType := strings.ToLower(resp.Header.Get("Content-Type"))
 	if strings.Contains(contentType, ";") {
 		t := strings.Split(contentType, ";")
-		contentType = t[0]
+		if len(t) > 0 {
+			contentType = t[0]
+		}
 	}
 	log.Println("Content type is = ", contentType, " for ", r.URL.String())
 	// contentTypeBytes := []byte(contentType)
@@ -360,7 +382,7 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		passthru.ProxyActionToLog = ProxyActionBlockedFileType
 		// IProxy.RunHandler("log", "", &requestUrlBytes_log, passthru)
 		IProxy.LogHandler(GSLogData{Url: r.URL.String(), User: user, Action: ProxyActionBlockedFileType})
-		showBlockPage(w, r, nil, BLOCKED_CONTENT_TYPE)
+		sendBlockMessageBytes(w, r, nil, BLOCKED_CONTENT_TYPE, &contentType)
 		return
 	}
 
@@ -397,7 +419,9 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		if err != nil {
 			log.Printf("error while copying response (URL: %s): %s", r.URL, err)
-			showBlockPage(w, r, nil, PROXY_ERROR_UNABLE_TO_COPY_DATA)
+			errorData := &GSProxyErrorData{Error: err.Error()}
+			IProxy.ProxyErrorHandler(errorData)
+			sendBlockMessageBytes(w, r, nil, errorData.FilterResponse, nil)
 			return
 		}
 	}
@@ -440,18 +464,29 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func sendInsecureBlockPage(w http.ResponseWriter, r *http.Request, resp *http.Response, content []byte) {
+func sendInsecureBlockBytes(w http.ResponseWriter, r *http.Request, resp *http.Response, content []byte, contentType *string) {
 	w.WriteHeader(http.StatusOK)
+	// string ends with
+
+	if contentType != nil && isImage(*contentType) {
+		reasonForBlockArray := append([]string{"", "Image blocked by Gatesentry", "Reason(s) for blocking", "1. The content type is blocked"})
+		emptyImage, _ := createEmptyImage(500, 500, "jpeg", reasonForBlockArray)
+		w.Header().Set("Content-Type", "image/jpeg; charset=utf-8")
+		w.Write(emptyImage)
+		return
+	}
+
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Write(content)
 }
 
-func showBlockPage(w http.ResponseWriter, r *http.Request, resp *http.Response, content []byte) {
+func sendBlockMessageBytes(w http.ResponseWriter, r *http.Request, resp *http.Response, content []byte, contentType *string) {
 	// check if request is https
 	if strings.Contains(r.URL.String(), ":443") {
+		log.Println("[Proxy] Sending block page for https request")
 		conn, _, err := w.(http.Hijacker).Hijack()
 		if err != nil {
-			sendInsecureBlockPage(w, r, resp, content)
+			sendInsecureBlockBytes(w, r, resp, content, contentType)
 			return
 		}
 		defer conn.Close()
@@ -493,7 +528,7 @@ func showBlockPage(w http.ResponseWriter, r *http.Request, resp *http.Response, 
 
 		tlsConn.Close()
 	} else {
-		sendInsecureBlockPage(w, r, resp, content)
+		sendInsecureBlockBytes(w, r, resp, content, contentType)
 	}
 
 }
