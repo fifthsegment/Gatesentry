@@ -1,6 +1,6 @@
 # CHANGELOG
 
-## v1.17
+## v1.17 (21st October 2023)
 
 - Fixed bug : Missing mapping of exception hosts in the Web UI
 - Fixed bug : AVIF files were not being properly displayed in Firefox
