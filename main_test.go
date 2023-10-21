@@ -391,12 +391,12 @@ func TestProxyServer(t *testing.T) {
 		}
 
 		resp, err := httpClient.Get("https://www.google.com")
+		time.Sleep(4 * time.Second)
+
 		if err != nil {
 			t.Fatalf("Traffic was not bumped. Got error: %s", err.Error())
 		}
 		defer resp.Body.Close()
-
-		time.Sleep(2 * time.Second)
 
 		proxyCertSubject := resp.TLS.PeerCertificates[0].Subject.CommonName
 
