@@ -17,7 +17,7 @@ func ParseJSONRequest(r *http.Request, v interface{}) error {
 
 		switch {
 		case errors.As(err, &syntaxErr):
-			return errors.New("malformed JSON at " + string(syntaxErr.Offset))
+			return errors.New("malformed JSON at " + string(rune(syntaxErr.Offset)))
 		case errors.As(err, &unmarshalTypeError):
 			return errors.New("JSON value of type " + unmarshalTypeError.Value + " cannot be converted to Go value type " + unmarshalTypeError.Type.String())
 		case errors.As(err, &invalidUnmarshalError):

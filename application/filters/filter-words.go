@@ -1,13 +1,11 @@
 package gatesentry2filters
 
 import (
-	"strings"
-	// "fmt"
 	"log"
 	"strconv"
+	"strings"
 
 	gatesentry2responder "bitbucket.org/abdullah_irfan/gatesentryf/responder"
-	// "gatesentry2/proxy"
 )
 
 func FilterWords(f *GSFilter, content string, responder *gatesentry2responder.GSFilterResponder) {

@@ -33,24 +33,30 @@ func ScanMedia(dataToScan []byte, contentType string,
 		}
 		copyResponseHeader(w, resp)
 
-		var contentScannerInput = ContentScannerInput{
-			Content:     dataToScan,
-			ContentType: contentType,
-			Url:         r.URL.String(),
-		}
-		contentScannerInputBytes, err := json.Marshal(contentScannerInput)
-		if err != nil {
-			log.Println(err)
-			showBlockPage(w, r, nil, PROXY_ERROR_UNABLE_TO_MARSHALL_DATA_FOR_SCANNING)
-			httpResponseSent = true
-			return httpResponseSent, ProxyActionFilterError
-		}
+		// var contentScannerInput = ContentScannerInput{
+		// 	Content:     dataToScan,
+		// 	ContentType: contentType,
+		// 	Url:         r.URL.String(),
+		// }
+		// contentScannerInputBytes, err := json.Marshal(contentScannerInput)
+		// if err != nil {
+		// 	log.Println(err)
+		// 	showBlockPage(w, r, nil, PROXY_ERROR_UNABLE_TO_MARSHALL_DATA_FOR_SCANNING)
+		// 	httpResponseSent = true
+		// 	return httpResponseSent, ProxyActionFilterError
+		// }
 
-		isBlocked, reasonForBlock := IProxy.RunHandler("contentscannerMedia", "", &contentScannerInputBytes, passthru)
-		if isBlocked {
+		// isBlocked, reasonForBlock := IProxy.RunHandler("contentscannerMedia", &contentScannerInputBytes, passthru)
+		contentFilterData := GSContentFilterData{
+			Url:         r.URL.String(),
+			ContentType: contentType,
+			Content:     dataToScan,
+		}
+		IProxy.ContentHandler(&contentFilterData)
+		if contentFilterData.FilterResponseAction == ProxyActionBlockedMediaContent {
 			proxyActionPerformed = ProxyActionBlockedMediaContent
 			var reasonForBlockArray []string
-			err := json.Unmarshal(reasonForBlock, &reasonForBlockArray)
+			err := json.Unmarshal(contentFilterData.FilterResponse, &reasonForBlockArray)
 			if err != nil {
 				emptyImage, _ := createEmptyImage(500, 500, "jpeg", []string{"", "Error", err.Error()})
 
@@ -66,6 +72,7 @@ func ScanMedia(dataToScan []byte, contentType string,
 		} else {
 			// newBuf, _ := createTextOverlayOnImage(buf.Bytes(), []string{"", "Gatesentry filtered", "No reason(s) for blocking"})
 			io.Copy(destwithcounter, &buf)
+			httpResponseSent = true
 		}
 		log.Println("IO Copy done for url = ", r.URL.String())
 	}
@@ -83,12 +90,18 @@ func ScanText(dataToScan []byte,
 	var proxyActionPerformed ProxyAction = ProxyActionFilterNone
 	log.Println("ScanText called for url = " + r.URL.String() + " content type = " + contentType)
 	if strings.Contains(contentType, "html") || len(contentType) == 0 {
-		isBlocked, _ := IProxy.RunHandler("content", contentType, (&dataToScan), passthru)
-		if isBlocked {
+		contentFilterData := GSContentFilterData{
+			Url:         r.URL.String(),
+			ContentType: contentType,
+			Content:     (dataToScan),
+		}
+		IProxy.ContentHandler(&contentFilterData)
+		// isBlocked, _ := IProxy.RunHandler("content", contentType, (&dataToScan), passthru)
+		if contentFilterData.FilterResponseAction == ProxyActionBlockedTextContent {
 			proxyActionPerformed = ProxyActionBlockedTextContent
 			httpResponseSent = true
 			//dataToScan gets modified to contain the blocked page
-			showBlockPage(w, r, nil, *&dataToScan)
+			sendBlockMessageBytes(w, r, nil, contentFilterData.FilterResponse, nil)
 			resp.Header.Set("Content-Type", "text/html; charset=utf-8")
 		}
 

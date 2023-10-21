@@ -1,6 +1,10 @@
 package gatesentryproxy
 
-import "net"
+import (
+	"mime"
+	"net"
+	"strings"
+)
 
 func isLanAddress(addr string) bool {
 	ip := net.ParseIP(addr)
@@ -56,6 +60,7 @@ func isImage(contentType string) bool {
 		contentType == "image/jpg" ||
 		contentType == "image/webp" ||
 		contentType == "image/svg+xml" ||
+		contentType == "image/bmp" ||
 		contentType == "image/x-icon")
 
 	// 	cContentType == "image/x-icon" ||
@@ -70,4 +75,36 @@ func isImage(contentType string) bool {
 	// 	log.Println("Not filtering, sending directly to client")
 
 	// }
+}
+
+func getFileExtensionFromUrl(urlString string) string {
+	if strings.Contains(urlString, "?") {
+		urlString = strings.Split(urlString, "?")[0]
+	}
+	return urlString[strings.LastIndex(urlString, ".")+1:]
+}
+
+func getMimeByExtension(extension string) string {
+	mimeType := mime.TypeByExtension("." + extension)
+	if strings.Contains(mimeType, ";") {
+		mimeType = strings.Split(mimeType, ";")[0]
+	}
+	return mimeType
+}
+
+func isUrlContainingImage(urlString string) bool {
+	// remove query string
+	if strings.Contains(urlString, "?") {
+		urlString = strings.Split(urlString, "?")[0]
+	}
+	if strings.HasSuffix(urlString, ".jpeg") ||
+		strings.HasSuffix(urlString, ".jpg") ||
+		strings.HasSuffix(urlString, ".png") ||
+		strings.HasSuffix(urlString, ".gif") ||
+		strings.HasSuffix(urlString, ".bmp") ||
+		strings.HasSuffix(urlString, ".ico") ||
+		strings.HasSuffix(urlString, ".svg") {
+		return true
+	}
+	return false
 }

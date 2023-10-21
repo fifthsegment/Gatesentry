@@ -86,8 +86,6 @@ func (L *Log) LogDNS(domain string, user string, responseType string) {
 		now := time.Now()
 		secs := now.Unix()
 		_ = secs
-		// fmt.Println( gatesentry2utils.GetUserFromAuthHeader(ctx.Req) );
-		// logitem := "[GS-Logger] " + ctx.Req.RemoteAddr + " - " + ctx.Req.URL.String();
 
 		timestring := gatesentry2utils.Int64toString(secs)
 		logJson := `{"time": ` + timestring + `, "ip":"` + ip + `","url":"` + domain + `","type":"dns", "dnsResponseType":"` + responseType + `"}`
@@ -110,7 +108,6 @@ func (L *Log) LogProxy(url string, user string, actionType string) {
 		now := time.Now()
 		secs := now.Unix()
 		_ = secs
-		// fmt.Println( gatesentry2utils.GetUserFromAuthHeader(ctx.Req) );
 		// logitem := "[GS-Logger] " + ctx.Req.RemoteAddr + " - " + ctx.Req.URL.String();
 
 		timestring := gatesentry2utils.Int64toString(secs)

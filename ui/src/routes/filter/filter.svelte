@@ -33,7 +33,7 @@
   />
 {:else if type == "excludeurls"}
   <Filtereditor
-    filterId="CeBqssmRbqXzbHR"
+    filterId="JHGJiwjkGOeglsd"
     title={$_("Excluded URLs")}
     showColumns={["content", "actions"]}
     description={$_("Add URLs to exclude from filtering here.")}
@@ -41,10 +41,10 @@
 {:else if type == "excludehosts"}
   <Filtereditor
     filterId="CeBqssmRbqXzbHR"
-    title={$_("Exclusion List")}
+    title={$_("Excluded Hosts")}
     showColumns={["content", "actions"]}
     description={$_(
-      "Add hostnames/websites you want to exclude from filtering here.",
+      "Add hostnames you want to exclude from filtering here. If SSL Bumping is enabled, these Hostnames will not be bumped.",
     )}
   />
 {/if}

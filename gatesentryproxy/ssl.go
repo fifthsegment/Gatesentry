@@ -130,7 +130,11 @@ func HandleSSLBump(r *http.Request, w http.ResponseWriter, user string, authUser
 	conn, err := newHijackedConn(w)
 	if err != nil {
 		log.Printf("Error hijacking connection for CONNECT request to %s: %v", r.URL.Host, err)
-		showBlockPage(w, r, nil, BLOCKED_ERROR_HIJACK_BYTES)
+		errorData := &GSProxyErrorData{
+			Error: "Error hijacking connection for CONNECT request to " + r.URL.Host + ": " + err.Error(),
+		}
+		IProxy.ProxyErrorHandler(errorData)
+		sendBlockMessageBytes(w, r, nil, errorData.FilterResponse, nil)
 		return
 	}
 	fmt.Fprint(conn, "HTTP/1.1 200 Connection Established\r\n\r\n")
@@ -328,9 +332,14 @@ func SSLBump(conn net.Conn, serverAddr, user, authUser string, r *http.Request, 
 			ConnectDirect(conn, serverAddr, clientHello, gpt)
 			return
 		}
-		requestUrlBytes_log := []byte(serverAddr)
+		// requestUrlBytes_log := []byte(serverAddr)
 		gpt.ProxyActionToLog = ProxyActionSSLBump
-		gsproxy.RunHandler("log", "", &requestUrlBytes_log, gpt)
+		// gsproxy.RunHandler("log", "", &requestUrlBytes_log, gpt)
+		gsproxy.LogHandler(GSLogData{
+			User:   user,
+			Action: ProxyActionSSLBump,
+			Url:    serverAddr,
+		})
 
 		_, err = serverCert.Verify(x509.VerifyOptions{
 			Intermediates: certPoolWith(state.PeerCertificates[1:]),

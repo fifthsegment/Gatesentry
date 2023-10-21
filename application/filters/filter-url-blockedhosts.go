@@ -1,8 +1,6 @@
 package gatesentry2filters
 
 import (
-	// "fmt"
-
 	"strings"
 
 	gatesentry2responder "bitbucket.org/abdullah_irfan/gatesentryf/responder"

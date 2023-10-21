@@ -1,0 +1,32 @@
+name: Go Test and Coverage
+
+on:
+  push:
+    branches: ["master"]
+    paths:
+      - "**.go"
+  pull_request:
+    branches: ["master"]
+    paths:
+      - "**.go"
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v2
+
+      - name: Set up Go 1.x
+        uses: actions/setup-go@v2
+        with:
+          go-version: ^1.17 # Replace with your Go version if different
+
+      - name: Run Tests with Coverage
+        run: go test ./... -coverprofile=coverage.txt -covermode=atomic
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v2
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          file: ./coverage.txt

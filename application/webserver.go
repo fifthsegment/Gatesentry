@@ -56,7 +56,7 @@ func GSwebserverStart(port int) {
 		WebSetDefaultSettings: func(s string, v string) {
 			R.GSWebSettings.SetDefault(s, v)
 		},
-		InitGatesentry: R.init,
+		InitGatesentry: R.Init,
 	}
 
 	runtimeArgs := gatesentryWebserverTypes.InputArgs{
@@ -67,7 +67,7 @@ func GSwebserverStart(port int) {
 		GetInstallationId:       R.GetInstallationId,
 		GetTotalConsumptionData: R.GetTotalConsumptionData,
 		GetApplicationVersion:   R.GetApplicationVersion,
-		Reload:                  R.init,
+		Reload:                  R.Init,
 	}
 	runtime := gatesentryWebserverTypes.NewTemporaryRuntime(runtimeArgs)
 

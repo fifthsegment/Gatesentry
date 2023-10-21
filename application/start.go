@@ -8,19 +8,19 @@ import (
 
 var R *GSRuntime
 
-func Start() *GSRuntime {
+func Start(webadminport int) *GSRuntime {
 	GSVerString := GetApplicationVersion()
 	fmt.Println("Starting GateSentry v " + GSVerString)
 	// proxy := gatesentry2proxy.StartProxy();
 	R = &GSRuntime{
-		WebServerPort:    10786,
+		WebServerPort:    webadminport,
 		FilterFiles:      make(map[string]string),
 		DNSServerChannel: make(chan int),
 
 		// Proxy: proxy,
 		// FileContents : make(map[string][]GSFILTERLINE),
 	}
-	R.init()
+	R.Init()
 	LoadFilters()
 	// RegisterProxyHandlers();
 	fmt.Println("Starting GateSentry webserver on port " + strconv.Itoa(R.WebServerPort))

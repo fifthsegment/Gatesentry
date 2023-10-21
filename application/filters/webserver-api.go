@@ -33,7 +33,7 @@ func GetAPIResponse(endpoint string, Filters []GSFilter, ctx iris.Context, comm 
 		requestedId := (ctx).Params().Get("id")
 		for _, v := range Filters {
 			if v.Id == requestedId {
-				var dataRecv []GSFILTERLINE
+				var dataRecv []GsFilterLine
 				err := (ctx).ReadJSON(&dataRecv)
 				log.Println(dataRecv)
 				if err != nil {

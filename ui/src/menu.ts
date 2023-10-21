@@ -61,16 +61,16 @@ let menuItems = [
       },
       {
         type: "link",
-        text: "Excluded Hosts",
+        text: "Exception Hostnames",
         href: "/excludehosts",
         icon: Filter,
       },
-      {
-        type: "link",
-        text: "Excluded URLs",
-        href: "/excludeurls",
-        icon: Filter,
-      },
+      // {
+      //   type: "link",
+      //   text: "Excluded URLs",
+      //   href: "/excludeurls",
+      //   icon: Filter,
+      // },
     ],
   },
   {

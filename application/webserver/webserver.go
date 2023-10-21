@@ -184,7 +184,7 @@ func RegisterEndpointsStartServer(Filters *[]gatesentryFilters.GSFilter,
 	internalServer.Post("/api/filters/{id}", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
 		requestedId := vars["id"]
-		var dataReceived []gatesentryFilters.GSFILTERLINE
+		var dataReceived []gatesentryFilters.GsFilterLine
 		ParseJSONRequest(r, &dataReceived)
 		responseJson := gatesentryWebserverEndpoints.PostSingleFilter(requestedId, dataReceived, Filters)
 		SendJSON(w, responseJson)

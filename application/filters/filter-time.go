@@ -1,11 +1,6 @@
 package gatesentry2filters
 
 import (
-	// "github.com/elazarl/goproxy"
-	// "fmt"
-
-	// "net/http"
-	// "gatesentry2/filters"
 	"encoding/json"
 	"log"
 	"time"

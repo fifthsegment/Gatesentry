@@ -10,23 +10,20 @@ type GSFilter struct {
 	Handles      string //This is a unique identifier for each filter as well
 	FileName     string
 	Handler      func(*GSFilter, string, *gatesentry2responder.GSFilterResponder)
-	FileContents []GSFILTERLINE
+	FileContents []GsFilterLine
 	Strictness   int
 }
 
-type GSFILTERLINE struct {
+type GsFilterLine struct {
 	Content string `json:"Content"`
 	Score   int    `json:"Score"`
 }
 
-// Structs for servicing api endpoints here
-
-// /filters
 type GSAPIStructFilter struct {
 	Id          string
 	Name        string
 	Handles     string
 	Description string
 	HasStrength bool
-	Entries     []GSFILTERLINE
+	Entries     []GsFilterLine
 }

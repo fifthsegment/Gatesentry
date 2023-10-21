@@ -96,7 +96,7 @@ func (R *GSRuntime) UpdatePassword(username string, password string) {
 		}
 	}
 	R.GSUserDataSaver()
-	R.init()
+	R.Init()
 }
 
 func (R *GSRuntime) UpdateUser(username string, data GatesentryTypes.GSUserPublic) {
