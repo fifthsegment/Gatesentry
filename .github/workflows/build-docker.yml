@@ -54,12 +54,12 @@ jobs:
           echo 'USER root' >> Dockerfile
           echo 'RUN chmod +x /usr/local/bin/gatesentry' >> Dockerfile
           echo 'EXPOSE 80 53 10413 10786' >> Dockerfile
-          echo 'CMD ["/usr/local/bin/gatesentry"]' >> Dockerfile
+          echo 'CMD ["/usr/local/bin/gatesentry/$BINARY_NAME"]' >> Dockerfile
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v2
         with:
-          #   context: .
+          context: .
           push: true
           #   tags: abdullahi1/gatesentry:${{ github.event.release.tag_name }}
           tags: abdullahi1/gatesentry:latest
