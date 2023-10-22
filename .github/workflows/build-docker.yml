@@ -5,7 +5,10 @@ on:
     workflows: ["Build a release"] # Name of the workflow in bump-version.yml
     types:
       - completed
-
+  push:
+    branches: ["master"]
+  pull_request:
+    branches: ["master"]
 # on:
 #   push:
 #     branches: ["master"]
