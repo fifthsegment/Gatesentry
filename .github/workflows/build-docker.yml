@@ -45,16 +45,23 @@ jobs:
       #     run: |
       #       wget $(curl -s https://api.github.com/repos/fifthsegment/Gatesentry/releases/latest | jq -r '.assets[] | select(.name == "gatesentry-linux") | .browser_download_url')
       #       wget $(curl -s https://api.github.com/repos/fifthsegment/Gatesentry/releases/latest | jq -r '.assets[] | select(.name == "gatesentry-linux-arm64") | .browser_download_url')
+      - name: Create entrypoint.sh script
+        run: |
+          echo '#!/bin/sh' > entrypoint.sh
+          echo 'exec /usr/local/bin/gatesentry/$1' >> entrypoint.sh
+          chmod +x entrypoint.sh
 
       - name: Create Dockerfile
         run: |
           echo 'ARG BINARY_NAME' > Dockerfile
           echo 'FROM ubuntu:latest' >> Dockerfile
-          echo 'COPY ${BINARY_NAME} /usr/local/bin/gatesentry' >> Dockerfile
+          echo 'COPY ${BINARY_NAME} /usr/local/bin/gatesentry/${BINARY_NAME}' >> Dockerfile
+          echo 'COPY entrypoint.sh /entrypoint.sh' >> Dockerfile
           echo 'USER root' >> Dockerfile
-          echo 'RUN sh -c "chmod +x /usr/local/bin/gatesentry/${BINARY_NAME}"' >> Dockerfile
+          echo 'RUN chmod +x /usr/local/bin/gatesentry/${BINARY_NAME}' >> Dockerfile
           echo 'EXPOSE 80 53 10413 10786' >> Dockerfile
-          echo 'ENTRYPOINT ["/bin/sh", "-c", "/usr/local/bin/gatesentry/$BINARY_NAME"]' >> Dockerfile
+          echo 'ENTRYPOINT ["/entrypoint.sh"]' >> Dockerfile
+          echo 'CMD ["${BINARY_NAME}"]' >> Dockerfile
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v2
