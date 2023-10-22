@@ -51,6 +51,11 @@
           ipText = "";
           showForm = false;
           dispatch("updatednsinfo");
+          notificationstore.add({
+            kind: "success",
+            title: $_("Success:"),
+            subtitle: $_("Successfully saved data to the api"),
+          });
         } else if ("error" in json) {
           notificationstore.add(
             createNotificationError(
@@ -64,8 +69,8 @@
       .catch(function (err) {
         notificationstore.add({
           kind: "error",
-          title: "Error:",
-          subtitle: "Unable to save data to the api : " + err.message,
+          title: $_("Error:"),
+          subtitle: $_("Unable to save data to the api : ") + err.message,
           timeout: 30000,
         });
         loadAPIData();
@@ -115,7 +120,7 @@
     domainText = row.domain;
     ipText = row.ip;
     showForm = true;
-    saveAPIData();
+    // saveAPIData();
   };
 
   const deleteRow = (rowId) => {

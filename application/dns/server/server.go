@@ -129,10 +129,15 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 			log.Println("Domain is internal : ", domain, " - ", ip)
 			response := new(dns.Msg)
 			response.SetRcode(r, dns.RcodeSuccess)
-			response.Answer = append(m.Answer, &dns.A{
-				Hdr: dns.RR_Header{Name: domain + ".", Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 3600},
+			response.Answer = append(response.Answer, &dns.A{
+				Hdr: dns.RR_Header{Name: q.Name, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 60},
 				A:   net.ParseIP(ip),
 			})
+
+			// msg.Answer = append(msg.Answer, &dns.A{
+			// 	Hdr: dns.RR_Header{Name: question.Name, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 60},
+			// 	A:   net.ParseIP(ip),
+			// })
 
 			logger.LogDNS(domain, "dns", "internal")
 			w.WriteMsg(response)
