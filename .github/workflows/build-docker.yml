@@ -52,9 +52,9 @@ jobs:
           echo 'FROM ubuntu:latest' >> Dockerfile
           echo 'COPY ${BINARY_NAME} /usr/local/bin/gatesentry' >> Dockerfile
           echo 'USER root' >> Dockerfile
-          echo 'RUN chmod +x /usr/local/bin/gatesentry/${BINARY_NAME}' >> Dockerfile
+          echo 'RUN sh -c "chmod +x /usr/local/bin/gatesentry/${BINARY_NAME}"' >> Dockerfile
           echo 'EXPOSE 80 53 10413 10786' >> Dockerfile
-          echo 'CMD ["/usr/local/bin/gatesentry/${BINARY_NAME}"]' >> Dockerfile
+          echo 'CMD /bin/sh -c "/usr/local/bin/gatesentry/$BINARY_NAME"' >> Dockerfile
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v2
