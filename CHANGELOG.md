@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## v1.17.3 (22nd October 2023)
+
+- Fix UI bug in the DNS page causing the user unable to modify domains
+
 ## v1.17.2 (22nd October 2023)
 
 - Add support for running on Docker
