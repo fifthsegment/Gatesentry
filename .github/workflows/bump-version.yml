@@ -2,7 +2,7 @@ name: Bump Version
 on:
   push:
     branches:
-      - master # adjust this to your main development branch
+      - release-*
 
 jobs:
   bump-version:
@@ -16,22 +16,22 @@ jobs:
         run: |
           VERSION=$(awk -F'"' '/var GATESENTRY_VERSION =/ { print $2 }' main.go)
           echo "Extracted Version: $VERSION"
-          
+
           IFS='.' read -r -a VERSION_ARRAY <<< "$VERSION"
           echo "Version Array: ${VERSION_ARRAY[@]}"
-          
+
           NEW_MINOR=$(( ${VERSION_ARRAY[1]} + 1 ))
           echo "New Minor: $NEW_MINOR"
-          
+
           NEW_VERSION="${VERSION_ARRAY[0]}.${NEW_MINOR}.0"
           echo "New Version: $NEW_VERSION"
-          
+
           perl -i -pe "s/var GATESENTRY_VERSION = \"[0-9]+\.[0-9]+\.[0-9]+\"/var GATESENTRY_VERSION = \"$NEW_VERSION\"/" main.go
           PERL_EXIT_CODE=$?
           echo "Perl Exit Code: $PERL_EXIT_CODE"
-          
+
           cat main.go  # This will output the contents of main.go to the log, so you can verify the substitution
-          
+
           echo "::set-output name=new-version::$NEW_VERSION"
 
       - name: Commit and tag

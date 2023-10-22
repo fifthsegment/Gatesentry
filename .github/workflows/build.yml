@@ -1,4 +1,4 @@
-name: Go Build and Upload
+name: Build a release
 
 # on:
 #   push:
