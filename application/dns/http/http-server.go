@@ -15,11 +15,10 @@ var (
 						<!DOCTYPE html>
 						<html>
 						<head>
-							<title>Blocked Website</title>
+							<title>Gatesentry DNS</title>
 						</head>
 						<body>
-							<h1>Website Blocked</h1>
-							<p>This website is blocked.</p>
+							<p>Gatesentry DNS Server home.</p>
 							<p></p>
 						</body>
 						</html>
