@@ -294,6 +294,7 @@ func TestProxyServer(t *testing.T) {
 
 		client := &http.Client{}
 		resp, err = client.Do(req)
+		time.Sleep(2 * time.Second)
 		if err != nil {
 			t.Fatal("Failed to get filters:", err)
 		}
@@ -349,6 +350,7 @@ func TestProxyServer(t *testing.T) {
 
 		// get response body
 		resp, err = client.Do(req)
+		time.Sleep(2 * time.Second)
 		if err != nil {
 			t.Fatal("Failed to get filters:", err)
 		}
@@ -374,7 +376,7 @@ func TestProxyServer(t *testing.T) {
 		enable_filtering = R.GSSettings.Get("enable_https_filtering")
 		fmt.Println("Enable filtering = " + enable_filtering)
 		R.Init()
-		time.Sleep(1 * time.Second)
+		time.Sleep(2 * time.Second)
 
 		proxyURL, err := url.Parse(proxyUrl)
 		if err != nil {

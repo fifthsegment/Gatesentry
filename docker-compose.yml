@@ -8,8 +8,5 @@ services:
       - "10413:10413"
       - "10786:10786"
     volumes:
-      - gssettings-volume:/usr/local/bin/gatesentry/gatesentry 
-volumes:
-  gssettings-volume:  # Define the volume
-    driver: local
+      - ./docker_root:/usr/local/gatesentry/gatesentry # this is where the config file will be stored
     

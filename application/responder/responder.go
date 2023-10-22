@@ -3,8 +3,6 @@ package gatesentry2responder
 import (
 	"strconv"
 	"strings"
-
-	gatesentry2frontend "bitbucket.org/abdullah_irfan/gatesentryf/webserver/frontend"
 )
 
 type GSFilterResponder struct {
@@ -62,7 +60,7 @@ func BuildGeneralResponsePage(Reasons []string, Score int) string {
 	templ = strings.Replace(templ, "_content_", content, -1)
 	templ = strings.Replace(templ, "_mainstyle_", "margin-top:7% ", -1)
 	templ = strings.Replace(templ, "_colorclass_", "mdl-color--red", -1)
-	templ = strings.Replace(templ, "_primarystyle_", string(gatesentry2frontend.GetBlockPageMaterialUIStylesheet()), -1)
+	templ = strings.Replace(templ, "_primarystyle_", GetCssString(), -1)
 	return templ
 }
 
@@ -87,7 +85,7 @@ func BuildResponsePage(Reasons []string, Score int) string {
 	templ = strings.Replace(templ, "_content_", content, -1)
 	templ = strings.Replace(templ, "_mainstyle_", "margin-top:7% ", -1)
 	templ = strings.Replace(templ, "_colorclass_", "mdl-color--red", -1)
-	templ = strings.Replace(templ, "_primarystyle_", string(gatesentry2frontend.GetBlockPageMaterialUIStylesheet()), -1)
+	templ = strings.Replace(templ, "_primarystyle_", GetCssString(), -1)
 	return templ
 	// data, err := gatesentry2webserver.Asset("app/material.css")
 	// if err != nil {
