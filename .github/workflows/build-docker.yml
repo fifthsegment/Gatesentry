@@ -28,10 +28,23 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
-      - name: Download gatesentry-linux binary from latest release
+      - name: Install GitHub CLI
         run: |
-          wget $(curl -s https://api.github.com/repos/fifthsegment/Gatesentry/releases/latest | jq -r '.assets[] | select(.name == "gatesentry-linux") | .browser_download_url')
-          wget $(curl -s https://api.github.com/repos/fifthsegment/Gatesentry/releases/latest | jq -r '.assets[] | select(.name == "gatesentry-linux-arm64") | .browser_download_url')
+          sudo apt-get update
+          sudo apt-get install -y gh
+
+      - name: Authenticate with GitHub CLI
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | gh auth login --with-token
+
+      - name: Download gatesentry-linux binary for amd64
+        run: |
+          gh release download -R fifthsegment/Gatesentry -p "gatesentry-linux"
+          gh release download -R fifthsegment/Gatesentry -p "gatesentry-linux-arm64"
+
+      #   - name: Download gatesentry-linux binary from latest release
+      #     run: |
+      #       wget $(curl -s https://api.github.com/repos/fifthsegment/Gatesentry/releases/latest | jq -r '.assets[] | select(.name == "gatesentry-linux") | .browser_download_url')
+      #       wget $(curl -s https://api.github.com/repos/fifthsegment/Gatesentry/releases/latest | jq -r '.assets[] | select(.name == "gatesentry-linux-arm64") | .browser_download_url')
 
       - name: Create Dockerfile
         run: |
