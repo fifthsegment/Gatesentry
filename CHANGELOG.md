@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## v1.17.1 (22nd October 2023)
+
+- Fix: DNS Server blocklist in default settings
+
 ## v1.17 (22nd October 2023)
 
 - Fix: DNS Server not updating list immediately after an update from the UI
