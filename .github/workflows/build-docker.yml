@@ -54,7 +54,7 @@ jobs:
           echo 'USER root' >> Dockerfile
           echo 'RUN sh -c "chmod +x /usr/local/bin/gatesentry/${BINARY_NAME}"' >> Dockerfile
           echo 'EXPOSE 80 53 10413 10786' >> Dockerfile
-          echo 'CMD /bin/sh -c "/usr/local/bin/gatesentry/$BINARY_NAME"' >> Dockerfile
+          echo 'ENTRYPOINT ["/bin/sh", "-c", "/usr/local/bin/gatesentry/$BINARY_NAME"]' >> Dockerfile
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v2
