@@ -48,7 +48,7 @@ jobs:
       - name: Create entrypoint.sh script
         run: |
           echo '#!/bin/sh' > entrypoint.sh
-          echo 'exec /usr/local/bin/gatesentry/$1' >> entrypoint.sh
+          echo 'echo $BINARY_NAME' >> entrypoint.sh
           chmod +x entrypoint.sh
 
       - name: Create Dockerfile
@@ -61,7 +61,6 @@ jobs:
           echo 'RUN chmod +x /usr/local/bin/gatesentry/${BINARY_NAME}' >> Dockerfile
           echo 'EXPOSE 80 53 10413 10786' >> Dockerfile
           echo 'ENTRYPOINT ["/entrypoint.sh"]' >> Dockerfile
-          echo 'CMD ["${BINARY_NAME}"]' >> Dockerfile
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v2
