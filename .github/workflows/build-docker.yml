@@ -55,8 +55,10 @@ jobs:
         run: |
           echo 'ARG BINARY_NAME' > Dockerfile
           echo 'FROM ubuntu:latest' >> Dockerfile
-          echo 'COPY ${BINARY_NAME} /usr/local/bin/gatesentry/${BINARY_NAME}' >> Dockerfile
+          echo 'COPY ${BINARY_NAME} /usr/local/bin/gatesentry' >> Dockerfile
+          echo 'echo {$BINARY_NAME}' >> binary.txt
           echo 'COPY entrypoint.sh /entrypoint.sh' >> Dockerfile
+          echo 'COPY binary.txt /binary.txt' >> Dockerfile
           echo 'USER root' >> Dockerfile
           echo 'RUN chmod +x /usr/local/bin/gatesentry/${BINARY_NAME}' >> Dockerfile
           echo 'EXPOSE 80 53 10413 10786' >> Dockerfile
