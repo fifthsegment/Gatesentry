@@ -1,14 +1,22 @@
 <script lang="ts">
   import { _ } from "svelte-i18n";
-  import Certificate from "../../components/connectedCertificate.svelte";
 
   import ConnectedGeneralSettingInput from "../../components/connectedGeneralSettingInputs.svelte";
   import HttpsToggle from "../../components/httpsToggle.svelte";
+  import ConnectedCertificateComposed from "../../components/connectedCertificateComposed.svelte";
+  import ConnectedSettingInput from "../../components/connectedSettingInput.svelte";
+  import { Breadcrumb, BreadcrumbItem } from "carbon-components-svelte";
 </script>
+
+<Breadcrumb style="margin-bottom: 10px;">
+  <BreadcrumbItem href="/">Dashboard</BreadcrumbItem>
+  <BreadcrumbItem>Settings</BreadcrumbItem>
+</Breadcrumb>
 
 <h2>Settings</h2>
 
 <br />
+
 <ConnectedGeneralSettingInput
   keyName="log_location"
   title={$_("Log Location")}
@@ -28,6 +36,4 @@
 
 <HttpsToggle />
 
-<Certificate settingName="capem" label={$_("HTTPS Filtering - Certificate")} />
-
-<Certificate settingName="keypem" label={$_("HTTPS Filtering - Key")} />
+<ConnectedCertificateComposed />

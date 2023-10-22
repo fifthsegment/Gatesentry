@@ -1,7 +1,11 @@
 # CHANGELOG
 
-## v1.17 (21st October 2023)
+## v1.17 (22nd October 2023)
 
+- Fix: DNS Server not updating list immediately after an update from the UI
+- Added link to download certificate on the login screen
+- Added DNS server info page which shows total blocked domains, last update time and next scheduled update for blocklists
+- Added filtering strictness field to the UI
 - Fixed bug : Missing mapping of exception hosts in the Web UI
 - Fixed bug : AVIF files were not being properly displayed in Firefox
 - Refactored code

@@ -16,6 +16,9 @@
   import { AddAlt, Edit, RowDelete, Save } from "carbon-icons-svelte";
   import { notificationstore } from "../store/notifications";
   import { createNotificationError } from "../lib/utils";
+  import { createEventDispatcher } from "svelte";
+  const dispatch = createEventDispatcher();
+
   let data = null;
   let domainText = "";
   let ipText = "";
@@ -44,6 +47,18 @@
       .then(function (json) {
         if (json.ok == true) {
           loadAPIData();
+          domainText = "";
+          ipText = "";
+          showForm = false;
+          dispatch("updatednsinfo");
+        } else if ("error" in json) {
+          notificationstore.add(
+            createNotificationError(
+              { title: $_("Error"), subtitle: json.error },
+              $_,
+            ),
+          );
+          loadAPIData();
         }
       })
       .catch(function (err) {
@@ -61,26 +76,26 @@
 
   const addSaveRow = () => {
     // search if the same domain already exists
-    const existingDomain = data.find((row) => row.domain === domainText);
-    const existingIp = data.find((row) => row.ip === ipText);
-    if (existingDomain) {
-      notificationstore.add(
-        createNotificationError(
-          { title: $_("Error"), subtitle: $_("Domain already exists") },
-          $_,
-        ),
-      );
-      return;
-    }
-    if (existingIp) {
-      notificationstore.add(
-        createNotificationError(
-          { title: $_("Error"), subtitle: $_("IP already exists") },
-          $_,
-        ),
-      );
-      return;
-    }
+    // const existingDomain = data.find((row) => row.domain === domainText);
+    // const existingIp = data.find((row) => row.ip === ipText);
+    // if (existingDomain) {
+    //   notificationstore.add(
+    //     createNotificationError(
+    //       { title: $_("Error"), subtitle: $_("Domain already exists") },
+    //       $_,
+    //     ),
+    //   );
+    //   return;
+    // }
+    // if (existingIp) {
+    //   notificationstore.add(
+    //     createNotificationError(
+    //       { title: $_("Error"), subtitle: $_("IP already exists") },
+    //       $_,
+    //     ),
+    //   );
+    //   return;
+    // }
     if (editingRowId) {
       const row = data.find((row) => row.id === editingRowId);
       data[editingRowId - 1].domain = domainText;
@@ -90,9 +105,7 @@
     } else {
       data = [...data, { id: data.length + 1, domain: domainText, ip: ipText }];
     }
-    domainText = "";
-    ipText = "";
-    showForm = false;
+
     saveAPIData();
   };
 

@@ -14,6 +14,7 @@ import (
 	gatesentryDnsUtils "bitbucket.org/abdullah_irfan/gatesentryf/dns/utils"
 	gatesentryLogger "bitbucket.org/abdullah_irfan/gatesentryf/logger"
 	gatesentry2storage "bitbucket.org/abdullah_irfan/gatesentryf/storage"
+	gatesentryTypes "bitbucket.org/abdullah_irfan/gatesentryf/types"
 	"github.com/miekg/dns"
 )
 
@@ -39,11 +40,15 @@ var (
 
 var server *dns.Server
 var serverRunning bool = false
+var restartDnsSchedulerChan chan bool
 
-func StartDNSServer(basePath string, ilogger *gatesentryLogger.Log, blockedLists []string, settings *gatesentry2storage.MapStore) {
+const BLOCKLIST_HOURLY_UPDATE_INTERVAL = 10
+
+func StartDNSServer(basePath string, ilogger *gatesentryLogger.Log, blockedLists []string, settings *gatesentry2storage.MapStore, dnsinfo *gatesentryTypes.DnsServerInfo) {
 
 	if server != nil || serverRunning == true {
 		fmt.Println("DNS server is already running")
+		restartDnsSchedulerChan <- true
 		return
 	}
 
@@ -52,6 +57,8 @@ func StartDNSServer(basePath string, ilogger *gatesentryLogger.Log, blockedLists
 	go gatesentryDnsHttpServer.StartHTTPServer()
 	// InitializeLogs()
 	// go gatesentryDnsFilter.InitializeBlockedDomains(&blockedDomains, &blockedLists)
+	restartDnsSchedulerChan = make(chan bool)
+
 	go gatesentryDnsScheduler.RunScheduler(
 		&blockedDomains,
 		&blockedLists,
@@ -59,7 +66,12 @@ func StartDNSServer(basePath string, ilogger *gatesentryLogger.Log, blockedLists
 		&exceptionDomains,
 		&mutex,
 		settings,
+		dnsinfo,
+		BLOCKLIST_HOURLY_UPDATE_INTERVAL,
+		restartDnsSchedulerChan,
 	)
+	restartDnsSchedulerChan <- true
+
 	serverRunning = true
 	// go PrintQueryLogsPeriodically()
 	// Listen for incoming DNS requests on port 53
@@ -80,7 +92,6 @@ func StopDNSServer() {
 	// if server == nil || serverRunning == false {
 	if server == nil || serverRunning == false {
 		fmt.Println("DNS server is already stopped")
-
 		return
 	}
 
@@ -107,7 +118,7 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 
 	for _, q := range r.Question {
 		domain := strings.ToLower(q.Name)
-		log.Println("[DNS] Domain requested:", domain)
+		log.Println("[DNS] Domain requested:", domain, " Length of internal records = ", len(internalRecords))
 		domain = domain[:len(domain)-1]
 		// LogQuery(domain)
 		if _, exists := exceptionDomains[domain]; exists {

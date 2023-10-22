@@ -27,7 +27,7 @@ var GSPROXYPORT = "10413"
 var GSWEBADMINPORT = "10786"
 var GSBASEDIR = ""
 var Baseendpointv2 = "https://www.gatesentryfilter.com/api/"
-var GATESENTRY_VERSION = "1.17.0"
+var GATESENTRY_VERSION = "1.16.0"
 var GS_BOUND_ADDRESS = ":"
 var R *application.GSRuntime
 
@@ -337,7 +337,7 @@ func RunGateSentry() {
 	}
 
 	// Making a comm channel for our internal dns server
-	go application.DNSServerThread(application.GetBaseDir(), R.Logger, R.DNSServerChannel, R.GSSettings)
+	go application.DNSServerThread(application.GetBaseDir(), R.Logger, R.DNSServerChannel, R.GSSettings, R.DnsServerInfo)
 
 	addr := "0.0.0.0:"
 	addr += GSPROXYPORT

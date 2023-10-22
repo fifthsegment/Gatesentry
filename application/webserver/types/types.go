@@ -4,69 +4,38 @@ import (
 	"encoding/json"
 
 	gatesentryLogger "bitbucket.org/abdullah_irfan/gatesentryf/logger"
+	gatesentry2storage "bitbucket.org/abdullah_irfan/gatesentryf/storage"
 	GatesentryTypes "bitbucket.org/abdullah_irfan/gatesentryf/types"
 )
 
-type GetSettings func(string) string
-
-type SetSettings func(string, string)
-
-type SettingsStore struct {
-	GetSettings           GetSettings
-	SetSettings           SetSettings
-	WebGetSettings        GetSettings
-	WebSetSettings        SetSettings
-	WebSetDefaultSettings SetSettings
-	InitGatesentry        func()
-}
-
 // create an initializer for above struct
-func NewSettingsStore(getSettings GetSettings, setSettings SetSettings, webGetSettings GetSettings, webSetSettings SetSettings, initGatesentry func()) *SettingsStore {
-	return &SettingsStore{
-		GetSettings:    getSettings,
-		SetSettings:    setSettings,
-		WebGetSettings: webGetSettings,
-		WebSetSettings: webSetSettings,
-		InitGatesentry: initGatesentry,
-	}
-}
 
-func (s *SettingsStore) Get(key string) string {
-	return s.GetSettings(key)
-}
+// func (s *SettingsStore) GetAdminPassword() string {
+// 	general_settings := s.Get("general_settings")
+// 	general_settings_parsed := GSGeneral_Settings{}
+// 	json.Unmarshal([]byte(general_settings), &general_settings_parsed)
+// 	return general_settings_parsed.AdminPassword
+// }
 
-func (s *SettingsStore) Set(key string, value string) {
-	s.SetSettings(key, value)
-}
+// func (s *SettingsStore) GetAdminUser() string {
+// 	general_settings := s.Get("general_settings")
+// 	general_settings_parsed := GSGeneral_Settings{}
+// 	json.Unmarshal([]byte(general_settings), &general_settings_parsed)
+// 	return general_settings_parsed.AdminUser
+// }
 
-func (s *SettingsStore) WebSetDefault(key string, value string) {
-	s.SetSettings(key, value)
-}
-
-func (s *SettingsStore) WebGet(key string) string {
-	return s.WebGetSettings(key)
-}
-
-func (s *SettingsStore) WebSet(key string, value string) {
-	s.WebSetSettings(key, value)
-}
-
-func (s *SettingsStore) GetAdminPassword() string {
-	general_settings := s.Get("general_settings")
-	general_settings_parsed := GSGeneral_Settings{}
-	json.Unmarshal([]byte(general_settings), &general_settings_parsed)
-	return general_settings_parsed.AdminPassword
-}
-
-func (s *SettingsStore) GetAdminUser() string {
+func GetAdminUser(s *gatesentry2storage.MapStore) string {
 	general_settings := s.Get("general_settings")
 	general_settings_parsed := GSGeneral_Settings{}
 	json.Unmarshal([]byte(general_settings), &general_settings_parsed)
 	return general_settings_parsed.AdminUser
 }
 
-func (s *SettingsStore) OnMajorSettingsChange() {
-	s.InitGatesentry()
+func GetAdminPassword(s *gatesentry2storage.MapStore) string {
+	general_settings := s.Get("general_settings")
+	general_settings_parsed := GSGeneral_Settings{}
+	json.Unmarshal([]byte(general_settings), &general_settings_parsed)
+	return general_settings_parsed.AdminPassword
 }
 
 type User struct {

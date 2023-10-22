@@ -1,13 +1,15 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { createEventDispatcher, onMount } from "svelte";
   import { store } from "../store/apistore";
   import {
     Button,
+    Column,
     ComposedModal,
     DataTable,
     ModalBody,
     ModalFooter,
     ModalHeader,
+    Row,
     TextInput,
   } from "carbon-components-svelte";
   import { AddAlt, Edit, RowDelete, Save } from "carbon-icons-svelte";
@@ -17,6 +19,8 @@
     createNotificationError,
     createNotificationSuccess,
   } from "../lib/utils";
+  const dispatch = createEventDispatcher();
+
   let data = null;
   let editingRowId = null;
   let editingItemValue = "";
@@ -33,6 +37,7 @@
         JSON.stringify(data),
       );
 
+      dispatch("updatednsinfo");
       notificationstore.add(
         createNotificationSuccess(
           {
@@ -97,8 +102,30 @@
   {$_(
     "A block list is a file containing a list of domains to block. Gatesentry comes with a series of predefined blocklists for adblocking. You can also add your own custom block lists or remove the existing ones.",
   )}
+  <a href="https://github.com/hagezi/dns-blocklists#fake" target="_blank"
+    >{$_("Get more block lists from here")}</a
+  >
 </p>
+<br />
+<strong>{$_("The following two formats are supported: ")}</strong>
+<Row>
+  <Column>
+    <pre class="simple-border">
+      <code>
+        0.0.0.0 domain.com
+      </code>
+    </pre>
+  </Column>
 
+  <Column>
+    <pre class="simple-border">
+      <code>
+        domain.com
+      </code>
+    </pre>
+  </Column>
+</Row>
+<br />
 {#if data}
   {#if showForm}
     <ComposedModal

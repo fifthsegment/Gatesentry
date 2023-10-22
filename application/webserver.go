@@ -34,30 +34,8 @@ func GSwebserverStart(port int) {
 	}
 
 	fmt.Println("Webserver is listening on : " + ggport)
-
-	// app := iris.New()
-
 	gatesentry2storage.SetBaseDir(GSBASEDIR)
 	R.GSWebSettings = gatesentry2storage.NewMapStore("GSWebSettings", true)
-
-	settings := &gatesentryWebserverTypes.SettingsStore{
-		GetSettings: func(s string) string {
-			return R.GSSettings.Get(s)
-		},
-		SetSettings: func(s string, v string) {
-			R.GSSettings.Update(s, v)
-		},
-		WebGetSettings: func(s string) string {
-			return R.GSWebSettings.Get(s)
-		},
-		WebSetSettings: func(s string, v string) {
-			R.GSWebSettings.Update(s, v)
-		},
-		WebSetDefaultSettings: func(s string, v string) {
-			R.GSWebSettings.SetDefault(s, v)
-		},
-		InitGatesentry: R.Init,
-	}
 
 	runtimeArgs := gatesentryWebserverTypes.InputArgs{
 		GetUserGetJSON:          R.GSUserGetDataJSON,
@@ -73,7 +51,15 @@ func GSwebserverStart(port int) {
 
 	// gatesentryWebserver.RegisterEndpoints(app, settings, &R.Filters, R.Logger, runtime, R.BoundAddress)
 
-	gatesentryWebserver.RegisterEndpointsStartServer(&R.Filters, runtime, settings, R.Logger, R.BoundAddress, strconv.Itoa(GSWebServerPort))
+	gatesentryWebserver.RegisterEndpointsStartServer(
+		&R.Filters,
+		runtime,
+		R.Logger,
+		R.DnsServerInfo,
+		R.BoundAddress,
+		strconv.Itoa(GSWebServerPort),
+		R.GSSettings,
+	)
 
 	// app.Listen(":" + strconv.Itoa(GSWebServerPort))
 }
