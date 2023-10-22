@@ -53,13 +53,13 @@ jobs:
         run: |
           echo '#!/bin/sh' > entrypoint.sh
           echo 'arch=$(uname -m)' >> entrypoint.sh
-          echo 'chmod +x /usr/local/bin/gatesentry/gatesentry-linux' >> entrypoint.sh
-          echo 'chmod +x /usr/local/bin/gatesentry/gatesentry-linux-arm64' >> entrypoint.sh
+          echo 'chmod +x /usr/local/gatesentry/gatesentry-linux' >> entrypoint.sh
+          echo 'chmod +x /usr/local/gatesentry/gatesentry-linux-arm64' >> entrypoint.sh
           echo 'if [ "$arch" = "aarch64" ]; then' >> entrypoint.sh
           echo '  echo "Running on arm64"' >> entrypoint.sh
-          echo '  exec /usr/local/bin/gatesentry/gatesentry-linux-arm64' >> entrypoint.sh
+          echo '  exec /usr/local/gatesentry/gatesentry-linux-arm64' >> entrypoint.sh
           echo 'else' >> entrypoint.sh
-          echo '  exec /usr/local/bin/gatesentry/gatesentry-linux' >> entrypoint.sh
+          echo '  exec /usr/local/gatesentry/gatesentry-linux' >> entrypoint.sh
           echo 'fi' >> entrypoint.sh
           chmod +x entrypoint.sh
 
@@ -69,11 +69,9 @@ jobs:
           echo 'FROM ubuntu:latest' >> Dockerfile
           echo 'USER root' >> Dockerfile
           echo 'RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*' >> Dockerfile
-          echo "COPY \${BINARY_NAME} /usr/local/bin/gatesentry" >> Dockerfile
-          echo "echo \${BINARY_NAME}" >> binary.txt
+          echo "COPY \${BINARY_NAME} /usr/local/gatesentry" >> Dockerfile
           echo 'COPY entrypoint.sh /entrypoint.sh' >> Dockerfile
-          echo 'COPY binary.txt /binary.txt' >> Dockerfile
-          echo 'RUN chmod +x /usr/local/bin/gatesentry/${BINARY_NAME}' >> Dockerfile
+          echo 'RUN chmod +x /usr/local/gatesentry/${BINARY_NAME}' >> Dockerfile
           echo 'EXPOSE 80 53 10413 10786' >> Dockerfile
           echo 'ENTRYPOINT ["/entrypoint.sh"]' >> Dockerfile
 
