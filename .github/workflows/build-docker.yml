@@ -1,15 +1,15 @@
 name: Build Docker Image
 
-# on:
-#   release:
-#     types:
-#       - published
-
 on:
-  push:
-    branches: ["master"]
-  pull_request:
-    branches: ["master"]
+  release:
+    types:
+      - published
+
+# on:
+#   push:
+#     branches: ["master"]
+#   pull_request:
+#     branches: ["master"]
 
 jobs:
   build:
@@ -77,8 +77,8 @@ jobs:
         with:
           context: .
           push: true
-          #   tags: abdullahi1/gatesentry:${{ github.event.release.tag_name }}
-          tags: abdullahi1/gatesentry:latest
+          tags: abdullahi1/gatesentry:${{ github.event.release.tag_name }}
+          #   tags: abdullahi1/gatesentry:latest
           platforms: linux/amd64,linux/arm64
           build-args: |
             BINARY_NAME=gatesentry-linux${{ matrix.platform == 'linux/arm64' && '-arm64' || '' }}
