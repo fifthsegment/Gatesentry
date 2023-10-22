@@ -38,6 +38,7 @@ jobs:
           echo 'ARG BINARY_NAME' > Dockerfile
           echo 'FROM ubuntu:latest' >> Dockerfile
           echo 'COPY $BINARY_NAME /usr/local/bin/gatesentry' >> Dockerfile
+          echo 'USER root' >> Dockerfile
           echo 'RUN chmod +x /usr/local/bin/gatesentry' >> Dockerfile
           echo 'EXPOSE 80 53 10413 10786' >> Dockerfile
           echo 'CMD ["/usr/local/bin/gatesentry"]' >> Dockerfile
