@@ -93,9 +93,16 @@ func preupgradeCheck(binpath string) error {
 }
 
 func main() {
-	dir, err := filepath.Abs(filepath.Dir(os.Args[0]))
+	dir, err := filepath.Abs(filepath.Dir(os.Args[0]) + string(os.PathSeparator) + "gatesentry")
 	if err != nil {
 		log.Fatal(err)
+	}
+
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
+		err = os.Mkdir(dir, 0755)
+		if err != nil {
+			log.Fatal(err)
+		}
 	}
 
 	GSBASEDIR = dir
