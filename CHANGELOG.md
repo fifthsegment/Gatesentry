@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## v1.17.2 (22nd October 2023)
+
+- Add support for running on Docker
+
 ## v1.17.1 (22nd October 2023)
 
 - Fix: DNS Server blocklist in default settings
