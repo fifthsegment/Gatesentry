@@ -64,6 +64,11 @@ jobs:
         run: |
           echo 'ARG BINARY_NAME' > Dockerfile
           echo 'FROM ubuntu:latest' >> Dockerfile
+          echo 'RUN apt-get update \
+            # Install ca-certificates package
+            && apt-get install -y ca-certificates \
+            # Clear the package list for a smaller image
+            && rm -rf /var/lib/apt/lists/* \  '
           echo "COPY \${BINARY_NAME} /usr/local/bin/gatesentry" >> Dockerfile
           echo "echo \${BINARY_NAME}" >> binary.txt
           echo 'COPY entrypoint.sh /entrypoint.sh' >> Dockerfile
