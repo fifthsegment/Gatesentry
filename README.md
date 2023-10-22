@@ -105,6 +105,10 @@ Note:Ensure your system’s firewall and security settings allow traffic on port
 
 This guide now specifically refers to the Gatesentry software and uses the `gatesentry-{platform}` filename convention for clarity.
 
+### DNS Information
+
+Gatesentry ships with a built in DNS server, which can be used to block domains. The server as of now forwards requests to Google DNS for resolution, this can be modified from inside the `application/dns/server/server.go` file. 
+
 ## Local Development
 
 `./setup.sh`
