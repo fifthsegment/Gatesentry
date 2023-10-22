@@ -167,7 +167,7 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 
 func forwardDNSRequest(r *dns.Msg) (*dns.Msg, error) {
 	c := new(dns.Client)
-	resp, _, err := c.Exchange(r, externalResolver) // Use Google's public DNS as an example
+	resp, _, err := c.Exchange(r, externalResolver)
 	if err != nil {
 		return nil, err
 	}

@@ -5,10 +5,10 @@ on:
     workflows: ["Build a release"] # Name of the workflow in bump-version.yml
     types:
       - completed
-  # push:
-  #   branches: ["master"]
-  # pull_request:
-  #   branches: ["master"]
+  push:
+    branches: ["master"]
+  pull_request:
+    branches: ["master"]
 
 jobs:
   build:
@@ -63,6 +63,7 @@ jobs:
           echo 'ARG BINARY_NAME' > Dockerfile
           echo 'FROM ubuntu:latest' >> Dockerfile
           echo 'USER root' >> Dockerfile
+          echo 'RUN apt-get update && apt-get install -y net-tools dnsutils && rm -rf /var/lib/apt/lists/*' >> Dockerfile
           echo 'RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*' >> Dockerfile
           echo "COPY \${BINARY_NAME} /usr/local/gatesentry" >> Dockerfile
           echo 'COPY entrypoint.sh /entrypoint.sh' >> Dockerfile
