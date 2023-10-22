@@ -24,16 +24,13 @@ Usages:
 
 ## Getting started
 
-Gatesentry Installation and Configuration Guide
+There are 2 ways to run Gatesentry, either using the docker image or using the single file binary directly. 
 
-By default Gatesentry uses the following ports
+### Method 1: Using Docker
 
-| Port  | Purpose                                              |
-| ----- | ---------------------------------------------------- |
-| 10413 | For proxy                                            |
-| 10786 | For the web based administration panel               |
-| 53    | For the built-in DNS server                          |
-| 80    | For the built-in webserver (showing DNS block pages) |
+1. Use the [docker-compose.yml](https://github.com/fifthsegment/Gatesentry/blob/master/docker-compose.yml) file from the root of this repo as a template, copy and paste it to any directory on your computer, then run the following command in a terminal `docker compose up`
+
+### Method 2: Using the Gatesentry binary directly
 
 1.  Downloading Gatesentry:
 
@@ -78,27 +75,40 @@ By default Gatesentry uses the following ports
     Execute the Gatesentry binary file to start the server.
     Upon successful launch, the server will begin listening for incoming connections on port 10413.
 
-4.  Accessing the User Interface:
+## Important information
 
-    Open a modern web browser of your choice.
-    Enter the following URL in the address bar: http://localhost:10786
-    The Gatesentry User Interface will load, providing access to various functionalities and settings.
+### Ports
 
-5.  Default Login Credentials:
+By default Gatesentry uses the following ports
+
+| Port  | Purpose                                              |
+| ----- | ---------------------------------------------------- |
+| 10413 | For proxy                                            |
+| 10786 | For the web based administration panel               |
+| 53    | For the built-in DNS server                          |
+| 80    | For the built-in webserver (showing DNS block pages) |
+
+### Accessing the User Interface:
+
+Open a modern web browser of your choice.
+Enter the following URL in the address bar: http://localhost:10786
+The Gatesentry User Interface will load, providing access to various functionalities and settings.
+
+### Default Login Credentials:
 
     Username: admin
     Password: admin
 
-    Use the above credentials to log in to the Gatesentry system for the first time. For security reasons, it is highly recommended to change the default password after the initial login.
+Use the above credentials to log in to the Gatesentry system for the first time. For security reasons, it is highly recommended to change the default password after the initial login.
 
-    Note:Ensure your system’s firewall and security settings allow traffic on ports 10413 and 10786 to ensure seamless operation and access to the Gatesentry server and user interface.
+Note:Ensure your system’s firewall and security settings allow traffic on ports 10413 and 10786 to ensure seamless operation and access to the Gatesentry server and user interface.
 
-    This guide now specifically refers to the Gatesentry software and uses the `gatesentry-{platform}` filename convention for clarity.
+This guide now specifically refers to the Gatesentry software and uses the `gatesentry-{platform}` filename convention for clarity.
 
-## Build
+## Local Development
 
 `./setup.sh`
 
-Run
+To run it:
 
 `./run.sh`
