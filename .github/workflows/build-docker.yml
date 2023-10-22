@@ -48,7 +48,15 @@ jobs:
       - name: Create entrypoint.sh script
         run: |
           echo '#!/bin/sh' > entrypoint.sh
-          echo 'echo $BINARY_NAME' >> entrypoint.sh
+          echo 'arch=$(uname -m)' >> entrypoint.sh
+          echo 'chmod +x /usr/local/bin/gatesentry/gatesentry-linux' >> entrypoint.sh
+          echo 'chmod +x /usr/local/bin/gatesentry/gatesentry-linux-arm64' >> entrypoint.sh
+          echo 'if [ "$arch" = "aarch64" ]; then' >> entrypoint.sh
+          echo '  echo "Running on arm64"' >> entrypoint.sh
+          echo '  exec /usr/local/bin/gatesentry/gatesentry-linux-arm64' >> entrypoint.sh
+          echo 'else' >> entrypoint.sh
+          echo '  exec /usr/local/bin/gatesentry/gatesentry-linux' >> entrypoint.sh
+          echo 'fi' >> entrypoint.sh
           chmod +x entrypoint.sh
 
       - name: Create Dockerfile
