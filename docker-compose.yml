@@ -1,0 +1,15 @@
+version: '3.8'
+services:
+  gatesentry:
+    image: abdullahi1/gatesentry:latest
+    ports:
+      - "80:80"
+      - "53:53"
+      - "10413:10413"
+      - "10786:10786"
+    volumes:
+      - gssettings-volume:/usr/local/bin/gatesentry/gatesentry 
+volumes:
+  gssettings-volume:  # Define the volume
+    driver: local
+    

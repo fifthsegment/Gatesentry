@@ -10,7 +10,7 @@ import (
 
 const ENCRYPTIONKEY = "AES256Key-A23AS98BVM94PO3XSD10AA"
 
-var GSBASEDIR = "./"
+var GSBASEDIR = "./gatesentry"
 
 type Store struct {
 	Id            string
