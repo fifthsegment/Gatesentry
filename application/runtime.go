@@ -10,6 +10,7 @@ import (
 
 	"bitbucket.org/abdullah_irfan/gatesentryf/internalfiles"
 	gatesentry2proxy "bitbucket.org/abdullah_irfan/gatesentryf/proxy"
+	gatesentryrules "bitbucket.org/abdullah_irfan/gatesentryf/rules"
 	GatesentryTypes "bitbucket.org/abdullah_irfan/gatesentryf/types"
 	gatesentryWebserverTypes "bitbucket.org/abdullah_irfan/gatesentryf/webserver/types"
 
@@ -81,6 +82,7 @@ type GSRuntime struct {
 	DNSServerChannel            chan int
 	BoundAddress                *string
 	DnsServerInfo               *GatesentryTypes.DnsServerInfo
+	Rules                       []*gatesentryrules.Rule
 }
 
 func SetBaseDir(a string) {
@@ -178,6 +180,7 @@ func (R *GSRuntime) Init() {
 	R.GSSettings.SetDefault("idemail", "")
 	R.GSSettings.SetDefault("enable_ai_image_filtering", "false")
 	R.GSSettings.SetDefault("ai_scanner_url", "")
+	R.GSSettings.SetDefault("ai_scanner_url", "[]")
 
 	R.GSSettings.SetDefault("version", R.GetApplicationVersion())
 	R.GSUpdateLog.SetDefault("versions", "")
@@ -262,6 +265,17 @@ wR8g0gOPPV1l
 	R.LoadUsers()
 	//
 	R.GSUserRunDataSaver()
+
+	// Load rules to memory
+	rules, err := gatesentryrules.ParseRules(R.GSSettings.Get("rules"))
+	if err == nil {
+		R.Rules = make([]*gatesentryrules.Rule, len(rules))
+		for i, r := range rules {
+			R.Rules[i] = &r
+		}
+	} else {
+		log.Println("Error parsing rules:", err)
+	}
 
 	//R.KeepAliveMonitor()
 

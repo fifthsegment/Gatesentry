@@ -218,6 +218,12 @@ func RunGateSentry() {
 		return R.IsUserValid(authheader)
 	}
 
+	ngp.RuleHandler = func(gafd *gatesentryproxy.GSRuleFilterData) {
+		log.Println("Running rule handler")
+		// log.Println("GPT = ", gpt)
+
+	}
+
 	ngp.ContentHandler = func(gafd *gatesentryproxy.GSContentFilterData) {
 		if strings.Contains(gafd.ContentType, "html") {
 			responder := &gresponder.GSFilterResponder{Blocked: false}

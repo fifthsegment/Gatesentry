@@ -1,8 +1,8 @@
 <script lang="ts">
-  export let keyName: string;
-  export let labelText: string;
-  export let title: string;
-  export let helperText;
+  export let keyName: string = "";
+  export let labelText: string = "";
+  export let title: string = "";
+  export let helperText = "";
   export let type;
   export let disabled = false;
   export let disableOnblur = false;
@@ -21,7 +21,7 @@
   } from "../lib/utils";
   import { onDestroy, onMount } from "svelte";
 
-  let data = null;
+  export let data = null;
   let internalFormValue = null;
   let loaded = false;
 
@@ -40,7 +40,7 @@
     }
   };
 
-  const updateNetwork = async (keyValue) => {
+  export const updateNetwork = async (keyValue) => {
     const response = await $store.api.setSetting(keyName, keyValue);
     if (response === false) {
       notificationstore.add(
@@ -81,7 +81,7 @@
 </script>
 
 {#if loaded}
-  {#if type == "radio"}
+  {#if type == "external"}{:else if type == "radio"}
     <RadioButtonGroup
       legendText={labelText}
       bind:selected={data}
