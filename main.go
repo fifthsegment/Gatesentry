@@ -222,6 +222,7 @@ func RunGateSentry() {
 		log.Println("Running rule handler")
 		// log.Println("GPT = ", gpt)
 		points := 0
+		pointsRequired := 0
 		for _, rule := range R.Rules {
 			if rule.Domain == gafd.Url {
 				if rule.TimeRestriction.Action == "block" {
@@ -231,6 +232,10 @@ func RunGateSentry() {
 				}
 				break
 			}
+		}
+
+		if gafd.Url != "" {
+			pointsRequired++
 		}
 
 	}
