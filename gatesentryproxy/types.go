@@ -64,11 +64,13 @@ type GSContentSizeFilterData struct {
 }
 
 type GSRuleFilterData struct {
-	Url         string
-	ContentType string
-	ContentSize int64
-	User        string
-	Data        []byte
+	Url                  string
+	ContentType          string
+	ContentSize          int64
+	User                 string
+	Data                 []byte
+	FilterResponseAction ProxyAction
+	FilterResponse       []byte
 }
 
 type GSUserAccessFilterData struct {

@@ -224,20 +224,42 @@ func RunGateSentry() {
 		points := 0
 		pointsRequired := 0
 		for _, rule := range R.Rules {
-			if rule.Domain == gafd.Url {
-				if rule.TimeRestriction.Action == "block" {
+			if rule.Domain != "" {
+				pointsRequired++
+				if rule.Domain == gafd.Url {
 					points++
-					// gafd.FilterResponseAction = gatesentryproxy.ProxyActionBlockedUrl
-					// gafd.FilterResponse = []byte(gresponder.BuildGeneralResponsePage([]string{"Unable to fulfill your request because it contains a <strong>blocked URL</strong>."}, -1))
 				}
 				break
 			}
+			if rule.ContentSize > 0 {
+				pointsRequired++
+				if gafd.ContentSize > rule.ContentSize {
+					points++
+				}
+				break
+			}
+			if rule.ContentType != "" {
+				pointsRequired++
+				if rule.ContentType == gafd.ContentType {
+					points++
+				}
+				break
+			}
+			if rule.User != "" {
+				pointsRequired++
+				if rule.User == gafd.User {
+					points++
+				}
+				break
+			}
+			if rule.TimeRestriction.Action != "" {
+			}
 		}
 
-		if gafd.Url != "" {
-			pointsRequired++
+		if points == pointsRequired {
+			gafd.FilterResponseAction = gatesentryproxy.ProxyActionBlockedRule
+			gafd.FilterResponse = []byte(gresponder.BuildGeneralResponsePage([]string{"Unable to fulfill your request because it matches the conditions of a <strong>filtering rule</strong>."}, -1))
 		}
-
 	}
 
 	ngp.ContentHandler = func(gafd *gatesentryproxy.GSContentFilterData) {

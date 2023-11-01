@@ -11,7 +11,7 @@ type TimeRestriction struct {
 type Rule struct {
 	TimeRestriction TimeRestriction `json:"timeRestriction"`
 	ContentType     string          `json:"contentType"`
-	ContentSize     string          `json:"contentSize"`
+	ContentSize     int64           `json:"contentSize"`
 	User            string          `json:"user"`
 	Domain          string          `json:"domain"`
 }

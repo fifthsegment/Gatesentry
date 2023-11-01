@@ -447,13 +447,14 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	IProxy.RuleHandler(&GSRuleFilterData{
-		Url:         r.URL.String(),
-		ContentType: contentType,
-		ContentSize: int64(len(localCopyData)),
-		User:        passthru.User,
-		Data:        localCopyData,
-	})
+	ruleData := GSRuleFilterData{Url: r.URL.String(), ContentType: contentType, ContentSize: int64(len(localCopyData)), User: user, Data: localCopyData}
+	IProxy.RuleHandler(&ruleData)
+	if passthru.ProxyActionToLog == ProxyActionBlockedRule {
+		// IProxy.RunHandler("log", "", &requestUrlBytes, passthru)
+		IProxy.LogHandler(GSLogData{Url: r.URL.String(), User: user, Action: ProxyActionBlockedRule})
+		sendBlockMessageBytes(w, r, nil, ruleData.FilterResponse, nil)
+		return
+	}
 
 	if gzipOK && len(localCopyData) > 1000 {
 		resp.Header.Set("Content-Encoding", "gzip")
