@@ -24,7 +24,7 @@ func GSApiSettingsGET(requestedId string, settings *gatesentry2storage.MapStore)
 			value = string(valueJson)
 		}
 		return struct{ Value string }{Value: value}
-	case "blocktimes", "strictness", "timezone", "idemail", "enable_https_filtering", "capem", "keypem", "enable_dns_server", "dns_custom_entries", "ai_scanner_url", "enable_ai_image_filtering", "EnableUsers":
+	case "blocktimes", "strictness", "timezone", "idemail", "enable_https_filtering", "capem", "keypem", "enable_dns_server", "dns_custom_entries", "ai_scanner_url", "enable_ai_image_filtering", "EnableUsers", "rules":
 		value := settings.Get(requestedId)
 		return struct {
 			Key   string
@@ -81,7 +81,7 @@ func GSApiSettingsPOST(requestedId string, settings *gatesentry2storage.MapStore
 		requestedId == "enable_dns_server" ||
 		requestedId == "enable_https_filtering" ||
 		requestedId == "enable_ai_image_filtering" ||
-		requestedId == "ai_scanner_url" || requestedId == "EnableUsers" || requestedId == "strictness" {
+		requestedId == "ai_scanner_url" || requestedId == "EnableUsers" || requestedId == "strictness" || requestedId == "rules" {
 		settings.Update(requestedId, temp.Value)
 	}
 

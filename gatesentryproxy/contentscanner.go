@@ -53,6 +53,14 @@ func ScanMedia(dataToScan []byte, contentType string,
 			Content:     dataToScan,
 		}
 		IProxy.ContentHandler(&contentFilterData)
+
+		IProxy.RuleHandler(&GSRuleFilterData{
+			Url:         r.URL.String(),
+			ContentType: contentType,
+			ContentSize: int64(len(dataToScan)),
+			User:        passthru.User,
+			Data:        dataToScan,
+		})
 		if contentFilterData.FilterResponseAction == ProxyActionBlockedMediaContent {
 			proxyActionPerformed = ProxyActionBlockedMediaContent
 			var reasonForBlockArray []string
@@ -90,12 +98,21 @@ func ScanText(dataToScan []byte,
 	var proxyActionPerformed ProxyAction = ProxyActionFilterNone
 	log.Println("ScanText called for url = " + r.URL.String() + " content type = " + contentType)
 	if strings.Contains(contentType, "html") || len(contentType) == 0 {
+
 		contentFilterData := GSContentFilterData{
 			Url:         r.URL.String(),
 			ContentType: contentType,
 			Content:     (dataToScan),
 		}
 		IProxy.ContentHandler(&contentFilterData)
+
+		IProxy.RuleHandler(&GSRuleFilterData{
+			Url:         r.URL.String(),
+			ContentType: contentType,
+			ContentSize: int64(len(dataToScan)),
+			User:        passthru.User,
+			Data:        dataToScan,
+		})
 		// isBlocked, _ := IProxy.RunHandler("content", contentType, (&dataToScan), passthru)
 		if contentFilterData.FilterResponseAction == ProxyActionBlockedTextContent {
 			proxyActionPerformed = ProxyActionBlockedTextContent

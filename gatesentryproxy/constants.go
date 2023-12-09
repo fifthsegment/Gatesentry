@@ -21,6 +21,7 @@ const (
 	ProxyActionSSLBump                ProxyAction = "ssl-bump"
 	ProxyActionFilterError            ProxyAction = "filtererror"
 	ProxyActionFilterNone             ProxyAction = "filternone"
+	ProxyActionBlockedRule            ProxyAction = "blocked_rule"
 )
 
 var EMPTY_BYTES = []byte("")

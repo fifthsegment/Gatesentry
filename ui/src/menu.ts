@@ -80,12 +80,12 @@ let menuItems = [
     href: "/services",
     icon: SwitchLayer_2,
   },
-  // {
-  //   type: "link",
-  //   text: "Rules",
-  //   href: "/rules",
-  //   icon: Rule,
-  // },
+  {
+    type: "link",
+    text: "Rules",
+    href: "/rules",
+    icon: Rule,
+  },
   {
     type: "link",
     text: "Stats",

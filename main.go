@@ -218,6 +218,50 @@ func RunGateSentry() {
 		return R.IsUserValid(authheader)
 	}
 
+	ngp.RuleHandler = func(gafd *gatesentryproxy.GSRuleFilterData) {
+		log.Println("Running rule handler")
+		// log.Println("GPT = ", gpt)
+		points := 0
+		pointsRequired := 0
+		for _, rule := range R.Rules {
+			if rule.Domain != "" {
+				pointsRequired++
+				if rule.Domain == gafd.Url {
+					points++
+				}
+				break
+			}
+			if rule.ContentSize > 0 {
+				pointsRequired++
+				if gafd.ContentSize > rule.ContentSize {
+					points++
+				}
+				break
+			}
+			if rule.ContentType != "" {
+				pointsRequired++
+				if rule.ContentType == gafd.ContentType {
+					points++
+				}
+				break
+			}
+			if rule.User != "" {
+				pointsRequired++
+				if rule.User == gafd.User {
+					points++
+				}
+				break
+			}
+			if rule.TimeRestriction.Action != "" {
+			}
+		}
+
+		if points == pointsRequired {
+			gafd.FilterResponseAction = gatesentryproxy.ProxyActionBlockedRule
+			gafd.FilterResponse = []byte(gresponder.BuildGeneralResponsePage([]string{"Unable to fulfill your request because it matches the conditions of a <strong>filtering rule</strong>."}, -1))
+		}
+	}
+
 	ngp.ContentHandler = func(gafd *gatesentryproxy.GSContentFilterData) {
 		if strings.Contains(gafd.ContentType, "html") {
 			responder := &gresponder.GSFilterResponder{Blocked: false}

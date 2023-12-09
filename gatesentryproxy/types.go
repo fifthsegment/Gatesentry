@@ -29,6 +29,7 @@ type GSProxy struct {
 	ContentSizeHandler func(GSContentSizeFilterData)
 	UserAccessHandler  func(*GSUserAccessFilterData)
 	TimeAccessHandler  func(*GSTimeAccessFilterData)
+	RuleHandler        func(*GSRuleFilterData)
 	UrlAccessHandler   func(*GSUrlFilterData)
 	ProxyErrorHandler  func(*GSProxyErrorData)
 	DoMitm             func(host string) bool
@@ -60,6 +61,16 @@ type GSContentSizeFilterData struct {
 	ContentType string
 	ContentSize int64
 	User        string
+}
+
+type GSRuleFilterData struct {
+	Url                  string
+	ContentType          string
+	ContentSize          int64
+	User                 string
+	Data                 []byte
+	FilterResponseAction ProxyAction
+	FilterResponse       []byte
 }
 
 type GSUserAccessFilterData struct {
