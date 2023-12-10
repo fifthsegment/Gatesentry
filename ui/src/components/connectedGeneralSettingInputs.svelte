@@ -41,7 +41,6 @@
       SETTING_GENERAL_SETTINGS,
       JSON.stringify(updateData),
     );
-    console.log("response", response);
     if (response === false) {
       notificationstore.add(
         createNotificationError({ subtitle: $_("Unable to save setting") }, $_),

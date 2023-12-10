@@ -1,26 +1,29 @@
 package gatesentryproxy
 
+import (
+	GatesentryTypes "bitbucket.org/abdullah_irfan/gatesentryf/types"
+)
+
 const FILTER_TIME = "timeallowed"
 const FILTER_USER_ACCESS_DISABLED = "blockinternet"
 const FILTER_ACCESS_URL = "url"
 const PROXY_ACTION_SSL_DIRECT = "ssldirect"
 const FILTER_FILE_TYPE = "contenttypeblocked"
 
-type ProxyAction string
-
 const (
-	ProxyActionBlockedTextContent     ProxyAction = "blocked_text_content"
-	ProxyActionBlockedMediaContent    ProxyAction = "blocked_media_content"
-	ProxyActionBlockedFileType        ProxyAction = "blocked_file_type"
-	ProxyActionBlockedTime            ProxyAction = "blocked_time"
-	ProxyActionBlockedInternetForUser ProxyAction = "blocked_internet_for_user"
-	ProxyActionUserNotFound           ProxyAction = "user_not_found"
-	ProxyActionUserActive             ProxyAction = "user_active"
-	ProxyActionBlockedUrl             ProxyAction = "blocked_url"
-	ProxyActionSSLDirect              ProxyAction = "ssldirect"
-	ProxyActionSSLBump                ProxyAction = "ssl-bump"
-	ProxyActionFilterError            ProxyAction = "filtererror"
-	ProxyActionFilterNone             ProxyAction = "filternone"
+	ProxyActionBlockedTextContent     GatesentryTypes.ProxyAction = "blocked_text_content"
+	ProxyActionBlockedMediaContent    GatesentryTypes.ProxyAction = "blocked_media_content"
+	ProxyActionBlockedFileType        GatesentryTypes.ProxyAction = "blocked_file_type"
+	ProxyActionBlockedTime            GatesentryTypes.ProxyAction = "blocked_time"
+	ProxyActionBlockedRule            GatesentryTypes.ProxyAction = "blocked_rule"
+	ProxyActionBlockedInternetForUser GatesentryTypes.ProxyAction = "blocked_internet_for_user"
+	ProxyActionUserNotFound           GatesentryTypes.ProxyAction = "user_not_found"
+	ProxyActionUserActive             GatesentryTypes.ProxyAction = "user_active"
+	ProxyActionBlockedUrl             GatesentryTypes.ProxyAction = "blocked_url"
+	ProxyActionSSLDirect              GatesentryTypes.ProxyAction = "ssldirect"
+	ProxyActionSSLBump                GatesentryTypes.ProxyAction = "ssl-bump"
+	ProxyActionFilterError            GatesentryTypes.ProxyAction = "filtererror"
+	ProxyActionFilterNone             GatesentryTypes.ProxyAction = "filternone"
 )
 
 var EMPTY_BYTES = []byte("")

@@ -81,6 +81,7 @@ type GSRuntime struct {
 	DNSServerChannel            chan int
 	BoundAddress                *string
 	DnsServerInfo               *GatesentryTypes.DnsServerInfo
+	RuleList                    []GatesentryTypes.GSRule
 }
 
 func SetBaseDir(a string) {
@@ -178,6 +179,7 @@ func (R *GSRuntime) Init() {
 	R.GSSettings.SetDefault("idemail", "")
 	R.GSSettings.SetDefault("enable_ai_image_filtering", "false")
 	R.GSSettings.SetDefault("ai_scanner_url", "")
+	R.GSSettings.SetDefault("rules", "[]")
 
 	R.GSSettings.SetDefault("version", R.GetApplicationVersion())
 	R.GSUpdateLog.SetDefault("versions", "")
@@ -238,6 +240,8 @@ wR8g0gOPPV1l
 		"https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/popupads-onlydomains.txt",
 		"https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/tif-onlydomains.txt"
 	]`)
+
+	R.LoadRules()
 
 	general_settings := R.GSSettings.Get("general_settings")
 	general_settings_parsed := gatesentryWebserverTypes.GSGeneral_Settings{}

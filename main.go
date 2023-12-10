@@ -17,6 +17,7 @@ import (
 	application "bitbucket.org/abdullah_irfan/gatesentryf"
 	filters "bitbucket.org/abdullah_irfan/gatesentryf/filters"
 	gresponder "bitbucket.org/abdullah_irfan/gatesentryf/responder"
+	GatesentryTypes "bitbucket.org/abdullah_irfan/gatesentryf/types"
 	"bitbucket.org/abdullah_irfan/gatesentryproxy"
 	"github.com/jpillora/overseer"
 	"github.com/kardianos/service"
@@ -328,6 +329,10 @@ func RunGateSentry() {
 		user := gafd.User
 		actionTaken := string(gafd.Action)
 		R.Logger.LogProxy(url, user, actionTaken)
+	}
+
+	ngp.RuleHandler = func(gafd *GatesentryTypes.GSRuleFilterParam) {
+		R.RunRuleHandler(gafd)
 	}
 
 	ngp.ProxyErrorHandler = func(gafd *gatesentryproxy.GSProxyErrorData) {

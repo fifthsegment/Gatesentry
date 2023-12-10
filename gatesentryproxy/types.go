@@ -1,10 +1,12 @@
 package gatesentryproxy
 
+import GatesentryTypes "bitbucket.org/abdullah_irfan/gatesentryf/types"
+
 type GSProxyPassthru struct {
 	UserData         interface{}
 	DontTouch        bool
 	User             string
-	ProxyActionToLog ProxyAction
+	ProxyActionToLog GatesentryTypes.ProxyAction
 }
 
 type GSResponder struct {
@@ -37,6 +39,7 @@ type GSProxy struct {
 	LogHandler         func(GSLogData)
 	Handlers           map[string][]*GSHandler
 	UsersCache         map[string]GSUserCached
+	RuleHandler        func(*GatesentryTypes.GSRuleFilterParam)
 }
 
 // For the refactored filter input
@@ -45,13 +48,13 @@ type GSContentFilterData struct {
 	ContentType          string
 	Content              []byte
 	FilterResponse       []byte
-	FilterResponseAction ProxyAction
+	FilterResponseAction GatesentryTypes.ProxyAction
 }
 
 type GSContentTypeFilterData struct {
 	Url                  string
 	ContentType          string
-	FilterResponseAction ProxyAction
+	FilterResponseAction GatesentryTypes.ProxyAction
 	FilterResponse       []byte
 }
 
@@ -64,7 +67,7 @@ type GSContentSizeFilterData struct {
 
 type GSUserAccessFilterData struct {
 	User                 string
-	FilterResponseAction ProxyAction
+	FilterResponseAction GatesentryTypes.ProxyAction
 	FilterResponse       []byte
 }
 
@@ -80,13 +83,13 @@ type GSLogData struct {
 	Url         string
 	ContentType string
 	User        string
-	Action      ProxyAction
+	Action      GatesentryTypes.ProxyAction
 }
 
 type GSUrlFilterData struct {
 	Url                  string
 	User                 string
-	FilterResponseAction ProxyAction
+	FilterResponseAction GatesentryTypes.ProxyAction
 	FilterResponse       []byte
 }
 

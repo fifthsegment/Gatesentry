@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 
+	GatesentryTypes "bitbucket.org/abdullah_irfan/gatesentryf/types"
 	"github.com/h2non/filetype"
 )
 
@@ -22,9 +23,9 @@ func ScanMedia(dataToScan []byte, contentType string,
 	w http.ResponseWriter,
 	resp *http.Response,
 	buf bytes.Buffer,
-	passthru *GSProxyPassthru) (bool, ProxyAction) {
+	passthru *GSProxyPassthru) (bool, GatesentryTypes.ProxyAction) {
 	var httpResponseSent bool = false
-	var proxyActionPerformed ProxyAction = ProxyActionFilterNone
+	var proxyActionPerformed GatesentryTypes.ProxyAction = ProxyActionFilterNone
 	if filetype.IsAudio(dataToScan) || filetype.IsVideo(dataToScan) || filetype.IsImage(dataToScan) || isImage(contentType) || isVideo(contentType) {
 		destwithcounter := &DataPassThru{
 			Writer:      w,
@@ -85,9 +86,9 @@ func ScanText(dataToScan []byte,
 	w http.ResponseWriter,
 	resp *http.Response,
 	buf bytes.Buffer,
-	passthru *GSProxyPassthru) (bool, ProxyAction) {
+	passthru *GSProxyPassthru) (bool, GatesentryTypes.ProxyAction) {
 	var httpResponseSent bool = false
-	var proxyActionPerformed ProxyAction = ProxyActionFilterNone
+	var proxyActionPerformed GatesentryTypes.ProxyAction = ProxyActionFilterNone
 	log.Println("ScanText called for url = " + r.URL.String() + " content type = " + contentType)
 	if strings.Contains(contentType, "html") || len(contentType) == 0 {
 		contentFilterData := GSContentFilterData{

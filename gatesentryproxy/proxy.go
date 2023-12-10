@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	GatesentryTypes "bitbucket.org/abdullah_irfan/gatesentryf/types"
 	"github.com/h2non/filetype"
 )
 
@@ -445,6 +446,19 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// IProxy.RunHandler("log", "", &requestUrlBytes, passthru)
 		IProxy.LogHandler(GSLogData{Url: r.URL.String(), User: user, Action: proxyActionTaken})
 		return
+	}
+
+	ruleTest := &GatesentryTypes.GSRuleFilterParam{
+		Url:         r.URL.String(),
+		ContentType: contentType,
+		User:        user,
+		Action:      ProxyActionFilterNone,
+	}
+	IProxy.RuleHandler(ruleTest)
+
+	if ruleTest.Action == ProxyActionBlockedRule {
+		IProxy.LogHandler(GSLogData{Url: r.URL.String(), User: user, Action: proxyActionTaken})
+		sendBlockMessageBytes(w, r, nil, BLOCKED_CONTENT_TEXT, &contentType)
 	}
 
 	if gzipOK && len(localCopyData) > 1000 {
