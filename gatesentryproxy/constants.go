@@ -15,7 +15,7 @@ const (
 	ProxyActionBlockedMediaContent    GatesentryTypes.ProxyAction = "blocked_media_content"
 	ProxyActionBlockedFileType        GatesentryTypes.ProxyAction = "blocked_file_type"
 	ProxyActionBlockedTime            GatesentryTypes.ProxyAction = "blocked_time"
-	ProxyActionBlockedRule            GatesentryTypes.ProxyAction = "blocked_rule"
+	ProxyActionBlockedRule            GatesentryTypes.ProxyAction = GatesentryTypes.ProxyActionBlocked
 	ProxyActionBlockedInternetForUser GatesentryTypes.ProxyAction = "blocked_internet_for_user"
 	ProxyActionUserNotFound           GatesentryTypes.ProxyAction = "user_not_found"
 	ProxyActionUserActive             GatesentryTypes.ProxyAction = "user_active"

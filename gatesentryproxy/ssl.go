@@ -24,6 +24,7 @@ import (
 
 	"strconv"
 
+	GatesentryTypes "bitbucket.org/abdullah_irfan/gatesentryf/types"
 	gsClientHello "bitbucket.org/abdullah_irfan/gatesentryproxy/clienthello"
 )
 
@@ -151,6 +152,11 @@ func HandleSSLConnectDirect(r *http.Request, w http.ResponseWriter, user string,
 	// logAccess(r, nil, 0, false, user, tally, scores, thisRule, "", ignored)
 	// conf = nil // Allow it to be garbage-collected, since we won't use it any more.
 	ConnectDirect(conn, r.URL.Host, nil, passthru)
+
+	// if ruleTest.Action == ProxyActionBlockedRule {
+	// 	IProxy.LogHandler(GSLogData{Url: r.URL.Host, User: passthru.User, Action: ProxyActionBlockedRule})
+	// 	// stop writing to client
+	// }
 }
 
 // ConnectDirect connects to serverAddr and copies data between it and conn.
@@ -168,9 +174,6 @@ func ConnectDirect(conn net.Conn, serverAddr string, extraData []byte, gpt *GSPr
 	}
 
 	if extraData != nil {
-		// There may also be data waiting in the socket's input buffer;
-		// read it before we send the data on, so that the first packet of
-		// the connection doesn't get split in two.
 		conn.SetReadDeadline(time.Now().Add(time.Millisecond))
 		buf := make([]byte, 2000)
 		n, _ := conn.Read(buf)
@@ -184,7 +187,7 @@ func ConnectDirect(conn net.Conn, serverAddr string, extraData []byte, gpt *GSPr
 	ulChan := make(chan int64)
 	go func() {
 		log.Printf("Non-MITM connection : Writing data to connection")
-		destwithcounter := &DataPassThru{Writer: conn, Contenttype: "", Passthru: gpt}
+		destwithcounter := &DataPassThru{Writer: conn, Contenttype: "", Passthru: gpt, ServerAddr: serverAddr}
 		n, _ := io.Copy(destwithcounter, serverConn)
 		time.Sleep(time.Second)
 		conn.Close()
@@ -229,9 +232,24 @@ func ConnectDirect(conn net.Conn, serverAddr string, extraData []byte, gpt *GSPr
 	// 	downloadedSizeChan <- counter.Count() + int64(len(extraData))
 	// }()
 
-	downloaded, _ = io.Copy(serverConn, conn)
+	uploaded, _ = io.Copy(serverConn, conn)
 	serverConn.Close()
-	uploaded = <-ulChan
+	downloaded = <-ulChan
+
+	var uploadedMb = float64(uploaded) / 1024 / 1024
+	var downloadedMb = float64(downloaded) / 1024 / 1024
+
+	log.Println("Uploaded = " + strconv.FormatFloat(uploadedMb, 'f', 6, 64) + " MB" + " Downloaded = " + strconv.FormatFloat(downloadedMb, 'f', 6, 64) + " MB")
+
+	ruleTest := &GatesentryTypes.GSRuleFilterParam{
+		Url:         serverAddr,
+		ContentType: "",
+		User:        gpt.User,
+		Action:      ProxyActionFilterNone,
+		ContentSize: int(downloadedMb),
+	}
+
+	IProxy.RuleHandler(ruleTest)
 	return uploaded, downloaded
 }
 

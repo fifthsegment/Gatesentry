@@ -27,7 +27,7 @@ func DNSServerThread(baseDir string, logger *gatesentry2logger.Log, c <-chan int
 			log.Println("[DNS.SERVER] Received message:", msg)
 			if msg == 1 {
 				// Start the DNS server
-				go gatesentryDnsServer.StartDNSServer(baseDir, logger, blocklists, settings, R.DnsServerInfo)
+				go gatesentryDnsServer.StartDNSServer(baseDir, logger, blocklists, settings, R.DnsServerInfo, R.RunRuleHandler)
 				log.Println("[DNS.SERVER] started")
 			} else if msg == 2 {
 				log.Println("[DNS.SERVER] Stopping DNS server")

@@ -3,6 +3,8 @@ package gatesentryf
 import (
 	"encoding/json"
 	"log"
+	"strconv"
+	"time"
 
 	GatesentryTypes "bitbucket.org/abdullah_irfan/gatesentryf/types"
 )
@@ -23,7 +25,16 @@ func (R *GSRuntime) LoadRules() {
 	log.Println("Number of rules loaded : ", len(R.RuleList))
 }
 
-func (R *GSRuntime) RunRuleHandler(rule *GatesentryTypes.GSRuleFilterParam) {
-	log.Println("Running rule handler")
+func (R *GSRuntime) RunRuleHandler(testCase *GatesentryTypes.GSRuleFilterParam) {
+	// get current system time hour
+	currentTime := time.Now()
+	currentHour := currentTime.Hour()
+	log.Println("Running rule handler for request type =  " + strconv.FormatBool(testCase.IsDnsRequest) + " for url = " + testCase.Url + " time now = " + strconv.Itoa(currentHour) + " user = " + testCase.User + " content type = " + testCase.ContentType + " size = " + strconv.Itoa(testCase.ContentSize))
+	for _, rule := range R.RuleList {
+		log.Println("Rule domain = " + rule.Domain + " == " + testCase.Url)
+		if rule.Domain == testCase.Url {
+			testCase.Action = GatesentryTypes.ProxyActionBlocked
+		}
+	}
 
 }

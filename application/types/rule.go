@@ -15,10 +15,14 @@ type GSRule struct {
 }
 
 type GSRuleFilterParam struct {
-	Url         string
-	ContentType string
-	User        string
-	Action      ProxyAction
+	Url          string
+	ContentType  string
+	User         string
+	Action       ProxyAction
+	ContentSize  int
+	IsDnsRequest bool
 }
 
 type ProxyAction string
+
+const ProxyActionBlocked = "blocked_rule"

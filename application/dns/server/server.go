@@ -14,6 +14,7 @@ import (
 	gatesentryDnsUtils "bitbucket.org/abdullah_irfan/gatesentryf/dns/utils"
 	gatesentryLogger "bitbucket.org/abdullah_irfan/gatesentryf/logger"
 	gatesentry2storage "bitbucket.org/abdullah_irfan/gatesentryf/storage"
+	GatesentryTypes "bitbucket.org/abdullah_irfan/gatesentryf/types"
 	gatesentryTypes "bitbucket.org/abdullah_irfan/gatesentryf/types"
 	"github.com/miekg/dns"
 )
@@ -44,8 +45,12 @@ var restartDnsSchedulerChan chan bool
 
 const BLOCKLIST_HOURLY_UPDATE_INTERVAL = 10
 
-func StartDNSServer(basePath string, ilogger *gatesentryLogger.Log, blockedLists []string, settings *gatesentry2storage.MapStore, dnsinfo *gatesentryTypes.DnsServerInfo) {
+var gsRuleHandler func(*gatesentryTypes.GSRuleFilterParam)
 
+func StartDNSServer(basePath string, ilogger *gatesentryLogger.Log, blockedLists []string,
+	settings *gatesentry2storage.MapStore, dnsinfo *gatesentryTypes.DnsServerInfo, ruleHandler func(*gatesentryTypes.GSRuleFilterParam)) {
+
+	gsRuleHandler = ruleHandler
 	if server != nil || serverRunning == true {
 		fmt.Println("DNS server is already running")
 		restartDnsSchedulerChan <- true
@@ -119,6 +124,26 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 	for _, q := range r.Question {
 		domain := strings.ToLower(q.Name)
 		log.Println("[DNS] Domain requested:", domain, " Length of internal records = ", len(internalRecords))
+		var ruleParams = &gatesentryTypes.GSRuleFilterParam{
+			Url:          domain,
+			ContentType:  "",
+			User:         "",
+			Action:       "",
+			IsDnsRequest: true,
+		}
+		gsRuleHandler(ruleParams)
+		if ruleParams.Action == GatesentryTypes.ProxyActionBlocked {
+			log.Println("[DNS] Domain is blocked by rule : ", domain)
+			response := new(dns.Msg)
+			response.SetRcode(r, dns.RcodeNameError)
+			response.Answer = append(response.Answer, &dns.CNAME{
+				Hdr:    dns.RR_Header{Name: domain + ".", Rrtype: dns.TypeCNAME, Class: dns.ClassINET, Ttl: 3600},
+				Target: "blocked.local.",
+			})
+			logger.LogDNS(domain, "dns", "blocked")
+			w.WriteMsg(response)
+			return
+		}
 		domain = domain[:len(domain)-1]
 		// LogQuery(domain)
 		if _, exists := exceptionDomains[domain]; exists {

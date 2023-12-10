@@ -132,11 +132,13 @@ type DataPassThru struct {
 	// total int64 // Total # of bytes transferred
 	Contenttype string
 	Passthru    *GSProxyPassthru
+	ServerAddr  string
 }
 
 func (pt *DataPassThru) Write(p []byte) (int, error) {
 	n, err := pt.Writer.Write(p)
 	pt.Bytes = append(pt.Bytes, p...)
+
 	if err == nil {
 		IProxy.ContentSizeHandler(
 			GSContentSizeFilterData{
@@ -249,6 +251,20 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				r.URL.Host = net.JoinHostPort(host, port)
 			}
 		}
+	}
+
+	ruleTest := &GatesentryTypes.GSRuleFilterParam{
+		Url:         r.URL.Host,
+		ContentType: "",
+		User:        user,
+		Action:      ProxyActionFilterNone,
+	}
+	IProxy.RuleHandler(ruleTest)
+
+	if ruleTest.Action == ProxyActionBlockedRule {
+		IProxy.LogHandler(GSLogData{Url: r.URL.String(), User: user, Action: ProxyActionBlockedRule})
+		blockedContentType := "text/html"
+		sendBlockMessageBytes(w, r, nil, BLOCKED_CONTENT_TEXT, &blockedContentType)
 	}
 
 	urlFilterData := GSUrlFilterData{Url: r.URL.String(), User: user}
@@ -448,15 +464,16 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ruleTest := &GatesentryTypes.GSRuleFilterParam{
+	// this runs after a response is received from the server (for ssl-bumped requests)
+	ruleTestLast := &GatesentryTypes.GSRuleFilterParam{
 		Url:         r.URL.String(),
 		ContentType: contentType,
 		User:        user,
 		Action:      ProxyActionFilterNone,
 	}
-	IProxy.RuleHandler(ruleTest)
+	IProxy.RuleHandler(ruleTestLast)
 
-	if ruleTest.Action == ProxyActionBlockedRule {
+	if ruleTestLast.Action == ProxyActionBlockedRule {
 		IProxy.LogHandler(GSLogData{Url: r.URL.String(), User: user, Action: proxyActionTaken})
 		sendBlockMessageBytes(w, r, nil, BLOCKED_CONTENT_TEXT, &contentType)
 	}
