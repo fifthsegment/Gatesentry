@@ -38,7 +38,7 @@
           </li>
           <li>
             In the Address field, enter Gatesentry Server IP and in the Port
-            field, enter 10786.
+            field, enter 10413.
           </li>
           <li>Click Save or OK to apply the changes.</li>
         </ul>
@@ -73,7 +73,7 @@
           <li>Select Manual proxy configuration.</li>
           <li>
             In the HTTP Proxy field, enter Gatesentry Server IP and in the Port
-            field, enter 10786.
+            field, enter 10413.
           </li>
           <li>
             Optionally, check the box for Use this proxy server for all
