@@ -189,39 +189,23 @@ func (R *GSRuntime) Init() {
 
 		R.GSSettings.Update("version", R.GetApplicationVersion())
 	}
-	R.GSSettings.SetDefault("capem", `-----BEGIN CERTIFICATE-----
-MIICxjCCAi+gAwIBAgIUTq5PcMI3QaCgB8dPvqRYv7QBTBswDQYJKoZIhvcNAQEL
-BQAwdTELMAkGA1UEBhMCVVMxFTATBgNVBAcMDERlZmF1bHQgQ2l0eTEZMBcGA1UE
-CgwQR2F0ZVNlbnRyeUZpbHRlcjEZMBcGA1UECwwQR2F0ZVNlbnRyeUZpbHRlcjEZ
-MBcGA1UEAwwQR2F0ZVNlbnRyeUZpbHRlcjAeFw0yMTA5MTcwNTQ1MjNaFw0yNDEy
-MzAwNTQ1MjNaMHUxCzAJBgNVBAYTAlVTMRUwEwYDVQQHDAxEZWZhdWx0IENpdHkx
-GTAXBgNVBAoMEEdhdGVTZW50cnlGaWx0ZXIxGTAXBgNVBAsMEEdhdGVTZW50cnlG
-aWx0ZXIxGTAXBgNVBAMMEEdhdGVTZW50cnlGaWx0ZXIwgZ8wDQYJKoZIhvcNAQEB
-BQADgY0AMIGJAoGBAMjHspkfXfFf8VReL+XIwbuQ4tyoVYyF3ei5SiFDPV348qAF
-ElNGXpxXtBo0wW4Ze4BrFq4hlCSlJ0Md+dCM9Ydv8ot4cTH0fBHyzyWFrM+4OGp7
-7wt8c1MaitCXHQr/Qv3XaL310LhhFqHWVUHN2AnIC45bvHs4oBMPEgDeZ/XPAgMB
-AAGjUzBRMB0GA1UdDgQWBBScjV6BX5IOujFu2zs1CIkX7/2mPDAfBgNVHSMEGDAW
-gBScjV6BX5IOujFu2zs1CIkX7/2mPDAPBgNVHRMBAf8EBTADAQH/MA0GCSqGSIb3
-DQEBCwUAA4GBACyUOwcf04ILzpuBKFkqptW0d4s4dAZARlE689DwZwPA3fy6u5Lk
-3mhs+KuZQwnuaXioKHO2ETY9tzWswPhJy6Er8ciDzLTNdtN4xGpBYD2Cq9J+NQlT
-jf6P7vZONRTILl3/EGql4swxUTTPuvpIbkEECwPBBx+9say8e5fQ86zL
------END CERTIFICATE-----`)
-	R.GSSettings.SetDefault("keypem", `-----BEGIN PRIVATE KEY-----
-MIICdQIBADANBgkqhkiG9w0BAQEFAASCAl8wggJbAgEAAoGBAMjHspkfXfFf8VRe
-L+XIwbuQ4tyoVYyF3ei5SiFDPV348qAFElNGXpxXtBo0wW4Ze4BrFq4hlCSlJ0Md
-+dCM9Ydv8ot4cTH0fBHyzyWFrM+4OGp77wt8c1MaitCXHQr/Qv3XaL310LhhFqHW
-VUHN2AnIC45bvHs4oBMPEgDeZ/XPAgMBAAECgYEAtE2JGDLv5QPYr4AJmVuIhozc
-/XT5pkDM/+HtLSO55zrZf1QumbPW4KVt6h64GcwueSsx6dvjsmjRcldn8J21Gnp5
-vwWHFhqlvARMGRhqb6CQt2BZyBTY4/0WJlzPB6R536clIPnl7B2KCI2k0vJ3bBl2
-MFufx+wZqbUa+gViMLECQQD9ZREBjQTULpAKuQz+WN+ETz778Ca6l/vlRRbpMtsx
-46/v147EUpsK77l5YEQ65ROBZSqFZT+nD3KemJ6/WY/3AkEAytgmS1B4lE8P0cD7
-LZst8bJESPPN05zmUld0Bp51b7JXgkYXxhZZfPpTca2KyijkmmiqtJKOuYLbJCUW
-alwC6QJADrgzP7LQZ/74cRcE0TWablYoI3x003wGru/Pf+ZrYz+FtdoAuhjOVtlM
-Hefgrscl1etph+w0wWCdWOcmuZjbSwJAFmJD14vJwpP26u6gySeWqlVBs8szq2Zl
-BDEiXJif3PORNI8HkJRmy6PUEXdVGXnpwCBMtiB2H4KRLCvrjVEaAQI/BfrMmS0q
-r3jQJqBGV0HT9lE3lnKhJnetFM2muN57tCHRsAVIzepBTcZceFIvonkp2uILW/Gj
-wR8g0gOPPV1l
------END PRIVATE KEY-----`)
+	// create key and cert pem files in parent directory of Gatesentry
+	// read contents of cert and key files made w/ openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -sha256 -days 365 -nodes -subj "/C=XX/ST=StateName/L=CityName/O=CompanyName/OU=CompanySectionName/CN=CommonNameOrHostname"
+	loadkeypem, err1 := os.ReadFile("key.pem")
+	// do whatever with the error
+	if err1 != nil {
+		fmt.Print(err1)
+	}
+	// convert bytes from files to string
+	keystr := string(loadkeypem)
+	loadcertpem, err := os.ReadFile("cert.pem")
+	if err != nil {
+		fmt.Print(err)
+	}
+	certstr := string(loadcertpem)
+	// replaced the default cert and key contents with ones created in parent directory of Gatesentry read in above
+	R.GSSettings.SetDefault("capem", certstr)
+	R.GSSettings.SetDefault("keypem", keystr)
 	R.GSSettings.SetDefault("dns_custom_entries", `[
 		"https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts",
 		"https://raw.githubusercontent.com/anudeepND/blacklist/master/adservers.txt",
