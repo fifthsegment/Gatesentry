@@ -21,7 +21,7 @@
           <li>Scroll down and tap on the 'Configure Proxy' option.</li>
           <li>
             Select 'Manual' and enter 'Gatesentry Server IP' in the Server
-            field, and '10786' in the Port field.
+            field, and '10413' in the Port field.
           </li>
           <li>Tap 'Save' to apply the settings.</li>
         </ul>
@@ -57,7 +57,7 @@
           <li>Scroll down and tap on 'Advanced' or 'Modify Network'.</li>
           <li>
             Select 'Manual' under Proxy options, and enter 'Gatesentry Server
-            IP' in the Proxy hostname field, and '10786' in the Proxy port
+            IP' in the Proxy hostname field, and '10413' in the Proxy port
             field.
           </li>
           <li>Tap 'Save' or 'OK' to apply the settings.</li>
