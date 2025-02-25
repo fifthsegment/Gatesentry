@@ -36,7 +36,7 @@ func loadCertificate() {
 func loadCertificateWithData(certPEMBlock, keyPEMBlock []byte) {
 
 	if len(certPEMBlock) != 0 && len(keyPEMBlock) != 0 {
-		log.Println(string(keyPEMBlock))
+		// log.Println(string(keyPEMBlock))
 		cert, err := tls.X509KeyPair(certPEMBlock, keyPEMBlock)
 		if err != nil {
 			log.Println("Error loading TLS certificate:", err)

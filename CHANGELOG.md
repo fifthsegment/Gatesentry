@@ -1,5 +1,10 @@
 # CHANGELOG
 
+## v1.17.4 (25 February 2025)
+
+- Updated expired MITM certificate with 2 year expiry. 
+- Fixed bug causing a user created certificate not being saved + fixed restart after certificate update.
+
 ## v1.17.3 (22nd October 2023)
 
 - Fix UI bug in the DNS page causing the user unable to modify domains
