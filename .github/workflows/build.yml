@@ -10,6 +10,7 @@ on:
 #     workflows: ["Bump Version"] # Name of the workflow in bump-version.yml
 #     types:
 #       - completed
+#
 
 permissions:
   contents: write
