@@ -101,7 +101,7 @@ func NewMapStore(name string, encrypt bool) *MapStore {
 func (m *MapStore) Update(key string, value string) {
 	// fmt.Println("Waiting to update " + value)
 	m.Mutex.Lock()
-	// fmt.Println("Running Update for " + value)
+	// fmt.Println("Running Update for " + key + " with: " + value)
 	data := m.BaseStore.Get()
 	mm := make(map[string]string)
 	if len(data) > 0 {

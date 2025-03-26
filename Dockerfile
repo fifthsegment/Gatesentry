@@ -1,6 +1,12 @@
 FROM ubuntu:latest
 USER root
-RUN apt-get update && apt-get install -y lsof net-tools dnsutils ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y \
+  lsof \
+  tzdata \
+  net-tools \
+  dnsutils \
+  ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
 RUN mkdir -p /usr/local/gatesentry
 COPY gatesentry-linux /usr/local/gatesentry
 COPY entrypoint.sh /entrypoint.sh

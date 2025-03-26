@@ -33,12 +33,12 @@
     disabled={true}
   />
 
-  <ConnectedGeneralSettingInput
+  <ConnectedSettingInput
     keyName="timezone"
     title={$_("Timezone")}
     labelText={$_("Timezone")}
     type="text"
-    helperText={$_("Enter the timezone (e.g., UTC, GMT+2)")}
+    helperText={$_("Enter the timezone (e.g., Europe/Berlin)")}
   />
 
   <HttpsToggle />

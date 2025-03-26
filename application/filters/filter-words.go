@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"log"
 	"regexp"
-	"strings"
 
 	gatesentry2responder "bitbucket.org/abdullah_irfan/gatesentryf/responder"
 )
@@ -13,24 +12,20 @@ func FilterWords(f *GSFilter, content string, responder *gatesentry2responder.GS
 	ReasonsForBlocking := []string{}
 	pts := 0
 
-	// Pre-process content to lowercase for case-insensitive matching
-	lowerContent := strings.ToLower(content)
-
 	// Iterate over all filter content
 	for _, v := range f.FileContents {
-		// Convert filter word to lowercase
-		lowerVContent := strings.ToLower(v.Content)
 
 		// Compile regex to match the word with word boundaries on both sides
 		// `\b` ensures the word is not part of another word (i.e., space or string boundary)
-		re, err := regexp.Compile(`(?i)\b` + regexp.QuoteMeta(lowerVContent) + `\b`)
+		// we are doing a case-insensitive match. no need to lowercase the v.Content first
+		re, err := regexp.Compile(`(?i)\b` + regexp.QuoteMeta(v.Content) + `\b`)
 		if err != nil {
 			log.Printf("Invalid regex pattern: %v\n", err)
 			continue
 		}
 
 		// Find all matches in the content
-		matches := re.FindAllString(lowerContent, -1)
+		matches := re.FindAllString(content, -1)
 
 		// Count matches and update points
 		found := len(matches)
@@ -38,7 +33,7 @@ func FilterWords(f *GSFilter, content string, responder *gatesentry2responder.GS
 
 		// If the word is found, log the reason
 		if found > 0 {
-			reason := fmt.Sprintf("Found <u>%s</u> %d times, weightage of each time = %d <!-- %s --->", "Bad word", found, v.Score, v.Content)
+			reason := fmt.Sprintf("Found <u>%s</u> %d times, weightage of each time = %d <!-- %s --->", "blocked word", found, v.Score, v.Content)
 			// reason := fmt.Sprintf("Found <u>%s</u> %d times, weightage of each time = %d", v.Content, found, v.Score)
 			ReasonsForBlocking = append(ReasonsForBlocking, reason)
 		}
