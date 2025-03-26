@@ -2,10 +2,9 @@
   export let keyName: string;
   export let labelText: string;
   export let title: string;
-  export let helperText;
-  export let type;
-  export let disabled = false;
-  export let disableOnblur = false;
+  export let helperText: string = "";
+  export let type: string = "text";
+  export let disabled: boolean = false;
 
   import { TextInput } from "carbon-components-svelte";
   import { store } from "../store/apistore";
@@ -15,7 +14,7 @@
     createNotificationError,
     createNotificationSuccess,
   } from "../lib/utils";
-  import { onDestroy, onMount } from "svelte";
+  import { onMount } from "svelte";
 
   const SETTING_GENERAL_SETTINGS = "general_settings";
   let data = null;
@@ -27,7 +26,7 @@
 
   const loadAPIData = async () => {
     try {
-      const json = await $store.api.getSetting(SETTING_GENERAL_SETTINGS);
+      const json = await $store.api.getSetting("general_settings");
       data = JSON.parse(json.Value);
     } catch (error) {
       console.error(
@@ -61,9 +60,27 @@
       ...data,
       [keyName]: value,
     };
-    internalFormValue = updateData;
-    if (disableOnblur) return;
-    updateNetwork(updateData);
+
+    try {
+      const response = await $store.api.setSetting(
+        SETTING_GENERAL_SETTINGS,
+        JSON.stringify(updateData),
+      );
+      if (response) {
+        notificationstore.add(
+          createNotificationSuccess({ subtitle: $_("Setting updated") }, $_),
+        );
+      } else {
+        notificationstore.add(
+          createNotificationError(
+            { subtitle: $_("Unable to save setting") },
+            $_,
+          ),
+        );
+      }
+    } catch (error) {
+      console.error("[GatesentryUI] Error updating setting", error);
+    }
   };
 
   onMount(() => {

@@ -38,6 +38,13 @@ func GetAdminPassword(s *gatesentry2storage.MapStore) string {
 	return general_settings_parsed.AdminPassword
 }
 
+func GetTimezone(s *gatesentry2storage.MapStore) string {
+	general_settings := s.Get("general_settings")
+	general_settings_parsed := GSGeneral_Settings{}
+	json.Unmarshal([]byte(general_settings), &general_settings_parsed)
+	return general_settings_parsed.Timezone
+}
+
 type User struct {
 	Name string `json:"name"`
 	Mail string `json:"mail"`
@@ -52,6 +59,7 @@ type GSGeneral_Settings struct {
 	LogLocation   string `json:"log_location"`
 	AdminPassword string `json:"admin_password"`
 	AdminUser     string `json:"admin_username"`
+	Timezone      string `json:"timezone"`
 }
 
 type Datareceiver struct {

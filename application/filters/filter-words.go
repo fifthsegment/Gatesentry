@@ -38,7 +38,8 @@ func FilterWords(f *GSFilter, content string, responder *gatesentry2responder.GS
 
 		// If the word is found, log the reason
 		if found > 0 {
-			reason := fmt.Sprintf("Found <u>%s</u> %d times, weightage of each time = %d", v.Content, found, v.Score)
+			reason := fmt.Sprintf("Found <u>%s</u> %d times, weightage of each time = %d <!-- %s --->", "Bad word", found, v.Score, v.Content)
+			// reason := fmt.Sprintf("Found <u>%s</u> %d times, weightage of each time = %d", v.Content, found, v.Score)
 			ReasonsForBlocking = append(ReasonsForBlocking, reason)
 		}
 
