@@ -1,6 +1,10 @@
 package gatesentryf
 
-import gatesentry2responder "bitbucket.org/abdullah_irfan/gatesentryf/responder"
+import (
+	"context"
+
+	gatesentry2responder "bitbucket.org/abdullah_irfan/gatesentryf/responder"
+)
 
 // "strings"
 // "strconv"
@@ -8,7 +12,7 @@ import gatesentry2responder "bitbucket.org/abdullah_irfan/gatesentryf/responder"
 
 func runfilterHandlers(content string, contentType string, responder *gatesentry2responder.GSFilterResponder) {
 	for _, v := range R.Filters {
-		v.Handle(content, contentType, responder)
+		v.Handle(context.Background(), content, contentType, responder)
 	}
 }
 

@@ -1,21 +1,23 @@
 package gatesentryf
 
 import (
+	"context"
+
 	gatesentry2responder "bitbucket.org/abdullah_irfan/gatesentryf/responder"
 	"gopkg.in/elazarl/goproxy.v1"
 	// "strings"
 )
 
-func RunFilter(filterType string, content string, responder *gatesentry2responder.GSFilterResponder) {
+func RunFilter(ctx context.Context, filterType string, content string, responder *gatesentry2responder.GSFilterResponder) {
 	for _, v := range R.Filters {
-		v.Handle(content, filterType, responder)
+		v.Handle(ctx, content, filterType, responder)
 	}
 }
 
 var ConditionalMitm goproxy.FuncHttpsHandler = func(host string, ctx *goproxy.ProxyCtx) (*goproxy.ConnectAction, string) {
 	responder := &gatesentry2responder.GSFilterResponder{Blocked: false}
 
-	RunFilter("url/https_dontbump", host, responder)
+	RunFilter(context.Background(), "url/https_dontbump", host, responder)
 	if responder.Blocked {
 
 		// A blocked here means the url is present in the list

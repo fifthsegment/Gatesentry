@@ -1,6 +1,10 @@
 package gatesentry2filters
 
-import gatesentry2responder "bitbucket.org/abdullah_irfan/gatesentryf/responder"
+import (
+	"context"
+
+	gatesentry2responder "bitbucket.org/abdullah_irfan/gatesentryf/responder"
+)
 
 type GSFilter struct {
 	Id           string
@@ -9,7 +13,7 @@ type GSFilter struct {
 	HasStrength  bool
 	Handles      string //This is a unique identifier for each filter as well
 	FileName     string
-	Handler      func(*GSFilter, string, *gatesentry2responder.GSFilterResponder)
+	Handler      func(context.Context, *GSFilter, string, *gatesentry2responder.GSFilterResponder)
 	FileContents []GsFilterLine
 	Strictness   int
 }

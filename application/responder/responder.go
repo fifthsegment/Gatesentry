@@ -11,6 +11,14 @@ type GSFilterResponder struct {
 	Reasons []string
 }
 
+func (g *GSFilterResponder) BlockRequest(true bool) {
+	panic("unimplemented")
+}
+
+func (g *GSFilterResponder) SetBlocked(value bool) {
+	g.Blocked = value
+}
+
 func GetTemplate() string {
 	templ := `<html>
 				<head>
@@ -27,12 +35,12 @@ func GetTemplate() string {
 				        <div class="mdl-grid" >
 				          <div class="mdl-cell mdl-cell--2-col mdl-cell--hide-tablet mdl-cell--hide-phone"></div>
 				          <div style="padding:20px; " class=" mdl-color--white mdl-shadow--4dp content mdl-color-text--grey-800 mdl-cell mdl-cell--8-col">
-			            
+
 								_content_
 
 				          </div>
 				        </div>
-		
+
 				      </main>
 				      </div>
 				    </div>
