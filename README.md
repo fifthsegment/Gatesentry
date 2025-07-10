@@ -110,7 +110,10 @@ This guide now specifically refers to the Gatesentry software and uses the `gate
 
 ### DNS Information
 
-Gatesentry ships with a built in DNS server, which can be used to block domains. The server as of now forwards requests to Google DNS for resolution, this can be modified from inside the `application/dns/server/server.go` file. 
+Gatesentry ships with a built in DNS server which can be used to block domains.  
+The resolver used for forwarding requests can now be configured via the
+application settings ("dns_resolver"). It defaults to Google DNS
+(`8.8.8.8:53`).
 
 ## Local Development
 
