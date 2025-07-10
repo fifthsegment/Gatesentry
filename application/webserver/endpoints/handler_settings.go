@@ -77,15 +77,20 @@ func GSApiSettingsPOST(requestedId string, settings *gatesentry2storage.MapStore
 		}
 	}
 
-	if requestedId == "dns_custom_entries" ||
-		requestedId == "enable_dns_server" ||
-		requestedId == "enable_https_filtering" ||
-		requestedId == "enable_ai_image_filtering" ||
-		requestedId == "ai_scanner_url" || 
-		requestedId == "EnableUsers" || 
-		requestedId == "strictness" || 
-		requestedId == "capem" || 
-		requestedId == "keypem" {
+	updateableSettings := map[string]bool{
+		"dns_custom_entries":        true,
+		"enable_dns_server":         true,
+		"enable_https_filtering":    true,
+		"enable_ai_image_filtering": true,
+		"ai_scanner_url":            true,
+		"EnableUsers":               true,
+		"strictness":                true,
+		"capem":                     true,
+		"keypem":                    true,
+		"timezone":                  true,
+	}
+
+	if updateableSettings[requestedId] {
 		settings.Update(requestedId, temp.Value)
 	}
 

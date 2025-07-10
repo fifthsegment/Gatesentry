@@ -15,25 +15,41 @@
 
 <h2>Settings</h2>
 
-<br />
+<div class="settings-container">
+  <ConnectedGeneralSettingInput
+    keyName="log_location"
+    title={$_("Log Location")}
+    labelText={$_("Log Location")}
+    type="text"
+    helperText=""
+  />
 
-<ConnectedGeneralSettingInput
-  keyName="log_location"
-  title={$_("Log Location")}
-  labelText={$_("Log Location")}
-  type="text"
-  helperText=""
-/>
-<br />
-<ConnectedGeneralSettingInput
-  keyName="admin_username"
-  helperText={""}
-  type="text"
-  title={$_("Admin username")}
-  labelText={$_("Admin username")}
-  disabled={true}
-/>
+  <ConnectedGeneralSettingInput
+    keyName="admin_username"
+    helperText=""
+    type="text"
+    title={$_("Admin username")}
+    labelText={$_("Admin username")}
+    disabled={true}
+  />
 
-<HttpsToggle />
+  <ConnectedSettingInput
+    keyName="timezone"
+    title={$_("Timezone")}
+    labelText={$_("Timezone")}
+    type="text"
+    helperText={$_("Enter the timezone (e.g., Europe/Berlin)")}
+  />
 
-<ConnectedCertificateComposed />
+  <HttpsToggle />
+
+  <ConnectedCertificateComposed />
+</div>
+
+<style>
+  .settings-container {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem; /* Add spacing between components */
+  }
+</style>

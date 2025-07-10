@@ -16,7 +16,6 @@ func GetAPIResponse(endpoint string, Filters []GSFilter, ctx iris.Context, comm 
 			x = append(x, GSAPIStructFilter{Id: v.Id, Name: v.FilterName, Handles: v.Handles, Entries: v.FileContents})
 		}
 		return x
-		break
 	case "GET /filters/:id":
 		x := []GSAPIStructFilter{}
 		//requestedId := ctx.Param("id")
@@ -27,7 +26,6 @@ func GetAPIResponse(endpoint string, Filters []GSFilter, ctx iris.Context, comm 
 			}
 		}
 		return x
-		break
 	case "POST /filters/:id":
 		x := []GSAPIStructFilter{}
 		requestedId := (ctx).Params().Get("id")
@@ -56,7 +54,6 @@ func GetAPIResponse(endpoint string, Filters []GSFilter, ctx iris.Context, comm 
 			}
 		}
 		return x
-		break
 	}
 	return nil
 

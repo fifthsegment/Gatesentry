@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"log"
 	"net"
@@ -11,7 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"errors"
 	"fmt"
 
 	application "bitbucket.org/abdullah_irfan/gatesentryf"
@@ -67,30 +67,29 @@ func (p *program) Start(s service.Service) error {
 }
 func (p *program) run() error {
 	RunGateSentry()
-	for {
-		select {
-		case <-p.exit:
-			log.Println("Stopping GateSentry")
-			application.Stop()
-			return nil
-		}
+	for range p.exit {
+		log.Println("Stopping GateSentry")
+		application.Stop()
+		return nil
 	}
+	return nil
 }
+
 func (p *program) Stop(s service.Service) error {
 	close(p.exit)
 	return nil
 }
 
-func preupgradeCheck(binpath string) error {
-	fmt.Println("Pre upgrade check = " + binpath)
-	encoded := application.GetFileHash(binpath)
+// func preupgradeCheck(binpath string) error {
+// 	fmt.Println("Pre upgrade check = " + binpath)
+// 	encoded := application.GetFileHash(binpath)
 
-	if !application.ValidateUpdateHashFromServer(encoded) {
-		return errors.New("Unable to validate hash from server")
-	}
+// 	if !application.ValidateUpdateHashFromServer(encoded) {
+// 		return errors.New("Unable to validate hash from server")
+// 	}
 
-	return nil
-}
+// 	return nil
+// }
 
 func main() {
 	dir, err := filepath.Abs(filepath.Dir(os.Args[0]) + string(os.PathSeparator) + "gatesentry")
@@ -143,9 +142,9 @@ func main() {
 
 }
 
-func prog(state overseer.State) {
-	RunGateSentryServiceRunner("")
-}
+// func prog(state overseer.State) {
+// 	RunGateSentryServiceRunner("")
+// }
 
 // Service setup.
 //
@@ -221,7 +220,7 @@ func RunGateSentry() {
 	ngp.ContentHandler = func(gafd *gatesentryproxy.GSContentFilterData) {
 		if strings.Contains(gafd.ContentType, "html") {
 			responder := &gresponder.GSFilterResponder{Blocked: false}
-			application.RunFilter("text/html", string(gafd.Content), responder)
+			application.RunFilter(context.Background(), "text/html", string(gafd.Content), responder)
 			if responder.Blocked {
 				gafd.FilterResponse = []byte(gresponder.BuildResponsePage(responder.Reasons, responder.Score))
 				gafd.FilterResponseAction = gatesentryproxy.ProxyActionBlockedTextContent
@@ -239,7 +238,7 @@ func RunGateSentry() {
 		enable_filtering := R.GSSettings.Get("enable_https_filtering")
 		if enable_filtering == "true" {
 			responder := &gresponder.GSFilterResponder{Blocked: false}
-			application.RunFilter("url/https_dontbump", host, responder)
+			application.RunFilter(context.Background(), "url/https_dontbump", host, responder)
 			if responder.Blocked {
 				return false
 			}
@@ -259,11 +258,11 @@ func RunGateSentry() {
 	ngp.ContentTypeHandler = func(gafd *gatesentryproxy.GSContentTypeFilterData) {
 		contentType := gafd.ContentType
 		responder := &gresponder.GSFilterResponder{Blocked: false}
-		application.RunFilter("url/all_blocked_mimes", contentType, responder)
+		application.RunFilter(context.Background(), "url/all_blocked_mimes", contentType, responder)
 		if responder.Blocked {
 			// rs.Changed = true
 			message := "This content type has been blocked on this network."
-			if contentType == "image/png" || contentType == "image/jpeg" || contentType == "image/jpg" || "image/gif" == contentType || "image/webp" == contentType {
+			if contentType == "image/png" || contentType == "image/jpeg" || contentType == "image/jpg" || contentType == "image/gif" || contentType == "image/webp" {
 				transparentImageBytes, _ := filters.Asset("app/transparent.png")
 				gafd.FilterResponseAction = gatesentryproxy.ProxyActionBlockedFileType
 				gafd.FilterResponse = transparentImageBytes
@@ -289,7 +288,7 @@ func RunGateSentry() {
 		host := url
 		log.Println("Running exception handler for = ", host)
 		responder := &gresponder.GSFilterResponder{Blocked: false}
-		application.RunFilter("url/all_exception_urls", host, responder)
+		application.RunFilter(context.Background(), "url/all_exception_urls", host, responder)
 		return responder.Blocked
 	}
 
@@ -316,7 +315,7 @@ func RunGateSentry() {
 	ngp.UrlAccessHandler = func(gafd *gatesentryproxy.GSUrlFilterData) {
 		host := gafd.Url
 		responder := &gresponder.GSFilterResponder{Blocked: false}
-		application.RunFilter("url/all_blocked_urls", host, responder)
+		application.RunFilter(context.Background(), "url/all_blocked_urls", host, responder)
 		if responder.Blocked {
 			gafd.FilterResponseAction = gatesentryproxy.ProxyActionBlockedUrl
 			gafd.FilterResponse = []byte(gresponder.BuildGeneralResponsePage([]string{"Unable to fulfill your request because it contains a <strong>blocked URL</strong>."}, -1))
@@ -336,11 +335,10 @@ func RunGateSentry() {
 		switch gafd.Error {
 		case "EOF":
 			msg = "Proxy Error. Unable to fulfill your request at this time. Please try again in a few seconds."
-			break
 		default:
 			break
 		}
-		*&gafd.FilterResponse = []byte(gresponder.BuildGeneralResponsePage([]string{msg}, -1))
+		gafd.FilterResponse = []byte(gresponder.BuildGeneralResponsePage([]string{msg}, -1))
 	}
 
 	// Making a comm channel for our internal dns server
@@ -358,7 +356,9 @@ func RunGateSentry() {
 			fmt.Println("Port is not open for proxy")
 		} else {
 			portavailable = true
-			err = ln.Close()
+			if err := ln.Close(); err != nil {
+				log.Printf("Error closing listener: %v", err)
+			}
 			fmt.Println("Listening on address:", ln.Addr().String())
 			boundAddresses := []string{}
 			host, _ := os.Hostname()
@@ -385,7 +385,7 @@ func RunGateSentry() {
 	keypembytes := []byte(R.GSSettings.Get("keypem"))
 
 	gatesentryproxy.InitWithDataCerts(capembytes, keypembytes)
-	proxyListener, err := net.Listen("tcp", addr)
+	proxyListener, _ := net.Listen("tcp", addr)
 	proxyHandler := gatesentryproxy.ProxyHandler{Iproxy: ngp}
 
 	// ResponseAuthError := []byte(gresponder.BuildGeneralResponsePage([]string{"Your access has been disabled."}, -1))
@@ -749,12 +749,6 @@ func RunGateSentry() {
 	err = server.Serve(tcpKeepAliveListener{proxyListener.(*net.TCPListener)})
 	log.Fatal(err)
 
-}
-
-func orPanic(err error) {
-	if err != nil {
-		panic(err)
-	}
 }
 
 type tcpKeepAliveListener struct {

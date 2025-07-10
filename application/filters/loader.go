@@ -1,6 +1,7 @@
 package gatesentry2filters
 
 import (
+	"context"
 	"log"
 	"os"
 
@@ -20,7 +21,7 @@ func NewGSFilter(
 	filename string,
 	hasStrength bool,
 	description string,
-	handlerFunc func(*GSFilter, string, *gatesentry2responder.GSFilterResponder),
+	handlerFunc func(context.Context, *GSFilter, string, *gatesentry2responder.GSFilterResponder),
 ) *GSFilter {
 	log.Println("Registering new filter to handle = " + handles)
 	filter := &GSFilter{
@@ -36,9 +37,9 @@ func NewGSFilter(
 	return filter
 }
 
-func (f *GSFilter) Handle(content string, contentType string, responder *gatesentry2responder.GSFilterResponder) {
+func (f *GSFilter) Handle(ctx context.Context, content string, contentType string, responder *gatesentry2responder.GSFilterResponder) {
 	if contentType == f.Handles {
-		f.Handler(f, content, responder)
+		f.Handler(ctx, f, content, responder) // Pass the context to the handler
 	}
 }
 
@@ -56,7 +57,7 @@ func LoadFilters(filters []GSFilter) []GSFilter {
 		basepath+"exceptionsitelist.json",
 		false,
 		"Exception sites that get wrongly blocked can be entered here. For sites mentioned here GateSentry simply doesn't touch their traffic.",
-		FilterUrlExceptionUrls,
+		FilterUrlExceptionUrls, // Ensure this function matches the new signature
 	)
 	filters = append(filters, *f)
 
@@ -71,17 +72,6 @@ func LoadFilters(filters []GSFilter) []GSFilter {
 
 	f = NewGSFilter("text/html", "Keywords to Block", "bVxTPTOXiqGRbhF", basepath+"stopwords.json", true, "Whenever a blocked keyword is found on a webpage, it will be assigned a strength score based on each occurence. If the score exceeds the strictness threshold the page gets blocked.", FilterWords)
 	filters = append(filters, *f)
-
-	// f = NewGSFilter(
-	// 	"images",
-	// 	"Keywords to Block",
-	// 	"bVxTPTOXiqGRbhF",
-	// 	basepath+"stopwords.json",
-	// 	true,
-	// 	"Filter description.",
-	// 	FilterImagesAI,
-	// )
-	// filters = append(filters, *f)
 
 	return filters
 }

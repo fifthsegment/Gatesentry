@@ -173,7 +173,7 @@ func (R *GSRuntime) Init() {
 	R.GSSettings.SetDefault("NonAlives", "0")
 	R.GSSettings.SetDefault("Noheartbeat", "0")
 	R.GSSettings.SetDefault("Noheartbeatmessage", "")
-	R.GSSettings.SetDefault("timezone", "Europe/Oslo")
+	R.GSSettings.SetDefault("timezone", "Europe/Helsinki")
 	R.GSSettings.SetDefault("enable_https_filtering", "false")
 	R.GSSettings.SetDefault("enable_dns_server", "true")
 	R.GSSettings.SetDefault("idemail", "")

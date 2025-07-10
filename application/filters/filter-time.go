@@ -32,10 +32,10 @@ func RunTimeFilter(responder *gatesentry2responder.GSFilterResponder, blockedtim
 
 	loc, erro := time.LoadLocation(timezone)
 	if erro != nil {
-		log.Println("Location not found = " + erro.Error())
+		log.Printf("error loading location '%s': %v\n", timezone, erro)
 		return
 	}
-	log.Println("Location found in db = " + timezone)
+	// log.Println("Location found in db = " + timezone)
 	t = t.In(loc)
 	blocktimes := GSBlockTimes{}
 	// fmt.Println(blockedtimes)
