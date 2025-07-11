@@ -5,10 +5,12 @@ on:
     branches: ["master"]
     paths:
       - "**.go"
+      - "ui/**"
   pull_request:
     branches: ["master"]
     paths:
       - "**.go"
+      - "ui/**"
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -16,6 +18,7 @@ jobs:
     steps:
       - name: Check out code
         uses: actions/checkout@v2
+
 
       - name: Set up Go 1.x
         uses: actions/setup-go@v2

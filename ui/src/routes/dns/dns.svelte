@@ -13,6 +13,7 @@
   import { store } from "../../store/apistore";
   import { set } from "lodash";
   import { Restart } from "carbon-icons-svelte";
+  import ConnectedSettingInput from "../../components/connectedSettingInput.svelte";
   let dnsInfo = null;
 
   const loadDnsInfo = async () => {
@@ -74,6 +75,14 @@
         </div>
       </div>
     {/if}
+    <br />
+    <ConnectedSettingInput
+      keyName="dns_resolver"
+      title={$_("DNS Resolver")}
+      labelText={$_("DNS Resolver")}
+      type="text"
+      helperText=""
+    />
     <br />
     <DnsArecords on:updatednsinfo={onUpdateDnsInfo} />
   </Column>

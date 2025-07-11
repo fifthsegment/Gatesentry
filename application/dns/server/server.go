@@ -38,6 +38,12 @@ var (
 	logger           *gatesentryLogger.Log
 )
 
+func SetExternalResolver(resolver string) {
+	if resolver != "" {
+		externalResolver = resolver
+	}
+}
+
 var server *dns.Server
 var serverRunning bool = false
 var restartDnsSchedulerChan chan bool
@@ -54,6 +60,7 @@ func StartDNSServer(basePath string, ilogger *gatesentryLogger.Log, blockedLists
 
 	logger = ilogger
 	logsPath = basePath + logsPath
+	SetExternalResolver(settings.Get("dns_resolver"))
 	go gatesentryDnsHttpServer.StartHTTPServer()
 	// InitializeLogs()
 	// go gatesentryDnsFilter.InitializeBlockedDomains(&blockedDomains, &blockedLists)
