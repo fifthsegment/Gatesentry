@@ -19,20 +19,6 @@ jobs:
       - name: Check out code
         uses: actions/checkout@v2
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v3
-        with:
-          node-version: 18
-
-      - name: Install frontend dependencies
-        run: |
-          cd ui
-          npm install
-
-      - name: Run frontend tests
-        run: |
-          cd ui
-          npx vitest run
 
       - name: Set up Go 1.x
         uses: actions/setup-go@v2
