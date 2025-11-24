@@ -74,7 +74,9 @@ func ScanMedia(dataToScan []byte, contentType string,
 			io.Copy(destwithcounter, &buf)
 			httpResponseSent = true
 		}
-		log.Println("IO Copy done for url = ", r.URL.String())
+		if DebugLogging {
+			log.Println("IO Copy done for url = ", r.URL.String())
+		}
 	}
 	return httpResponseSent, proxyActionPerformed
 }
@@ -88,7 +90,9 @@ func ScanText(dataToScan []byte,
 	passthru *GSProxyPassthru) (bool, ProxyAction) {
 	var httpResponseSent bool = false
 	var proxyActionPerformed ProxyAction = ProxyActionFilterNone
-	log.Println("ScanText called for url = " + r.URL.String() + " content type = " + contentType)
+	if DebugLogging {
+		log.Println("ScanText called for url = " + r.URL.String() + " content type = " + contentType)
+	}
 	if strings.Contains(contentType, "html") || len(contentType) == 0 {
 		contentFilterData := GSContentFilterData{
 			Url:         r.URL.String(),

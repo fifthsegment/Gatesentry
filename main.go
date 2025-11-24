@@ -248,12 +248,11 @@ func RunGateSentry() {
 	}
 
 	ngp.ContentSizeHandler = func(gafd gatesentryproxy.GSContentSizeFilterData) {
-		// log.Println("Content size handler called")
+		// Simplified: no goroutine overhead for simple operations on low-spec hardware
+		// UpdateConsumption is empty, UpdateUserData is simple
 		length := gafd.ContentSize
-		go func() {
-			R.UpdateUserData(gafd.User, uint64(length))
-			R.UpdateConsumption(length)
-		}()
+		R.UpdateUserData(gafd.User, uint64(length))
+		// R.UpdateConsumption is currently a no-op
 	}
 
 	ngp.ContentTypeHandler = func(gafd *gatesentryproxy.GSContentTypeFilterData) {
@@ -745,7 +744,7 @@ func RunGateSentry() {
 	// })
 
 	server := http.Server{Handler: proxyHandler}
-	log.Printf("Starting up...Listening on = " + addr)
+	log.Printf("Starting up...Listening on = %s", addr)
 	err = server.Serve(tcpKeepAliveListener{proxyListener.(*net.TCPListener)})
 	log.Fatal(err)
 

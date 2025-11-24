@@ -172,8 +172,10 @@ func ConnectDirect(conn net.Conn, serverAddr string, extraData []byte, gpt *GSPr
 		// read it before we send the data on, so that the first packet of
 		// the connection doesn't get split in two.
 		conn.SetReadDeadline(time.Now().Add(time.Millisecond))
-		buf := make([]byte, 2000)
-		n, _ := conn.Read(buf)
+		bufPtr := GetSmallBuffer()
+		buf := *bufPtr
+		n, _ := conn.Read(buf[:2000])
+		PutSmallBuffer(bufPtr)
 		conn.SetReadDeadline(time.Time{})
 		if n > 0 {
 			extraData = append(extraData, buf[:n]...)
@@ -240,12 +242,16 @@ func ConnectDirect(conn net.Conn, serverAddr string, extraData []byte, gpt *GSPr
 // trying to connect to. user is the username to use for logging; authUser is
 // the authenticated user, if any; r is the CONNECT request, if any.
 func SSLBump(conn net.Conn, serverAddr, user, authUser string, r *http.Request, gpt *GSProxyPassthru, gsproxy *GSProxy) {
-	log.Printf("[SSL] Performing a SSL Bump")
+	if DebugLogging {
+		log.Printf("[SSL] Performing a SSL Bump")
+	}
 	defer func() {
 		if err := recover(); err != nil {
-			buf := make([]byte, 4096)
-			buf = buf[:runtime.Stack(buf, false)]
-			log.Printf("SSLBump: panic serving connection to %s: %v\n%s", serverAddr, err, buf)
+			bufPtr := GetSmallBuffer()
+			buf := *bufPtr
+			n := runtime.Stack(buf, false)
+			log.Printf("SSLBump: panic serving connection to %s: %v\n%s", serverAddr, err, buf[:n])
+			PutSmallBuffer(bufPtr)
 			conn.Close()
 		}
 	}()
