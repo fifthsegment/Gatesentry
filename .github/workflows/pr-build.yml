@@ -1,0 +1,174 @@
+name: Build PR Binaries
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches:
+      - master
+      - main
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v3
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.21'
+
+      - name: Get dependencies
+        run: go get -v
+
+      - name: Build binaries for multiple platforms
+        run: |
+          mkdir -p pr-binaries
+          echo "Building Linux amd64..."
+          env GOOS=linux GOARCH=amd64 go build -o pr-binaries/gatesentry-linux-amd64
+          echo "Building Linux arm64..."
+          env GOOS=linux GOARCH=arm64 go build -o pr-binaries/gatesentry-linux-arm64
+          echo "Building macOS amd64..."
+          env GOOS=darwin GOARCH=amd64 go build -o pr-binaries/gatesentry-macos-amd64
+          echo "Building macOS arm64 (Apple Silicon)..."
+          env GOOS=darwin GOARCH=arm64 go build -o pr-binaries/gatesentry-macos-arm64
+          echo "Building Windows amd64..."
+          env GOOS=windows GOARCH=amd64 go build -o pr-binaries/gatesentry-windows-amd64.exe
+          
+          # Make binaries executable
+          chmod +x pr-binaries/gatesentry-*
+          
+          # Get file sizes
+          ls -lh pr-binaries/
+
+      - name: Upload binaries as artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: gatesentry-pr-${{ github.event.pull_request.number }}
+          path: pr-binaries/*
+          retention-days: 30
+
+      - name: Generate download links and comment
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            
+            // Get file sizes
+            const binariesDir = 'pr-binaries';
+            const files = fs.readdirSync(binariesDir);
+            
+            let fileList = '';
+            files.forEach(file => {
+              const stats = fs.statSync(path.join(binariesDir, file));
+              const sizeMB = (stats.size / (1024 * 1024)).toFixed(2);
+              fileList += `- \`${file}\` (${sizeMB} MB)\n`;
+            });
+            
+            const runId = context.runId;
+            const repo = context.repo;
+            const prNumber = context.payload.pull_request.number;
+            const sha = context.payload.pull_request.head.sha.substring(0, 7);
+            
+            // Create comment body
+            const commentBody = `## 🚀 PR Build Artifacts
+            
+            Test binaries have been built for this PR (commit ${sha}).
+            
+            ### Available Binaries:
+            ${fileList}
+            
+            ### Download Instructions:
+            
+            1. **Via GitHub Actions UI:**
+               - Go to the [Actions tab](https://github.com/${repo.owner}/${repo.repo}/actions/runs/${runId})
+               - Scroll down to "Artifacts" section
+               - Download \`gatesentry-pr-${prNumber}\`
+            
+            2. **Via GitHub CLI:**
+               \`\`\`bash
+               gh run download ${runId} -n gatesentry-pr-${prNumber} -R ${repo.owner}/${repo.repo}
+               \`\`\`
+            
+            ### Quick Test (Linux/macOS):
+            \`\`\`bash
+            # Extract and make executable
+            chmod +x gatesentry-*
+            
+            # Test with low memory settings (good for routers)
+            export GS_MAX_SCAN_SIZE_MB=3
+            export GS_DEBUG_LOGGING=false
+            ./gatesentry-linux-amd64
+            
+            # Or test with custom settings
+            export GS_MAX_SCAN_SIZE_MB=10
+            ./gatesentry-linux-amd64
+            \`\`\`
+            
+            ### Quick Test (Windows):
+            \`\`\`powershell
+            # Set environment variables
+            $env:GS_MAX_SCAN_SIZE_MB=10
+            $env:GS_DEBUG_LOGGING="false"
+            .\\gatesentry-windows-amd64.exe
+            \`\`\`
+            
+            ### Configuration Options:
+            - \`GS_MAX_SCAN_SIZE_MB\`: Set max content scan size (1-1000 MB, default: 10)
+            - \`GS_DEBUG_LOGGING\`: Enable verbose logging (true/false, default: false)
+            
+            See [ROUTER_OPTIMIZATION.md](https://github.com/${repo.owner}/${repo.repo}/blob/${context.payload.pull_request.head.ref}/ROUTER_OPTIMIZATION.md) for detailed configuration guide.
+            
+            ---
+            
+            📝 *Binaries are kept for 30 days and automatically deleted afterwards.*`;
+            
+            // Find existing comment
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: repo.owner,
+              repo: repo.repo,
+              issue_number: prNumber
+            });
+            
+            const botComment = comments.find(comment => 
+              comment.user.type === 'Bot' && 
+              comment.body.includes('PR Build Artifacts')
+            );
+            
+            // Update or create comment
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner: repo.owner,
+                repo: repo.repo,
+                comment_id: botComment.id,
+                body: commentBody
+              });
+              console.log('Updated existing comment');
+            } else {
+              await github.rest.issues.createComment({
+                owner: repo.owner,
+                repo: repo.repo,
+                issue_number: prNumber,
+                body: commentBody
+              });
+              console.log('Created new comment');
+            }
+
+      - name: Build summary
+        run: |
+          echo "## Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Successfully built binaries for PR #${{ github.event.pull_request.number }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Binaries:" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          ls -lh pr-binaries/ | tail -n +2 | awk '{print "- " $9 " (" $5 ")"}' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Artifacts are available for download from the Actions tab." >> $GITHUB_STEP_SUMMARY
