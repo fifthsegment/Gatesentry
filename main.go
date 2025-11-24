@@ -201,6 +201,20 @@ func GetRuntime() *application.GSRuntime {
 }
 
 func RunGateSentry() {
+	// Configure optimization settings via environment variables
+	if os.Getenv("GS_DEBUG_LOGGING") == "true" {
+		gatesentryproxy.DebugLogging = true
+		log.Println("[CONFIG] Debug logging enabled")
+	}
+	
+	// Allow customizing max content scan size for memory-constrained environments
+	if maxScanSize := os.Getenv("GS_MAX_SCAN_SIZE_MB"); maxScanSize != "" {
+		if size, err := strconv.ParseInt(maxScanSize, 10, 64); err == nil && size > 0 {
+			gatesentryproxy.MaxContentScanSize = size * 1024 * 1024 // Convert MB to bytes
+			log.Printf("[CONFIG] Max content scan size set to %d MB", size)
+		}
+	}
+	
 	webadminport, err := strconv.Atoi(GSWEBADMINPORT)
 	if err != nil {
 		log.Fatal(err)
@@ -214,7 +228,9 @@ func RunGateSentry() {
 	ngp := gatesentryproxy.NewGSProxy()
 
 	ngp.AuthHandler = func(authheader string) bool {
-		log.Println("Auth header = " + authheader)
+		if gatesentryproxy.DebugLogging {
+			log.Println("Auth header = " + authheader)
+		}
 		return R.IsUserValid(authheader)
 	}
 
