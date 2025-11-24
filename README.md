@@ -5,7 +5,17 @@ An open source proxy server (supports SSL filtering / MITM) + DNS Server with a 
 ![Codecov](https://codecov.io/gh/fifthsegment/Gatesentry/branch/master/graph/badge.svg)
 
 
-[Download the latest releast](https://github.com/fifthsegment/Gatesentry/releases)
+[Download the latest release](https://github.com/fifthsegment/Gatesentry/releases)
+
+## 🚀 Optimized for Low-Spec Hardware
+
+Gatesentry is now optimized to run efficiently on routers and embedded devices with limited resources!
+
+**See [ROUTER_OPTIMIZATION.md](ROUTER_OPTIMIZATION.md) for:**
+- Performance optimization details
+- Configuration options for different hardware specs
+- Recommended settings for routers with 64MB - 1GB RAM
+- Troubleshooting tips
 
 Usages:
 

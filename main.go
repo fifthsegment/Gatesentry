@@ -209,9 +209,13 @@ func RunGateSentry() {
 	
 	// Allow customizing max content scan size for memory-constrained environments
 	if maxScanSize := os.Getenv("GS_MAX_SCAN_SIZE_MB"); maxScanSize != "" {
-		if size, err := strconv.ParseInt(maxScanSize, 10, 64); err == nil && size > 0 {
+		if size, err := strconv.ParseInt(maxScanSize, 10, 64); err == nil && size > 0 && size <= 1000 {
 			gatesentryproxy.MaxContentScanSize = size * 1024 * 1024 // Convert MB to bytes
 			log.Printf("[CONFIG] Max content scan size set to %d MB", size)
+		} else if err == nil && size > 1000 {
+			log.Printf("[CONFIG] Max content scan size %d MB is too large, using default 10 MB", size)
+		} else {
+			log.Printf("[CONFIG] Invalid max content scan size value: %s, using default", maxScanSize)
 		}
 	}
 	
