@@ -17,7 +17,7 @@ jobs:
     
     steps:
       - name: Check out code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set up Go
         uses: actions/setup-go@v4
@@ -48,14 +48,14 @@ jobs:
           ls -lh pr-binaries/
 
       - name: Upload binaries as artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: gatesentry-pr-${{ github.event.pull_request.number }}
           path: pr-binaries/*
           retention-days: 30
 
       - name: Generate download links and comment
-        uses: actions/github-script@v6
+        uses: actions/github-script@v7
         with:
           script: |
             const fs = require('fs');
