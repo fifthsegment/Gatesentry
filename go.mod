@@ -1,6 +1,8 @@
 module gatesentrybin
 
-go 1.21
+go 1.24.0
+
+toolchain go1.24.10
 
 replace bitbucket.org/abdullah_irfan/gatesentryf => ./application
 
@@ -17,14 +19,14 @@ require (
 	github.com/elazarl/goproxy/ext v0.0.0-20190711103511-473e67f1d7d2 // indirect
 	github.com/go-ole/go-ole v1.2.6 // indirect
 	github.com/goccy/go-json v0.9.4 // indirect
-	github.com/golang-jwt/jwt/v5 v5.0.0 // indirect
+	github.com/golang-jwt/jwt/v5 v5.3.0 // indirect
 	github.com/golang/snappy v0.0.4 // indirect
 	github.com/google/go-cmp v0.5.6 // indirect
-	github.com/gorilla/mux v1.8.0 // indirect
+	github.com/gorilla/mux v1.8.1 // indirect
 	github.com/h2non/filetype v1.1.3 // indirect
 	github.com/josharian/intern v1.0.0 // indirect
 	github.com/jpillora/s3 v1.1.4 // indirect
-	golang.org/x/image v0.18.0 // indirect
+	golang.org/x/image v0.33.0 // indirect
 	gopkg.in/elazarl/goproxy.v1 v1.0.0-20180725130230-947c36da3153 // indirect
 	gopkg.in/yaml.v2 v2.3.0 // indirect
 )
@@ -81,7 +83,7 @@ require (
 	golang.org/x/crypto v0.17.0 // indirect
 	golang.org/x/net v0.17.0 // indirect
 	golang.org/x/sys v0.15.0 // indirect
-	golang.org/x/text v0.16.0 // indirect
+	golang.org/x/text v0.31.0 // indirect
 	golang.org/x/time v0.0.0-20220224211638-0e9765cccd65 // indirect
 	google.golang.org/protobuf v1.27.1 // indirect
 	gopkg.in/ini.v1 v1.66.4 // indirect

@@ -5,7 +5,7 @@ An open source proxy server (supports SSL filtering / MITM) + DNS Server with a 
 ![Codecov](https://codecov.io/gh/fifthsegment/Gatesentry/branch/master/graph/badge.svg)
 
 
-[Download the latest releast](https://github.com/fifthsegment/Gatesentry/releases)
+[Download the latest release](https://github.com/fifthsegment/Gatesentry/releases)
 
 Usages:
 

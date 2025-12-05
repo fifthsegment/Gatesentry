@@ -1,19 +1,23 @@
 module bitbucket.org/abdullah_irfan/gatesentryf
 
-go 1.17
+go 1.24.0
+
+toolchain go1.24.10
 
 require (
 	github.com/abourget/goproxy v0.0.0-20170220221050-fcf497103e7b
 	github.com/antonholmquist/jason v1.0.0
 	github.com/badoux/checkmail v1.2.1
-	github.com/elazarl/goproxy v0.0.0-20210801061803-8e322dfb79c4
-	github.com/iris-contrib/middleware/jwt v0.0.0-20210110101738-6d0a4d799b5d
+	github.com/golang-jwt/jwt/v5 v5.3.0
+	github.com/gorilla/mux v1.8.1
 	github.com/kardianos/service v1.2.0
 	github.com/kataras/iris/v12 v12.2.0-alpha8
 	github.com/miekg/dns v1.1.43
 	github.com/oleksandr/bonjour v0.0.0-20210301155756-30f43c61b915
 	github.com/rogpeppe/go-charset v0.0.0-20190617161244-0dc95cdf6f31
 	github.com/tidwall/buntdb v1.2.6
+	golang.org/x/image v0.33.0
+	gopkg.in/elazarl/goproxy.v1 v1.0.0-20180725130230-947c36da3153
 )
 
 require (
@@ -25,6 +29,8 @@ require (
 	github.com/aymerick/douceur v0.2.0 // indirect
 	github.com/aymerick/raymond v2.0.3-0.20180322193309-b565731e1464+incompatible // indirect
 	github.com/eknkc/amber v0.0.0-20171010120322-cdade1c07385 // indirect
+	github.com/elazarl/goproxy v0.0.0-20210801061803-8e322dfb79c4 // indirect
+	github.com/elazarl/goproxy/ext v0.0.0-20190711103511-473e67f1d7d2 // indirect
 	github.com/fatih/structs v1.1.0 // indirect
 	github.com/flosch/pongo2/v4 v4.0.2 // indirect
 	github.com/goccy/go-json v0.9.4 // indirect
@@ -66,9 +72,10 @@ require (
 	golang.org/x/crypto v0.14.0 // indirect
 	golang.org/x/net v0.17.0 // indirect
 	golang.org/x/sys v0.13.0 // indirect
-	golang.org/x/text v0.13.0 // indirect
+	golang.org/x/text v0.31.0 // indirect
 	golang.org/x/time v0.0.0-20220224211638-0e9765cccd65 // indirect
 	google.golang.org/protobuf v1.27.1 // indirect
 	gopkg.in/ini.v1 v1.66.4 // indirect
+	gopkg.in/yaml.v2 v2.3.0 // indirect
 	gopkg.in/yaml.v3 v3.0.0 // indirect
 )

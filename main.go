@@ -201,6 +201,24 @@ func GetRuntime() *application.GSRuntime {
 }
 
 func RunGateSentry() {
+	// Configure optimization settings via environment variables
+	if os.Getenv("GS_DEBUG_LOGGING") == "true" {
+		gatesentryproxy.DebugLogging = true
+		log.Println("[CONFIG] Debug logging enabled")
+	}
+	
+	// Allow customizing max content scan size for memory-constrained environments
+	if maxScanSize := os.Getenv("GS_MAX_SCAN_SIZE_MB"); maxScanSize != "" {
+		if size, err := strconv.ParseInt(maxScanSize, 10, 64); err == nil && size > 0 && size <= 1000 {
+			gatesentryproxy.MaxContentScanSize = size * 1024 * 1024 // Convert MB to bytes
+			log.Printf("[CONFIG] Max content scan size set to %d MB", size)
+		} else if err == nil && size > 1000 {
+			log.Printf("[CONFIG] Max content scan size %d MB is too large, using default 10 MB", size)
+		} else {
+			log.Printf("[CONFIG] Invalid max content scan size value: %s, using default", maxScanSize)
+		}
+	}
+	
 	webadminport, err := strconv.Atoi(GSWEBADMINPORT)
 	if err != nil {
 		log.Fatal(err)
@@ -214,7 +232,9 @@ func RunGateSentry() {
 	ngp := gatesentryproxy.NewGSProxy()
 
 	ngp.AuthHandler = func(authheader string) bool {
-		log.Println("Auth header = " + authheader)
+		if gatesentryproxy.DebugLogging {
+			log.Println("Auth header = " + authheader)
+		}
 		return R.IsUserValid(authheader)
 	}
 
@@ -248,12 +268,11 @@ func RunGateSentry() {
 	}
 
 	ngp.ContentSizeHandler = func(gafd gatesentryproxy.GSContentSizeFilterData) {
-		// log.Println("Content size handler called")
+		// Simplified: no goroutine overhead for simple operations on low-spec hardware
+		// UpdateConsumption is empty, UpdateUserData is simple
 		length := gafd.ContentSize
-		go func() {
-			R.UpdateUserData(gafd.User, uint64(length))
-			R.UpdateConsumption(length)
-		}()
+		R.UpdateUserData(gafd.User, uint64(length))
+		// R.UpdateConsumption is currently a no-op
 	}
 
 	ngp.ContentTypeHandler = func(gafd *gatesentryproxy.GSContentTypeFilterData) {
@@ -745,7 +764,7 @@ func RunGateSentry() {
 	// })
 
 	server := http.Server{Handler: proxyHandler}
-	log.Printf("Starting up...Listening on = " + addr)
+	log.Printf("Starting up...Listening on = %s", addr)
 	err = server.Serve(tcpKeepAliveListener{proxyListener.(*net.TCPListener)})
 	log.Fatal(err)
 

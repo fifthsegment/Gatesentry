@@ -39,13 +39,21 @@ func (c *CertificateCache) Put(serverName, serverAddr string, cert tls.Certifica
 		c.lastCleaned = now
 	}
 
-	if now.Sub(c.lastCleaned) > c.TTL {
-		// Remove expired entries.
+	// Lazy cleanup - only clean periodically to reduce overhead
+	if now.Sub(c.lastCleaned) > c.TTL*2 {
+		// Remove expired entries in batches to reduce lock contention
+		count := 0
+		maxClean := 100 // Clean max 100 entries at a time
 		for k, v := range c.cache {
+			if count >= maxClean {
+				break
+			}
 			if now.Sub(v.added) > c.TTL {
 				delete(c.cache, k)
+				count++
 			}
 		}
+		c.lastCleaned = now
 	}
 
 	c.cache[certCacheKey{
@@ -56,11 +64,15 @@ func (c *CertificateCache) Put(serverName, serverAddr string, cert tls.Certifica
 		transport:   transport,
 		added:       now,
 	}
-	log.Println("[CertificateCache] Size = " + strconv.Itoa(len(c.cache)))
+	if DebugLogging {
+		log.Println("[CertificateCache] Size = " + strconv.Itoa(len(c.cache)))
+	}
 }
 
 func (c *CertificateCache) Get(serverName, serverAddr string) (tls.Certificate, http.RoundTripper) {
-	log.Println("[CertificateCache] Size = " + strconv.Itoa(len(c.cache)))
+	if DebugLogging {
+		log.Println("[CertificateCache] Size = " + strconv.Itoa(len(c.cache)))
+	}
 	c.lock.RLock()
 	defer c.lock.RUnlock()
 

@@ -18,7 +18,8 @@ import (
 )
 
 var IProxy *GSProxy
-var MaxContentScanSize int64 = 1e8
+var MaxContentScanSize int64 = 1e7 // Reduced from 100MB to 10MB for low-spec hardware
+var DebugLogging = false // Disable verbose logging for performance
 var dialer = &net.Dialer{
 	Timeout:   30 * time.Second,
 	KeepAlive: 30 * time.Second,
@@ -87,7 +88,7 @@ func (p *GSProxy) RunAuthHandler(authheader string) bool {
 
 func InitProxy() {
 	CreateBlockedImageBytes()
-	MaxContentScanSize = 1e8
+	MaxContentScanSize = 1e7 // 10MB for low-spec hardware
 }
 
 type ProxyHandler struct {
@@ -110,7 +111,12 @@ type ProxyHandler struct {
 func decodeBase64Credentials(auth string) (user, pass string, ok bool) {
 	auth = strings.TrimSpace(auth)
 	enc := base64.StdEncoding
-	buf := make([]byte, enc.DecodedLen(len(auth)))
+	
+	// Use buffer pool for small allocations
+	bufPtr := GetSmallBuffer()
+	defer PutSmallBuffer(bufPtr)
+	buf := *bufPtr
+	
 	n, err := enc.Decode(buf, []byte(auth))
 	if err != nil {
 		return "", "", false
@@ -199,7 +205,9 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			IProxy.UserAccessHandler(&userAccessFilterData)
 			userAuthStatusString := userAccessFilterData.FilterResponseAction
 
-			log.Println("User auth status = ", userAuthStatusString, " For user = ", user)
+			if DebugLogging {
+				log.Println("User auth status = ", userAuthStatusString, " For user = ", user)
+			}
 			if userAuthStatusString == ProxyActionUserNotFound {
 				w.Header().Set("Proxy-Authenticate", "Basic realm="+"gsrealm")
 				http.Error(w, "Proxy authentication required", http.StatusProxyAuthRequired)
@@ -267,7 +275,9 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	contentTypeScan := &GSContentTypeFilterData{Url: r.URL.String(), ContentType: fileMime}
 	IProxy.ContentTypeHandler(contentTypeScan)
 
-	log.Println("Url File extension = ", fileExt, " mime ", fileMime)
+	if DebugLogging {
+		log.Println("Url File extension = ", fileExt, " mime ", fileMime)
+	}
 
 	if contentTypeScan.FilterResponseAction == ProxyActionBlockedFileType {
 		passthru.ProxyActionToLog = ProxyActionBlockedUrl
@@ -292,7 +302,9 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// urlHostBytes := []byte(r.URL.Host)
 	// shouldMitm, _ := IProxy.RunHandler("mitm", "", &urlHostBytes, passthru)
 	shouldMitm := IProxy.DoMitm(r.URL.Host)
-	log.Println("Should MITM = ", shouldMitm, " currentAction = "+action, " for ", r.URL.String())
+	if DebugLogging {
+		log.Println("Should MITM = ", shouldMitm, " currentAction = "+action, " for ", r.URL.String())
+	}
 
 	if isHostLanAddress {
 		action = ACTION_NONE
@@ -370,7 +382,9 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			contentType = t[0]
 		}
 	}
-	log.Println("Content type is = ", contentType, " for ", r.URL.String())
+	if DebugLogging {
+		log.Println("Content type is = ", contentType, " for ", r.URL.String())
+	}
 	// contentTypeBytes := []byte(contentType)
 
 	// contentTypeStatusBlocked, _ := IProxy.RunHandler("contenttypeblocked", "", &contentTypeBytes, passthru)
@@ -428,7 +442,9 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	kind, _ := filetype.Match(localCopyData)
 	if kind != filetype.Unknown {
-		log.Printf("File type: %s. MIME: %s\n", kind.Extension, kind.MIME.Value)
+		if DebugLogging {
+			log.Printf("File type: %s. MIME: %s\n", kind.Extension, kind.MIME.Value)
+		}
 		contentType = kind.MIME.Value
 	}
 	responseSentMedia, proxyActionTaken := ScanMedia(localCopyData, contentType, r, w, resp, buf, passthru)
