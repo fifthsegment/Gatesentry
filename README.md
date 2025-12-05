@@ -7,16 +7,6 @@ An open source proxy server (supports SSL filtering / MITM) + DNS Server with a 
 
 [Download the latest release](https://github.com/fifthsegment/Gatesentry/releases)
 
-## 🚀 Optimized for Low-Spec Hardware
-
-Gatesentry is now optimized to run efficiently on routers and embedded devices with limited resources!
-
-**See [ROUTER_OPTIMIZATION.md](ROUTER_OPTIMIZATION.md) for:**
-- Performance optimization details
-- Configuration options for different hardware specs
-- Recommended settings for routers with 64MB - 1GB RAM
-- Troubleshooting tips
-
 Usages:
 
 - Privacy Protection: Users can use Gatesentry to prevent tracking by various online services by blocking tracking scripts and cookies.
