@@ -1,0 +1,33 @@
+name: UI Tests
+
+on:
+  push:
+    branches: ["master"]
+    paths:
+      - "ui/**"
+  pull_request:
+    branches: ["master"]
+    paths:
+      - "ui/**"
+
+jobs:
+  test-ui:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v2
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: 18
+
+      - name: Install dependencies
+        run: |
+          cd ui
+          npm install
+
+      - name: Run Vitest
+        run: |
+          cd ui
+          npx vitest run

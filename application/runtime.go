@@ -176,6 +176,7 @@ func (R *GSRuntime) Init() {
 	R.GSSettings.SetDefault("timezone", "Europe/Oslo")
 	R.GSSettings.SetDefault("enable_https_filtering", "false")
 	R.GSSettings.SetDefault("enable_dns_server", "true")
+	R.GSSettings.SetDefault("dns_resolver", "8.8.8.8:53")
 	R.GSSettings.SetDefault("idemail", "")
 	R.GSSettings.SetDefault("enable_ai_image_filtering", "false")
 	R.GSSettings.SetDefault("ai_scanner_url", "")
