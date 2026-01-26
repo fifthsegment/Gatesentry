@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## v1.18.0 (26 January 2026)
+
+- Added rule-based filtering system with domain-specific SSL inspection control
+- Added ability to block specific content types or URL patterns per domain
+- Added support for custom upstream DNS resolver configuration
+- Performance enhancements and code optimizations
+
 ## v1.17.4 (25 February 2025)
 
 - Updated expired MITM certificate with 2 year expiry. 

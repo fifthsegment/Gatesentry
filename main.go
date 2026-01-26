@@ -17,6 +17,7 @@ import (
 	application "bitbucket.org/abdullah_irfan/gatesentryf"
 	filters "bitbucket.org/abdullah_irfan/gatesentryf/filters"
 	gresponder "bitbucket.org/abdullah_irfan/gatesentryf/responder"
+	gatesentryWebserverEndpoints "bitbucket.org/abdullah_irfan/gatesentryf/webserver/endpoints"
 	"bitbucket.org/abdullah_irfan/gatesentryproxy"
 	"github.com/jpillora/overseer"
 	"github.com/kardianos/service"
@@ -27,7 +28,7 @@ var GSPROXYPORT = "10413"
 var GSWEBADMINPORT = "10786"
 var GSBASEDIR = ""
 var Baseendpointv2 = "https://www.gatesentryfilter.com/api/"
-var GATESENTRY_VERSION = "1.17.4"
+var GATESENTRY_VERSION = "1.18.0"
 var GS_BOUND_ADDRESS = ":"
 var R *application.GSRuntime
 
@@ -347,6 +348,15 @@ func RunGateSentry() {
 		user := gafd.User
 		actionTaken := string(gafd.Action)
 		R.Logger.LogProxy(url, user, actionTaken)
+	}
+
+	ngp.RuleMatchHandler = func(domain string, user string) interface{} {
+		ruleManager := gatesentryWebserverEndpoints.GetRuleManager()
+		if ruleManager == nil {
+			return nil
+		}
+		match := ruleManager.MatchRule(domain, user)
+		return match
 	}
 
 	ngp.ProxyErrorHandler = func(gafd *gatesentryproxy.GSProxyErrorData) {
