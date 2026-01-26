@@ -66,7 +66,7 @@
         priority: rules.length,
         domain: "",
         action: "allow",
-        mitm_action: "default",
+        mitm_action: "enable",
         block_type: "none",
         blocked_content_types: [],
         url_regex_patterns: [],
