@@ -35,6 +35,7 @@ type GSProxy struct {
 	IsExceptionUrl     func(url string) bool
 	IsAuthEnabled      func() bool
 	LogHandler         func(GSLogData)
+	RuleMatchHandler   func(domain string, user string) interface{} // Returns RuleMatch
 	Handlers           map[string][]*GSHandler
 	UsersCache         map[string]GSUserCached
 }

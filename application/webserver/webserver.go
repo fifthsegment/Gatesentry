@@ -145,6 +145,7 @@ func RegisterEndpointsStartServer(
 	boundAddress *string,
 	port string,
 	internalSettings *gatesentry2storage.MapStore,
+	ruleManager gatesentryWebserverEndpoints.RuleManagerInterface,
 ) {
 
 	// newRouter := mux.NewRouter()
@@ -344,6 +345,42 @@ func RegisterEndpointsStartServer(
 		w.Write(output)
 	}))
 
+	// Register rule endpoints with authentication
+	log.Println("Initializing rule manager...")
+	gatesentryWebserverEndpoints.InitRuleManager(ruleManager)
+	log.Println("Rule manager initialized")
+	
+	log.Println("Registering GET /api/rules...")
+	internalServer.Get("/api/rules", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiRulesGetAll(w, r)
+	})
+	
+	log.Println("Registering POST /api/rules...")
+	internalServer.Post("/api/rules", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiRuleCreate(w, r)
+	})
+	
+	log.Println("Registering GET /api/rules/{id}...")
+	internalServer.Get("/api/rules/{id}", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiRuleGet(w, r)
+	})
+	
+	log.Println("Registering PUT /api/rules/{id}...")
+	internalServer.Put("/api/rules/{id}", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiRuleUpdate(w, r)
+	})
+	
+	log.Println("Registering DELETE /api/rules/{id}...")
+	internalServer.Delete("/api/rules/{id}", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiRuleDelete(w, r)
+	})
+	
+	log.Println("Registering POST /api/rules/test...")
+	internalServer.Post("/api/rules/test", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiRuleTest(w, r)
+	})
+	log.Println("All rule endpoints registered successfully")
+
 	internalServer.router.PathPrefix("/fs/").Handler(
 		http.StripPrefix("/fs",
 			http.FileServer(
@@ -358,6 +395,7 @@ func RegisterEndpointsStartServer(
 	internalServer.Get("/users", indexHandler)
 	internalServer.Get("/dns", indexHandler)
 	internalServer.Get("/settings", indexHandler)
+	internalServer.Get("/rules", indexHandler)
 
 	internalServer.ListenAndServe(":" + port)
 

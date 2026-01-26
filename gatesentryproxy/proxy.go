@@ -10,6 +10,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -299,9 +300,39 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		action = ACTION_SSL_BUMP
 	}
 
-	// urlHostBytes := []byte(r.URL.Host)
-	// shouldMitm, _ := IProxy.RunHandler("mitm", "", &urlHostBytes, passthru)
+	var ruleMatch interface{}
+	ruleShouldMITM := false
+	ruleMatched := false
+	if IProxy.RuleMatchHandler != nil {
+		host, _, _ := net.SplitHostPort(r.URL.Host)
+		if host == "" {
+			host = r.URL.Host
+		}
+		ruleMatch = IProxy.RuleMatchHandler(host, user)
+		
+		if ruleMatch != nil {
+			passthru.UserData = ruleMatch
+			
+			matchVal := reflect.ValueOf(ruleMatch)
+			if matchVal.Kind() == reflect.Struct {
+				matchedField := matchVal.FieldByName("Matched")
+				if matchedField.IsValid() && matchedField.Kind() == reflect.Bool && matchedField.Bool() {
+					ruleMatched = true
+					mitmField := matchVal.FieldByName("ShouldMITM")
+					if mitmField.IsValid() && mitmField.Kind() == reflect.Bool {
+						ruleShouldMITM = mitmField.Bool()
+					}
+				}
+			}
+		}
+	}
+
 	shouldMitm := IProxy.DoMitm(r.URL.Host)
+	
+	if ruleMatched {
+		shouldMitm = ruleShouldMITM
+	}
+	
 	if DebugLogging {
 		log.Println("Should MITM = ", shouldMitm, " currentAction = "+action, " for ", r.URL.String())
 	}
@@ -315,10 +346,11 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		action = ACTION_NONE
 	}
 
-	// isExceptionUrl, _ := IProxy.RunHandler("except_urls", "", &requestUrlBytes, passthru)
-	isExceptionUrl := IProxy.IsExceptionUrl(r.URL.String())
-	if isExceptionUrl {
-		action = ACTION_NONE
+	if !ruleMatched {
+		isExceptionUrl := IProxy.IsExceptionUrl(r.URL.String())
+		if isExceptionUrl {
+			action = ACTION_NONE
+		}
 	}
 
 	if action == ACTION_SSL_BUMP {
@@ -374,6 +406,38 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer resp.Body.Close()
+
+	if passthru.UserData != nil {
+		matchVal := reflect.ValueOf(passthru.UserData)
+		if matchVal.Kind() == reflect.Struct {
+			urlRegexField := matchVal.FieldByName("BlockURLRegexes")
+			actionField := matchVal.FieldByName("ShouldBlock")
+			
+			if urlRegexField.IsValid() && urlRegexField.Kind() == reflect.Slice && urlRegexField.Len() > 0 {
+				requestURL := r.URL.String()
+				shouldBlock := false
+				blockAction := actionField.IsValid() && actionField.Kind() == reflect.Bool && actionField.Bool()
+				
+				for i := 0; i < urlRegexField.Len(); i++ {
+					patternVal := urlRegexField.Index(i)
+					if patternVal.Kind() == reflect.String {
+						pattern := patternVal.String()
+						if strings.Contains(requestURL, pattern) {
+							shouldBlock = blockAction
+							break
+						}
+					}
+				}
+				
+				if shouldBlock {
+					passthru.ProxyActionToLog = ProxyActionBlockedUrl
+					IProxy.LogHandler(GSLogData{Url: requestURL, User: user, Action: ProxyActionBlockedUrl})
+					sendBlockMessageBytes(w, r, nil, []byte("URL blocked by rule"), nil)
+					return
+				}
+			}
+		}
+	}
 
 	contentType := strings.ToLower(resp.Header.Get("Content-Type"))
 	if strings.Contains(contentType, ";") {
