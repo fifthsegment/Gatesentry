@@ -25,6 +25,7 @@ Usages:
 
 ![gatesentry-repo](https://github.com/fifthsegment/Gatesentry/assets/5513549/5ab836ab-7362-4916-9f7c-655e67e4deab)
 
+
 ## Getting started
 
 There are 2 ways to run Gatesentry, either using the docker image or using the single file binary directly. 
