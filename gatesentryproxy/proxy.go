@@ -353,6 +353,25 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Block entire domain if rule says to block
+	if ruleMatched && passthru.UserData != nil {
+		matchVal := reflect.ValueOf(passthru.UserData)
+		if matchVal.Kind() == reflect.Struct {
+			shouldBlockField := matchVal.FieldByName("ShouldBlock")
+			urlRegexField := matchVal.FieldByName("BlockURLRegexes")
+			
+			// If action is block and no URL patterns, block entire domain
+			if shouldBlockField.IsValid() && shouldBlockField.Kind() == reflect.Bool && shouldBlockField.Bool() {
+				if !urlRegexField.IsValid() || urlRegexField.Len() == 0 {
+					passthru.ProxyActionToLog = ProxyActionBlockedUrl
+					IProxy.LogHandler(GSLogData{Url: r.URL.String(), User: user, Action: ProxyActionBlockedUrl})
+					// Just close connection - don't establish tunnel
+					return
+				}
+			}
+		}
+	}
+
 	if action == ACTION_SSL_BUMP {
 		HandleSSLBump(r, w, user, authUser, passthru, IProxy)
 		return

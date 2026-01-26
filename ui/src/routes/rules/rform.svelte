@@ -197,6 +197,24 @@
             </td>
           </tr>
 
+          <!-- Action - always show -->
+          <tr>
+            <td class="label-col">{$_("Action")}</td>
+            <td class="input-col">
+              <Dropdown
+                size="sm"
+                selectedId={rule.action}
+                on:select={(e) => {
+                  rule.action = e.detail.selectedId;
+                }}
+                items={[
+                  { id: "allow", text: "Allow" },
+                  { id: "block", text: "Block" },
+                ]}
+              />
+            </td>
+          </tr>
+
           <!-- MITM Action -->
           <tr>
             <td class="label-col">{$_("SSL Inspection")}</td>
@@ -236,26 +254,6 @@
                 />
               </td>
             </tr>
-
-            {#if rule.block_type !== "none"}
-              <!-- Action - only show when content filtering is active -->
-              <tr>
-                <td class="label-col">{$_("Action")}</td>
-                <td class="input-col">
-                  <Dropdown
-                    size="sm"
-                    selectedId={rule.action}
-                    on:select={(e) => {
-                      rule.action = e.detail.selectedId;
-                    }}
-                    items={[
-                      { id: "allow", text: "Allow" },
-                      { id: "block", text: "Block" },
-                    ]}
-                  />
-                </td>
-              </tr>
-            {/if}
 
             {#if showContentTypeOptions}
               <!-- Blocked Content Types -->
