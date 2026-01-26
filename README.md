@@ -122,3 +122,30 @@ application settings ("dns_resolver"). It defaults to Google DNS
 To run it:
 
 `./run.sh`
+
+## Build instructions
+Refering to the build instructions from https://github.com/fifthsegment/Gatesentry/blob/master/bitbucket-pipelines.yml:
+
+- [Install `go`](https://go.dev/doc/install)
+- Execute the following commands one by one:
+```
+git clone https://github.com/fifthsegment/Gatesentry.git # Clones the master repository – change it if you want another branch
+cd Gatesentry
+mkdir bin
+go get -v
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.38.0/install.sh | bash
+# You should BETTER use the versions of the following two commands given by the previous command as they might differ
+export NVM_DIR="$HOME/.nvm"
+"[ -s \"$NVM_DIR/nvm.sh\" ] && \\. \"$NVM_DIR/nvm.sh\""   # This loads nvm
+nvm install 18.17 # Install Node.js version 18.17
+cd ui && npm install && npm run build && cd ..
+rm -rf application/webserver/frontend/files/*
+mv ui/dist/* application/webserver/frontend/files
+mv application/webserver/frontend/files/fs/* application/webserver/frontend/files
+env GOOS=linux GOARCH=amd64 go build
+# If you build for macOS uncomment this
+# env GOOS=darwin GOARCH=amd64 go build -o gatesentry-macos
+# If you build for ARM64 uncomment this
+# env GOOS=darwin GOARCH=arm64 go build
+mv gatesentrybin gatesentry-linux
+```
