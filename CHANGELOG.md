@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## v1.18.1 (28 January 2026)
+
+- Fix regex matching bug in rule based blocking system.
+
 ## v1.18.0 (26 January 2026)
 
 - Added rule-based filtering system with domain-specific SSL inspection control
