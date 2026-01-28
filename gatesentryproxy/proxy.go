@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"reflect"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -20,7 +21,7 @@ import (
 
 var IProxy *GSProxy
 var MaxContentScanSize int64 = 1e7 // Reduced from 100MB to 10MB for low-spec hardware
-var DebugLogging = false // Disable verbose logging for performance
+var DebugLogging = false           // Disable verbose logging for performance
 var dialer = &net.Dialer{
 	Timeout:   30 * time.Second,
 	KeepAlive: 30 * time.Second,
@@ -112,12 +113,12 @@ type ProxyHandler struct {
 func decodeBase64Credentials(auth string) (user, pass string, ok bool) {
 	auth = strings.TrimSpace(auth)
 	enc := base64.StdEncoding
-	
+
 	// Use buffer pool for small allocations
 	bufPtr := GetSmallBuffer()
 	defer PutSmallBuffer(bufPtr)
 	buf := *bufPtr
-	
+
 	n, err := enc.Decode(buf, []byte(auth))
 	if err != nil {
 		return "", "", false
@@ -309,10 +310,10 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			host = r.URL.Host
 		}
 		ruleMatch = IProxy.RuleMatchHandler(host, user)
-		
+
 		if ruleMatch != nil {
 			passthru.UserData = ruleMatch
-			
+
 			matchVal := reflect.ValueOf(ruleMatch)
 			if matchVal.Kind() == reflect.Struct {
 				matchedField := matchVal.FieldByName("Matched")
@@ -328,11 +329,11 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	shouldMitm := IProxy.DoMitm(r.URL.Host)
-	
+
 	if ruleMatched {
 		shouldMitm = ruleShouldMITM
 	}
-	
+
 	if DebugLogging {
 		log.Println("Should MITM = ", shouldMitm, " currentAction = "+action, " for ", r.URL.String())
 	}
@@ -359,7 +360,8 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if matchVal.Kind() == reflect.Struct {
 			shouldBlockField := matchVal.FieldByName("ShouldBlock")
 			urlRegexField := matchVal.FieldByName("BlockURLRegexes")
-			
+
+			log.Println("Checking for domain block for ", r.URL.String())
 			// If action is block and no URL patterns, block entire domain
 			if shouldBlockField.IsValid() && shouldBlockField.Kind() == reflect.Bool && shouldBlockField.Bool() {
 				if !urlRegexField.IsValid() || urlRegexField.Len() == 0 {
@@ -431,23 +433,23 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if matchVal.Kind() == reflect.Struct {
 			urlRegexField := matchVal.FieldByName("BlockURLRegexes")
 			actionField := matchVal.FieldByName("ShouldBlock")
-			
+
 			if urlRegexField.IsValid() && urlRegexField.Kind() == reflect.Slice && urlRegexField.Len() > 0 {
 				requestURL := r.URL.String()
 				shouldBlock := false
 				blockAction := actionField.IsValid() && actionField.Kind() == reflect.Bool && actionField.Bool()
-				
 				for i := 0; i < urlRegexField.Len(); i++ {
 					patternVal := urlRegexField.Index(i)
 					if patternVal.Kind() == reflect.String {
 						pattern := patternVal.String()
-						if strings.Contains(requestURL, pattern) {
+						matched, err := regexp.MatchString(pattern, requestURL)
+						if err == nil && matched {
 							shouldBlock = blockAction
 							break
 						}
 					}
 				}
-				
+
 				if shouldBlock {
 					passthru.ProxyActionToLog = ProxyActionBlockedUrl
 					IProxy.LogHandler(GSLogData{Url: requestURL, User: user, Action: ProxyActionBlockedUrl})
