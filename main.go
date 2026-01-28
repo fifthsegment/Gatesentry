@@ -28,7 +28,7 @@ var GSPROXYPORT = "10413"
 var GSWEBADMINPORT = "10786"
 var GSBASEDIR = ""
 var Baseendpointv2 = "https://www.gatesentryfilter.com/api/"
-var GATESENTRY_VERSION = "1.18.0"
+var GATESENTRY_VERSION = "1.18.1"
 var GS_BOUND_ADDRESS = ":"
 var R *application.GSRuntime
 
@@ -207,7 +207,7 @@ func RunGateSentry() {
 		gatesentryproxy.DebugLogging = true
 		log.Println("[CONFIG] Debug logging enabled")
 	}
-	
+
 	// Allow customizing max content scan size for memory-constrained environments
 	if maxScanSize := os.Getenv("GS_MAX_SCAN_SIZE_MB"); maxScanSize != "" {
 		if size, err := strconv.ParseInt(maxScanSize, 10, 64); err == nil && size > 0 && size <= 1000 {
@@ -219,7 +219,7 @@ func RunGateSentry() {
 			log.Printf("[CONFIG] Invalid max content scan size value: %s, using default", maxScanSize)
 		}
 	}
-	
+
 	webadminport, err := strconv.Atoi(GSWEBADMINPORT)
 	if err != nil {
 		log.Fatal(err)
