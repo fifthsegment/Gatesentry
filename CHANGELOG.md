@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## v1.19.0 (30 January 2026)
+
+- Add support for transparent proxying on linux.
+
 ## v1.18.1 (28 January 2026)
 
 - Fix regex matching bug in rule based blocking system.
