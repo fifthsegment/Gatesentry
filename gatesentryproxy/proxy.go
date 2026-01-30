@@ -160,18 +160,43 @@ func (pt *DataPassThru) Write(p []byte) (int, error) {
 func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	passthru := NewGSProxyPassthru()
 
+	client := r.RemoteAddr
+	host, _, err := net.SplitHostPort(client)
+	if err == nil {
+		client = host
+	}
+
+	// Check for transparent proxy mode
+	// In transparent mode, the URL won't have a host, but the Host header will be present
+	if TransparentProxyEnabled && IsTransparentProxyRequest(r) {
+		if DebugLogging {
+			log.Printf("[Transparent] Detected transparent proxy request from %s to %s", client, r.Host)
+		}
+
+		// Get the original destination from the connection if possible
+		originalDst := r.Host
+		if originalDst == "" {
+			log.Printf("[Transparent] No Host header in transparent request from %s", client)
+			http.Error(w, "No Host header", http.StatusBadRequest)
+			return
+		}
+
+		// Ensure port is present
+		if !strings.Contains(originalDst, ":") {
+			originalDst = net.JoinHostPort(originalDst, "80")
+		}
+
+		// Set up the URL for transparent proxy handling
+		r.URL.Scheme = "http"
+		r.URL.Host = originalDst
+	}
+
 	hostaddress := strings.Split(r.URL.Host, ":")[0]
 	isHostLanAddress := isLanAddress(hostaddress)
 
 	if len(r.URL.String()) > 10000 {
 		http.Error(w, "URL too long", http.StatusRequestURITooLong)
 		return
-	}
-
-	client := r.RemoteAddr
-	host, _, err := net.SplitHostPort(client)
-	if err == nil {
-		client = host
 	}
 
 	if r.URL.Scheme == "" {
@@ -440,9 +465,11 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				blockAction := actionField.IsValid() && actionField.Kind() == reflect.Bool && actionField.Bool()
 				for i := 0; i < urlRegexField.Len(); i++ {
 					patternVal := urlRegexField.Index(i)
+					log.Println("Checking URL regex pattern ", patternVal.String(), " for ", requestURL)
 					if patternVal.Kind() == reflect.String {
 						pattern := patternVal.String()
 						matched, err := regexp.MatchString(pattern, requestURL)
+						log.Printf("Regex match result for pattern %s on URL %s: %v (err: %v)", pattern, requestURL, matched, err)
 						if err == nil && matched {
 							shouldBlock = blockAction
 							break
