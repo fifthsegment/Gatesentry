@@ -4,12 +4,14 @@ package gatesentryproxy
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"io"
 	"log"
 	"net"
 	"net/http"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -23,6 +25,22 @@ func NewTransparentProxyListener(listener net.Listener, handler *ProxyHandler) *
 		Listener:     listener,
 		ProxyHandler: handler,
 	}
+}
+
+func CreateTransparentListener(addr string) (net.Listener, error) {
+	lc := net.ListenConfig{
+		Control: func(network, address string, c syscall.RawConn) error {
+			var opErr error
+			err := c.Control(func(fd uintptr) {
+				opErr = syscall.SetsockoptInt(int(fd), syscall.SOL_IP, syscall.IP_TRANSPARENT, 1)
+			})
+			if err != nil {
+				return err
+			}
+			return opErr
+		},
+	}
+	return lc.Listen(context.Background(), "tcp", addr)
 }
 
 func (l *TransparentProxyListener) Accept() (net.Conn, error) {
@@ -298,7 +316,7 @@ func NewTransparentProxyServer(handler *ProxyHandler) *TransparentProxyServer {
 }
 
 func (s *TransparentProxyServer) Start(addr string) error {
-	listener, err := net.Listen("tcp", addr)
+	listener, err := CreateTransparentListener(addr)
 	if err != nil {
 		return err
 	}

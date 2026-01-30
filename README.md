@@ -118,20 +118,30 @@ application settings ("dns_resolver"). It defaults to Google DNS
 
 ## Transparent Proxy Mode (Linux only)
 
-GateSentry automatically enables transparent proxy mode on Linux systems. This allows traffic interception without client configuration using Linux's `SO_ORIGINAL_DST` socket option.
+GateSentry automatically enables transparent proxy mode on Linux systems. This allows traffic interception without client configuration using Linux's `SO_ORIGINAL_DST` socket option and `IP_TRANSPARENT` socket support for TPROXY.
 
-### Setup
+### Setup for Local Traffic (REDIRECT mode)
 
-1. Configure iptables to redirect traffic:
-   ```bash
-   # Redirect HTTP traffic
-   iptables -t nat -A PREROUTING -p tcp --dport 80 -j REDIRECT --to-port 10414
+For traffic originating from the local machine:
 
-   # Redirect HTTPS traffic (for SSL Bump)
-   iptables -t nat -A PREROUTING -p tcp --dport 443 -j REDIRECT --to-port 10414
-   ```
+```bash
+iptables -t nat -A PREROUTING -p tcp --dport 80 -j REDIRECT --to-port 10414
+iptables -t nat -A PREROUTING -p tcp --dport 443 -j REDIRECT --to-port 10414
+```
 
-2. Start GateSentry - it will automatically listen on both the explicit proxy port (10413) and transparent proxy port (10414)
+### Setup for Forwarded Traffic (TPROXY mode)
+
+For traffic forwarded through the machine (e.g., Tailscale exit node, router):
+
+```bash
+# Mark traffic for routing
+iptables -t mangle -A PREROUTING -p tcp --dport 80 -j TPROXY --tproxy-mark 0x1/0x1 --on-port 10414
+iptables -t mangle -A PREROUTING -p tcp --dport 443 -j TPROXY --tproxy-mark 0x1/0x1 --on-port 10414
+
+# Route marked traffic locally
+ip rule add fwmark 1 lookup 100
+ip route add local 0.0.0.0/0 dev lo table 100
+```
 
 ### Configuration
 
@@ -142,17 +152,17 @@ GateSentry automatically enables transparent proxy mode on Linux systems. This a
 
 ### Requirements
 
-- Linux with `SO_ORIGINAL_DST` support
-- Root or CAP_NET_ADMIN privileges for iptables
+- Linux with `SO_ORIGINAL_DST` and `IP_TRANSPARENT` support
+- Root or CAP_NET_ADMIN privileges
 - CA certificate installed on clients for HTTPS interception
 
 ### Features
 
-- Auto-starts on Linux with graceful fallback if port is unavailable
-- Protocol auto-detection (HTTP vs HTTPS) on the same port
+- Supports both REDIRECT (local) and TPROXY (forwarded) traffic
+- Auto-starts on Linux with graceful fallback
+- Protocol auto-detection (HTTP vs HTTPS)
 - SSL Bump support for HTTPS filtering
 - All existing filters work in transparent mode
-- Runs alongside explicit proxy mode
 
 ## Local Development
 
