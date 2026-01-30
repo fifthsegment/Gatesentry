@@ -22,6 +22,10 @@ func (l *TransparentProxyListener) Accept() (net.Conn, error) {
 	return nil, errors.New("transparent proxy not supported on this platform")
 }
 
+func CreateTransparentListener(addr string) (net.Listener, error) {
+	return nil, errors.New("transparent proxy not supported on this platform")
+}
+
 type TransparentProxyServer struct {
 	Server   *http.Server
 	Handler  *ProxyHandler

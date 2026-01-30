@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## v1.19.1 (30 January 2026)
+
+- Added TPROXY support for transparent proxy mode (enables handling forwarded traffic from Tailscale exit nodes and routers)
+- Added IP_TRANSPARENT socket option for transparent proxy listener
+- Auto-detects Linux and enables transparent proxy by default with graceful fallback
+- Platform-specific builds: transparent proxy code excluded on macOS/Windows
+
 ## v1.19.0 (30 January 2026)
 
 - Add support for transparent proxying on linux.
