@@ -166,14 +166,11 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		client = host
 	}
 
-	// Check for transparent proxy mode
-	// In transparent mode, the URL won't have a host, but the Host header will be present
 	if TransparentProxyEnabled && IsTransparentProxyRequest(r) {
 		if DebugLogging {
 			log.Printf("[Transparent] Detected transparent proxy request from %s to %s", client, r.Host)
 		}
 
-		// Get the original destination from the connection if possible
 		originalDst := r.Host
 		if originalDst == "" {
 			log.Printf("[Transparent] No Host header in transparent request from %s", client)
@@ -181,12 +178,10 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// Ensure port is present
 		if !strings.Contains(originalDst, ":") {
 			originalDst = net.JoinHostPort(originalDst, "80")
 		}
 
-		// Set up the URL for transparent proxy handling
 		r.URL.Scheme = "http"
 		r.URL.Host = originalDst
 	}

@@ -221,7 +221,6 @@ func RunGateSentry() {
 		}
 	}
 
-	// Configure transparent proxy port (Linux only)
 	if transparentPort := os.Getenv("GS_TRANSPARENT_PROXY_PORT"); transparentPort != "" {
 		if port, err := strconv.Atoi(transparentPort); err == nil && port > 0 && port <= 65535 {
 			gatesentryproxy.SetTransparentProxyPort(port)
@@ -231,7 +230,6 @@ func RunGateSentry() {
 		}
 	}
 
-	// Disable transparent proxy if explicitly requested
 	transparentProxyDisabled := os.Getenv("GS_TRANSPARENT_PROXY") == "false"
 
 	webadminport, err := strconv.Atoi(GSWEBADMINPORT)
@@ -787,7 +785,6 @@ func RunGateSentry() {
 	// 	}
 	// })
 
-	// Auto-start transparent proxy on Linux (unless disabled)
 	if runtime.GOOS == "linux" && !transparentProxyDisabled {
 		go func() {
 			transparentAddr := "0.0.0.0:" + strconv.Itoa(gatesentryproxy.GetTransparentProxyPort())
