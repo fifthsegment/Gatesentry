@@ -86,7 +86,8 @@ By default Gatesentry uses the following ports
 
 | Port  | Purpose                                              |
 | ----- | ---------------------------------------------------- |
-| 10413 | For proxy                                            |
+| 10413 | For proxy (explicit mode)                            |
+| 10414 | For proxy (transparent mode, optional)               |
 | 10786 | For the web based administration panel               |
 | 53    | For the built-in DNS server                          |
 | 80    | For the built-in webserver (showing DNS block pages) |
@@ -114,6 +115,44 @@ Gatesentry ships with a built in DNS server which can be used to block domains.
 The resolver used for forwarding requests can now be configured via the
 application settings ("dns_resolver"). It defaults to Google DNS
 (`8.8.8.8:53`).
+
+## Transparent Proxy Mode (Linux only)
+
+GateSentry automatically enables transparent proxy mode on Linux systems. This allows traffic interception without client configuration using Linux's `SO_ORIGINAL_DST` socket option.
+
+### Setup
+
+1. Configure iptables to redirect traffic:
+   ```bash
+   # Redirect HTTP traffic
+   iptables -t nat -A PREROUTING -p tcp --dport 80 -j REDIRECT --to-port 10414
+
+   # Redirect HTTPS traffic (for SSL Bump)
+   iptables -t nat -A PREROUTING -p tcp --dport 443 -j REDIRECT --to-port 10414
+   ```
+
+2. Start GateSentry - it will automatically listen on both the explicit proxy port (10413) and transparent proxy port (10414)
+
+### Configuration
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `GS_TRANSPARENT_PROXY_PORT` | Port for transparent proxy | `10414` |
+| `GS_TRANSPARENT_PROXY` | Set to `false` to disable | `true` on Linux |
+
+### Requirements
+
+- Linux with `SO_ORIGINAL_DST` support
+- Root or CAP_NET_ADMIN privileges for iptables
+- CA certificate installed on clients for HTTPS interception
+
+### Features
+
+- Auto-starts on Linux with graceful fallback if port is unavailable
+- Protocol auto-detection (HTTP vs HTTPS) on the same port
+- SSL Bump support for HTTPS filtering
+- All existing filters work in transparent mode
+- Runs alongside explicit proxy mode
 
 ## Local Development
 

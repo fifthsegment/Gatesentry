@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -219,6 +220,17 @@ func RunGateSentry() {
 			log.Printf("[CONFIG] Invalid max content scan size value: %s, using default", maxScanSize)
 		}
 	}
+
+	if transparentPort := os.Getenv("GS_TRANSPARENT_PROXY_PORT"); transparentPort != "" {
+		if port, err := strconv.Atoi(transparentPort); err == nil && port > 0 && port <= 65535 {
+			gatesentryproxy.SetTransparentProxyPort(port)
+			log.Printf("[CONFIG] Transparent proxy port set to %d", port)
+		} else {
+			log.Printf("[CONFIG] Invalid transparent proxy port: %s, using default %d", transparentPort, gatesentryproxy.GetTransparentProxyPort())
+		}
+	}
+
+	transparentProxyDisabled := os.Getenv("GS_TRANSPARENT_PROXY") == "false"
 
 	webadminport, err := strconv.Atoi(GSWEBADMINPORT)
 	if err != nil {
@@ -772,6 +784,21 @@ func RunGateSentry() {
 	// 		}
 	// 	}
 	// })
+
+	if runtime.GOOS == "linux" && !transparentProxyDisabled {
+		go func() {
+			transparentAddr := "0.0.0.0:" + strconv.Itoa(gatesentryproxy.GetTransparentProxyPort())
+			log.Printf("[Transparent] Starting transparent proxy server on %s", transparentAddr)
+
+			transparentServer := gatesentryproxy.NewTransparentProxyServer(&proxyHandler)
+			if err := transparentServer.Start(transparentAddr); err != nil {
+				log.Printf("[Transparent] Warning: Could not start transparent proxy server: %v", err)
+				log.Printf("[Transparent] Continuing without transparent proxy. Set GS_TRANSPARENT_PROXY=false to suppress this warning.")
+			} else {
+				gatesentryproxy.SetTransparentProxyEnabled(true)
+			}
+		}()
+	}
 
 	server := http.Server{Handler: proxyHandler}
 	log.Printf("Starting up...Listening on = %s", addr)
