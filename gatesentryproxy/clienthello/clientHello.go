@@ -229,7 +229,9 @@ func (ch *ClientHello) Unmarshall(payload []byte) error {
 
 				switch nameType {
 				case SNINameTypeDNS:
-					ch.SNI = string(data)
+					if len(data) >= nameLen {
+						ch.SNI = string(data[:nameLen])
+					}
 				default:
 					// Unknown Name Type
 				}
