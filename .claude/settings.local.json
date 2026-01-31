@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git checkout -b release-1200)",
+      "Bash(find:*)",
+      "Bash(go build:*)",
+      "Bash(git checkout:*)"
+    ]
+  }
+}
