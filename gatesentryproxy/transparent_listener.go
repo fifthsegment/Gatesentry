@@ -253,16 +253,17 @@ func (l *TransparentProxyListener) handleTransparentHTTPS(conn net.Conn, origina
 		logUrl = "https://" + serverName
 	}
 
+	// Create a fresh prependConn with the clientHello data and the real underlying connection
+	// This reconstructs the connection state as if clientHello wasn't read yet
+	freshConn := &prependConn{
+		Conn:   realConn,
+		buf:    clientHello,
+		offset: 0,
+	}
+
 	if shouldMitm {
 		if DebugLogging {
 			log.Printf("[Transparent] Performing SSL Bump for %s (SNI: %s)", serverAddr, serverName)
-		}
-		// Create a fresh prependConn with the clientHello data and the real underlying connection
-		// This avoids nesting prependConns which can cause issues
-		freshConn := &prependConn{
-			Conn:   realConn,
-			buf:    clientHello,
-			offset: 0,
 		}
 		SSLBump(freshConn, serverAddr, user, "", nil, passthru, l.ProxyHandler.Iproxy)
 	} else {
@@ -270,9 +271,9 @@ func (l *TransparentProxyListener) handleTransparentHTTPS(conn net.Conn, origina
 			log.Printf("[Transparent] Direct tunnel for %s (SNI: %s)", serverAddr, serverName)
 		}
 		LogProxyAction(logUrl, user, ProxyActionSSLDirect)
-		// For ConnectDirect, pass the real connection (after clientHello was consumed)
-		// and the clientHello as extraData to be written to the server
-		ConnectDirect(realConn, serverAddr, clientHello, passthru)
+		// Pass freshConn with nil extraData - io.Copy will read clientHello from buffer
+		// This matches the original behavior before SNI extraction was added
+		ConnectDirect(freshConn, serverAddr, nil, passthru)
 	}
 }
 

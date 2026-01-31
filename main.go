@@ -29,7 +29,7 @@ var GSPROXYPORT = "10413"
 var GSWEBADMINPORT = "10786"
 var GSBASEDIR = ""
 var Baseendpointv2 = "https://www.gatesentryfilter.com/api/"
-var GATESENTRY_VERSION = "1.20.2"
+var GATESENTRY_VERSION = "1.20.3"
 var GS_BOUND_ADDRESS = ":"
 var R *application.GSRuntime
 
