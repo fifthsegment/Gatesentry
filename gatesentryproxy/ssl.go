@@ -381,6 +381,7 @@ func SSLBump(conn net.Conn, serverAddr, user, authUser string, r *http.Request, 
 			connectPort: port,
 			user:        authUser,
 			rt:          rt,
+			Iproxy:      gsproxy,
 		},
 		TLSConfig: &tls.Config{
 			NextProtos:   []string{"h2", "http/1.1"},
