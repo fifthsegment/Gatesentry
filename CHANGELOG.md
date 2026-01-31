@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## v1.20.6 (31 January 2026)
+
+- Fix HTTP2 not working properly in transparent mode
+
 ## v1.20.5 (31 January 2026)
 
 - Fixed HTTP/2 compatibility issue with MITM connections in transparent proxy mode

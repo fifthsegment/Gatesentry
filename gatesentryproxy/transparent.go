@@ -114,7 +114,7 @@ func HandleTransparentHTTPS(conn net.Conn, h *ProxyHandler, originalDst string, 
 		if DebugLogging {
 			log.Printf("[Transparent] Performing SSL Bump for %s", serverAddr)
 		}
-		SSLBump(conn, serverAddr, user, "", nil, passthru, h.Iproxy)
+		SSLBump(conn, serverAddr, user, "", nil, passthru, h.Iproxy, nil)
 	} else {
 		if DebugLogging {
 			log.Printf("[Transparent] Direct tunnel for %s", serverAddr)
