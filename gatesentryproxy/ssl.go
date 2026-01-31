@@ -1,6 +1,7 @@
 package gatesentryproxy
 
 import (
+	"context"
 	"io"
 	"log"
 	"net"
@@ -14,15 +15,10 @@ import (
 	"runtime"
 	"strings"
 
-	// "io/ioutil"
 	"bytes"
-
-	// "sync"
 	"reflect"
 
 	"golang.org/x/net/http2"
-
-	"strconv"
 
 	gsClientHello "bitbucket.org/abdullah_irfan/gatesentryproxy/clienthello"
 )
@@ -138,7 +134,7 @@ func HandleSSLBump(r *http.Request, w http.ResponseWriter, user string, authUser
 		return
 	}
 	fmt.Fprint(conn, "HTTP/1.1 200 Connection Established\r\n\r\n")
-	SSLBump(conn, r.URL.Host, user, authUser, r, passthru, gsproxy)
+	SSLBump(conn, r.URL.Host, user, authUser, r, passthru, gsproxy, nil)
 }
 
 func HandleSSLConnectDirect(r *http.Request, w http.ResponseWriter, user string, passthru *GSProxyPassthru) {
@@ -241,7 +237,9 @@ func ConnectDirect(conn net.Conn, serverAddr string, extraData []byte, gpt *GSPr
 // traffic. serverAddr is the address (host:port) of the server the client was
 // trying to connect to. user is the username to use for logging; authUser is
 // the authenticated user, if any; r is the CONNECT request, if any.
-func SSLBump(conn net.Conn, serverAddr, user, authUser string, r *http.Request, gpt *GSProxyPassthru, gsproxy *GSProxy) {
+// If clientHelloData is provided (non-nil), it will be used instead of reading
+// from the connection (used in transparent proxy mode where ClientHello was already read).
+func SSLBump(conn net.Conn, serverAddr, user, authUser string, r *http.Request, gpt *GSProxyPassthru, gsproxy *GSProxy, clientHelloData []byte) {
 	if DebugLogging {
 		log.Printf("[SSL] Performing a SSL Bump")
 	}
@@ -259,7 +257,13 @@ func SSLBump(conn net.Conn, serverAddr, user, authUser string, r *http.Request, 
 	obsoleteVersion := false
 	// Read the client hello so that we can find out the name of the server (not
 	// just the address).
-	clientHello, err := gsClientHello.ReadClientHello(conn)
+	var clientHello []byte
+	var err error
+	if clientHelloData != nil {
+		clientHello = clientHelloData
+	} else {
+		clientHello, err = gsClientHello.ReadClientHello(conn)
+	}
 
 	if err != nil {
 		GSLogSSL(user, serverAddr, "", fmt.Errorf("error reading client hello: %v", err), false)
@@ -310,7 +314,6 @@ func SSLBump(conn net.Conn, serverAddr, user, authUser string, r *http.Request, 
 	cachedCert := rt != nil
 
 	if !cachedCert {
-		log.Println("[SSL] Starting process to cache certificate")
 		serverConn, err := tls.Dial("tcp", serverAddr, &tls.Config{
 			ServerName:         serverName,
 			InsecureSkipVerify: false,
@@ -331,8 +334,6 @@ func SSLBump(conn net.Conn, serverAddr, user, authUser string, r *http.Request, 
 
 		cert, err = signCertificate(serverCert, !valid)
 		if err != nil {
-			log.Println("[SSL] Error signing certificate")
-			log.Println("[SSL] Closing connection")
 			serverConn.Close()
 			GSLogSSL(user, serverAddr, serverName, fmt.Errorf("error generating certificate: %v", err), false)
 			ConnectDirect(conn, serverAddr, clientHello, gpt)
@@ -354,60 +355,68 @@ func SSLBump(conn net.Conn, serverAddr, user, authUser string, r *http.Request, 
 		validWithDefaultRoots := err == nil
 
 		if state.NegotiatedProtocol == "h2" && state.NegotiatedProtocolIsMutual {
-			log.Println("[SSL] Negotiated Protocol is " + state.NegotiatedProtocol)
 			if validWithDefaultRoots {
-				log.Println("[SSL] Valid with default Roots using http Transport")
 				rt = http2Transport
 			} else {
-				log.Println("[SSL] Using Hard Validation Transport")
 				rt = newHardValidationTransport(insecureHTTP2Transport, serverName, state.PeerCertificates)
 			}
 		} else {
-			log.Println("[SSL] Negotiated Protocol is " + state.NegotiatedProtocol)
 			if validWithDefaultRoots {
-				log.Println("[SSL] Valid with default Roots using http2 Transport")
 				rt = httpTransport
 			} else {
-				log.Println("[SSL] Using Hard Validation Transport")
 				rt = newHardValidationTransport(insecureHTTPTransport, serverName, state.PeerCertificates)
 			}
 		}
 		CertCache.Put(serverName, serverAddr, cert, rt)
 	}
 	log.Println("[SSL] Setting up HTTP Server")
-	server := http.Server{
-		Handler: ProxyHandler{
-			TLS:         true,
-			connectPort: port,
-			user:        authUser,
-			rt:          rt,
-			Iproxy:      gsproxy,
-		},
-		TLSConfig: &tls.Config{
-			NextProtos:   []string{"h2", "http/1.1"},
-			Certificates: []tls.Certificate{cert, TLSCert},
-		},
+	// Create TLS config for the handshake (not for the server)
+	tlsConfig := &tls.Config{
+		NextProtos:   []string{"h2", "http/1.1"},
+		Certificates: []tls.Certificate{cert, TLSCert},
 	}
-	log.Println("[SSL] Configuring HTTP2 server with configuration")
-	err = http2.ConfigureServer(&server, nil)
-	if err != nil {
-		log.Println("Error configuring HTTP/2 server:", err)
-	}
-	log.Println("[SSL] Setting up TLS Connection with inserted data")
-	tlsConn := tls.Server(&insertingConn{conn, clientHello}, server.TLSConfig)
+	tlsConn := tls.Server(&insertingConn{conn, clientHello}, tlsConfig)
 	err = tlsConn.Handshake()
-	log.Println("[SSL] Performed TLS Handshake")
 	if err != nil {
 		GSLogSSL(user, serverAddr, serverName, fmt.Errorf("error in handshake with client: %v", err), cachedCert)
 		conn.Close()
 		return
 	}
 
-	listener := &singleListener{conn: tlsConn}
-	GSLogSSL(user, serverAddr, serverName, nil, cachedCert)
-	// conf = nil
-	server.Serve(listener)
+	clientState := tlsConn.ConnectionState()
+	negotiatedProto := clientState.NegotiatedProtocol
 
+	handler := ProxyHandler{
+		TLS:         true,
+		connectPort: port,
+		user:        authUser,
+		rt:          rt,
+		Iproxy:      gsproxy,
+	}
+
+	GSLogSSL(user, serverAddr, serverName, nil, cachedCert)
+
+	// Set up HTTP server with HTTP/2 support
+	server := http.Server{
+		Handler: handler,
+	}
+
+	if err := http2.ConfigureServer(&server, nil); err != nil {
+		log.Printf("[SSL] Error configuring HTTP/2 server: %v", err)
+	}
+
+	// Handle HTTP/2 directly if negotiated via ALPN
+	if negotiatedProto == "h2" {
+		h2s := &http2.Server{}
+		h2s.ServeConn(tlsConn, &http2.ServeConnOpts{
+			Handler: handler,
+			Context: context.Background(),
+		})
+	} else {
+		// Use standard HTTP/1.1 server with the TLS connection
+		listener := &singleListener{conn: tlsConn}
+		server.Serve(listener)
+	}
 }
 
 func newHardValidationTransport(rt http.RoundTripper, serverName string, certificates []*x509.Certificate) *hardValidationTransport {
@@ -499,8 +508,6 @@ func (t *hardValidationTransport) RoundTrip(req *http.Request) (*http.Response, 
 }
 
 func clientHelloServerName(data []byte) (name string, ok bool) {
-	log.Println("[SSL] client Hello Server name")
-	log.Println("[SSL] Data length = " + strconv.Itoa(len(data)))
 	var hello = gsClientHello.ClientHello{}
 	err := hello.Unmarshall(data)
 	return hello.SNI, err == nil

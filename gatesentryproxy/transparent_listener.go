@@ -226,6 +226,8 @@ func (l *TransparentProxyListener) handleTransparentHTTPS(conn net.Conn, origina
 
 	// Check proxy rules using the domain name (SNI) instead of IP
 	shouldBlock, ruleMatch, ruleShouldMitm := CheckProxyRules(ruleMatchHost, user)
+
+
 	if shouldBlock {
 		if DebugLogging {
 			log.Printf("[Transparent] Blocking HTTPS connection to %s (SNI: %s) by rule", serverAddr, serverName)
@@ -266,26 +268,22 @@ func (l *TransparentProxyListener) handleTransparentHTTPS(conn net.Conn, origina
 		logUrl = "https://" + serverName
 	}
 
-	// Create a fresh prependConn with the clientHello data and the real underlying connection
-	// This reconstructs the connection state as if clientHello wasn't read yet
-	freshConn := &prependConn{
-		Conn:   realConn,
-		buf:    clientHello,
-		offset: 0,
-	}
-
 	if shouldMitm {
 		if DebugLogging {
 			log.Printf("[Transparent] Performing SSL Bump for %s (SNI: %s)", serverAddr, serverName)
 		}
-		SSLBump(freshConn, serverAddr, user, "", nil, passthru, l.ProxyHandler.Iproxy)
+		SSLBump(realConn, serverAddr, user, "", nil, passthru, l.ProxyHandler.Iproxy, clientHello)
 	} else {
 		if DebugLogging {
 			log.Printf("[Transparent] Direct tunnel for %s (SNI: %s)", serverAddr, serverName)
 		}
 		LogProxyAction(logUrl, user, ProxyActionSSLDirect)
-		// Pass freshConn with nil extraData - io.Copy will read clientHello from buffer
-		// This matches the original behavior before SNI extraction was added
+		// Create a prependConn to buffer the clientHello for the direct connection
+		freshConn := &prependConn{
+			Conn:   realConn,
+			buf:    clientHello,
+			offset: 0,
+		}
 		ConnectDirect(freshConn, serverAddr, nil, passthru)
 	}
 }

@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## v1.20.6 (31 January 2026)
+
+- Fix HTTP2 not working properly in transparent mode
+
 ## v1.20.4 (31 January 2026)
 
 - Fix transparent HTTPS mode showing IP addresses instead of domain names
