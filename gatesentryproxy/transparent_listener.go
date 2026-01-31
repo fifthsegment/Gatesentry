@@ -175,15 +175,23 @@ func (l *TransparentProxyListener) handleTransparentHTTPS(conn net.Conn, origina
 
 	passthru := NewGSProxyPassthru()
 
+	// Get the underlying real connection from the prependConn
+	var realConn net.Conn
+	if pc, ok := conn.(*prependConn); ok {
+		realConn = pc.Conn
+	} else {
+		realConn = conn
+	}
+
 	// Read the TLS Client Hello to extract SNI (domain name) BEFORE rule matching
 	clientHello, err := gsClientHello.ReadClientHello(conn)
 	if err != nil {
 		if DebugLogging {
 			log.Printf("[Transparent] Error reading client hello: %v", err)
 		}
-		// If we can't read the client hello, fall back to direct connection with IP
-		LogProxyAction("https://"+serverAddr, user, ProxyActionSSLDirect)
-		ConnectDirect(conn, serverAddr, clientHello, passthru)
+		// If we can't read the client hello, close the connection
+		// We can't reliably tunnel partial/corrupt data
+		conn.Close()
 		return
 	}
 
@@ -249,19 +257,22 @@ func (l *TransparentProxyListener) handleTransparentHTTPS(conn net.Conn, origina
 		if DebugLogging {
 			log.Printf("[Transparent] Performing SSL Bump for %s (SNI: %s)", serverAddr, serverName)
 		}
-		// Pass the already-read client hello to SSLBump via an insertingConn
-		wrappedConn := &prependConn{
-			Conn:   conn,
+		// Create a fresh prependConn with the clientHello data and the real underlying connection
+		// This avoids nesting prependConns which can cause issues
+		freshConn := &prependConn{
+			Conn:   realConn,
 			buf:    clientHello,
 			offset: 0,
 		}
-		SSLBump(wrappedConn, serverAddr, user, "", nil, passthru, l.ProxyHandler.Iproxy)
+		SSLBump(freshConn, serverAddr, user, "", nil, passthru, l.ProxyHandler.Iproxy)
 	} else {
 		if DebugLogging {
 			log.Printf("[Transparent] Direct tunnel for %s (SNI: %s)", serverAddr, serverName)
 		}
 		LogProxyAction(logUrl, user, ProxyActionSSLDirect)
-		ConnectDirect(conn, serverAddr, clientHello, passthru)
+		// For ConnectDirect, pass the real connection (after clientHello was consumed)
+		// and the clientHello as extraData to be written to the server
+		ConnectDirect(realConn, serverAddr, clientHello, passthru)
 	}
 }
 
