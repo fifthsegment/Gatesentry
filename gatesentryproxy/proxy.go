@@ -321,31 +321,23 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		action = ACTION_SSL_BUMP
 	}
 
-	var ruleMatch interface{}
-	ruleShouldMITM := false
-	ruleMatched := false
-	if IProxy.RuleMatchHandler != nil {
-		host, _, _ := net.SplitHostPort(r.URL.Host)
-		if host == "" {
-			host = r.URL.Host
-		}
-		ruleMatch = IProxy.RuleMatchHandler(host, user)
+	requestHost, _, _ := net.SplitHostPort(r.URL.Host)
+	if requestHost == "" {
+		requestHost = r.URL.Host
+	}
 
-		if ruleMatch != nil {
-			passthru.UserData = ruleMatch
-
-			matchVal := reflect.ValueOf(ruleMatch)
-			if matchVal.Kind() == reflect.Struct {
-				matchedField := matchVal.FieldByName("Matched")
-				if matchedField.IsValid() && matchedField.Kind() == reflect.Bool && matchedField.Bool() {
-					ruleMatched = true
-					mitmField := matchVal.FieldByName("ShouldMITM")
-					if mitmField.IsValid() && mitmField.Kind() == reflect.Bool {
-						ruleShouldMITM = mitmField.Bool()
-					}
-				}
-			}
+	shouldBlock, ruleMatch, ruleShouldMITM := CheckProxyRules(requestHost, user)
+	if shouldBlock {
+		if DebugLogging {
+			log.Printf("[Proxy] Blocking request to %s by rule", r.URL.String())
 		}
+		LogProxyAction(r.URL.String(), user, ProxyActionBlockedUrl)
+		return
+	}
+
+	ruleMatched := ruleMatch != nil
+	if ruleMatch != nil {
+		passthru.UserData = ruleMatch
 	}
 
 	shouldMitm := IProxy.DoMitm(r.URL.Host)
@@ -371,26 +363,6 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		isExceptionUrl := IProxy.IsExceptionUrl(r.URL.String())
 		if isExceptionUrl {
 			action = ACTION_NONE
-		}
-	}
-
-	// Block entire domain if rule says to block
-	if ruleMatched && passthru.UserData != nil {
-		matchVal := reflect.ValueOf(passthru.UserData)
-		if matchVal.Kind() == reflect.Struct {
-			shouldBlockField := matchVal.FieldByName("ShouldBlock")
-			urlRegexField := matchVal.FieldByName("BlockURLRegexes")
-
-			log.Println("Checking for domain block for ", r.URL.String())
-			// If action is block and no URL patterns, block entire domain
-			if shouldBlockField.IsValid() && shouldBlockField.Kind() == reflect.Bool && shouldBlockField.Bool() {
-				if !urlRegexField.IsValid() || urlRegexField.Len() == 0 {
-					passthru.ProxyActionToLog = ProxyActionBlockedUrl
-					IProxy.LogHandler(GSLogData{Url: r.URL.String(), User: user, Action: ProxyActionBlockedUrl})
-					// Just close connection - don't establish tunnel
-					return
-				}
-			}
 		}
 	}
 
@@ -654,6 +626,56 @@ func sendBlockMessageBytes(w http.ResponseWriter, r *http.Request, resp *http.Re
 		sendInsecureBlockBytes(w, r, resp, content, contentType)
 	}
 
+}
+
+// CheckProxyRules checks proxy rules for a given host and user.
+// Returns: shouldBlock (bool), ruleMatch (interface{}), shouldMITM (bool)
+func CheckProxyRules(host string, user string) (bool, interface{}, bool) {
+	if IProxy == nil || IProxy.RuleMatchHandler == nil {
+		return false, nil, false
+	}
+
+	ruleMatch := IProxy.RuleMatchHandler(host, user)
+	if ruleMatch == nil {
+		return false, nil, false
+	}
+
+	matchVal := reflect.ValueOf(ruleMatch)
+	if matchVal.Kind() != reflect.Struct {
+		return false, nil, false
+	}
+
+	matchedField := matchVal.FieldByName("Matched")
+	if !matchedField.IsValid() || matchedField.Kind() != reflect.Bool || !matchedField.Bool() {
+		return false, nil, false
+	}
+
+	shouldBlockField := matchVal.FieldByName("ShouldBlock")
+	urlRegexField := matchVal.FieldByName("BlockURLRegexes")
+	mitmField := matchVal.FieldByName("ShouldMITM")
+
+	shouldBlock := false
+	shouldMITM := false
+
+	if shouldBlockField.IsValid() && shouldBlockField.Kind() == reflect.Bool && shouldBlockField.Bool() {
+		// Only block if no URL regexes specified (domain-level block)
+		if !urlRegexField.IsValid() || urlRegexField.Len() == 0 {
+			shouldBlock = true
+		}
+	}
+
+	if mitmField.IsValid() && mitmField.Kind() == reflect.Bool {
+		shouldMITM = mitmField.Bool()
+	}
+
+	return shouldBlock, ruleMatch, shouldMITM
+}
+
+// LogProxyAction logs a proxy action with the given URL, user, and action
+func LogProxyAction(url string, user string, action ProxyAction) {
+	if IProxy != nil && IProxy.LogHandler != nil {
+		IProxy.LogHandler(GSLogData{Url: url, User: user, Action: action})
+	}
 }
 
 // copyResponseHeader writes resp's header and status code to w.

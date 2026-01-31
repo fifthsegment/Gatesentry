@@ -123,6 +123,23 @@ func (l *TransparentProxyListener) handleTransparentHTTP(conn net.Conn, original
 		req.Host = originalDst
 	}
 
+	// Check proxy rules before processing
+	host, _, _ := net.SplitHostPort(originalDst)
+	if host == "" {
+		host = originalDst
+	}
+	user := ""
+
+	shouldBlock, _, _ := CheckProxyRules(host, user)
+	if shouldBlock {
+		if DebugLogging {
+			log.Printf("[Transparent] Blocking HTTP request to %s by rule", originalDst)
+		}
+		LogProxyAction(req.URL.String(), user, ProxyActionBlockedUrl)
+		conn.Close()
+		return
+	}
+
 	respWriter := &connResponseWriter{
 		conn:   conn,
 		header: make(http.Header),
@@ -156,9 +173,30 @@ func (l *TransparentProxyListener) handleTransparentHTTPS(conn net.Conn, origina
 
 	passthru := NewGSProxyPassthru()
 
+	// Check proxy rules before processing
+	shouldBlock, ruleMatch, ruleShouldMitm := CheckProxyRules(host, user)
+	if shouldBlock {
+		if DebugLogging {
+			log.Printf("[Transparent] Blocking HTTPS connection to %s by rule", serverAddr)
+		}
+		LogProxyAction("https://"+serverAddr, user, ProxyActionBlockedUrl)
+		conn.Close()
+		return
+	}
+
+	// Store rule match data for later use (MITM decision, URL regex checking)
+	if ruleMatch != nil {
+		passthru.UserData = ruleMatch
+	}
+
 	shouldMitm := false
 	if IProxy != nil && IProxy.DoMitm != nil {
 		shouldMitm = IProxy.DoMitm(serverAddr)
+	}
+
+	// If rule matched and specified MITM setting, use it
+	if ruleMatch != nil {
+		shouldMitm = ruleShouldMitm
 	}
 
 	if shouldMitm {
@@ -170,6 +208,7 @@ func (l *TransparentProxyListener) handleTransparentHTTPS(conn net.Conn, origina
 		if DebugLogging {
 			log.Printf("[Transparent] Direct tunnel for %s", serverAddr)
 		}
+		LogProxyAction("https://"+serverAddr, user, ProxyActionSSLDirect)
 		ConnectDirect(conn, serverAddr, nil, passthru)
 	}
 }
