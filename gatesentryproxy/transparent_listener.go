@@ -175,7 +175,23 @@ func (l *TransparentProxyListener) handleTransparentHTTPS(conn net.Conn, origina
 
 	passthru := NewGSProxyPassthru()
 
-	// Get the underlying real connection from the prependConn
+	// First, check if MITM is enabled for this destination (using IP-based check initially)
+	shouldMitm := false
+	if IProxy != nil && IProxy.DoMitm != nil {
+		shouldMitm = IProxy.DoMitm(serverAddr)
+	}
+
+	// For MITM connections, pass directly to SSLBump which handles SNI extraction internally
+	// This avoids connection wrapper issues with HTTP/2
+	if shouldMitm {
+		if DebugLogging {
+			log.Printf("[Transparent] Performing SSL Bump for %s", serverAddr)
+		}
+		SSLBump(conn, serverAddr, user, "", nil, passthru, l.ProxyHandler.Iproxy)
+		return
+	}
+
+	// For non-MITM connections, read ClientHello to extract SNI for logging and rules
 	var realConn net.Conn
 	if pc, ok := conn.(*prependConn); ok {
 		realConn = pc.Conn
@@ -183,12 +199,9 @@ func (l *TransparentProxyListener) handleTransparentHTTPS(conn net.Conn, origina
 		realConn = conn
 	}
 
-	// Read the TLS Client Hello to extract SNI (domain name) BEFORE rule matching
 	clientHello, err := gsClientHello.ReadClientHello(conn)
 	if err != nil {
 		log.Printf("[Transparent] Error reading client hello for %s: %v, falling back to direct tunnel", serverAddr, err)
-		// Fall back to direct tunnel with whatever data we got
-		// Create a fresh prependConn with the partial data we read
 		if len(clientHello) > 0 {
 			freshConn := &prependConn{
 				Conn:   realConn,
@@ -198,7 +211,6 @@ func (l *TransparentProxyListener) handleTransparentHTTPS(conn net.Conn, origina
 			LogProxyAction("https://"+serverAddr, user, ProxyActionSSLDirect)
 			ConnectDirect(freshConn, serverAddr, nil, passthru)
 		} else {
-			// No data read at all, just close
 			conn.Close()
 		}
 		return
@@ -224,13 +236,9 @@ func (l *TransparentProxyListener) handleTransparentHTTPS(conn net.Conn, origina
 		ruleMatchHost = serverName
 	}
 
-	// Check proxy rules using the domain name (SNI) instead of IP
-	shouldBlock, ruleMatch, ruleShouldMitm := CheckProxyRules(ruleMatchHost, user)
+	// Check proxy rules
+	shouldBlock, ruleMatch, _ := CheckProxyRules(ruleMatchHost, user)
 	if shouldBlock {
-		if DebugLogging {
-			log.Printf("[Transparent] Blocking HTTPS connection to %s (SNI: %s) by rule", serverAddr, serverName)
-		}
-		// Log with domain name if available
 		logUrl := "https://" + serverAddr
 		if serverName != "" {
 			logUrl = "https://" + serverName
@@ -240,54 +248,28 @@ func (l *TransparentProxyListener) handleTransparentHTTPS(conn net.Conn, origina
 		return
 	}
 
-	// Store rule match data for later use (MITM decision, URL regex checking)
 	if ruleMatch != nil {
 		passthru.UserData = ruleMatch
 	}
 
-	shouldMitm := false
-	if IProxy != nil && IProxy.DoMitm != nil {
-		// Use domain for MITM decision if available
-		mitmCheckHost := serverAddr
-		if serverName != "" {
-			mitmCheckHost = net.JoinHostPort(serverName, port)
-		}
-		shouldMitm = IProxy.DoMitm(mitmCheckHost)
-	}
-
-	// If rule matched and specified MITM setting, use it
-	if ruleMatch != nil {
-		shouldMitm = ruleShouldMitm
-	}
-
-	// Use domain name for logging if available
+	// Log with domain name if available
 	logUrl := "https://" + serverAddr
 	if serverName != "" {
 		logUrl = "https://" + serverName
 	}
 
-	// Create a fresh prependConn with the clientHello data and the real underlying connection
-	// This reconstructs the connection state as if clientHello wasn't read yet
+	if DebugLogging {
+		log.Printf("[Transparent] Direct tunnel for %s (SNI: %s)", serverAddr, serverName)
+	}
+	LogProxyAction(logUrl, user, ProxyActionSSLDirect)
+
+	// Create fresh connection with clientHello for tunneling
 	freshConn := &prependConn{
 		Conn:   realConn,
 		buf:    clientHello,
 		offset: 0,
 	}
-
-	if shouldMitm {
-		if DebugLogging {
-			log.Printf("[Transparent] Performing SSL Bump for %s (SNI: %s)", serverAddr, serverName)
-		}
-		SSLBump(freshConn, serverAddr, user, "", nil, passthru, l.ProxyHandler.Iproxy)
-	} else {
-		if DebugLogging {
-			log.Printf("[Transparent] Direct tunnel for %s (SNI: %s)", serverAddr, serverName)
-		}
-		LogProxyAction(logUrl, user, ProxyActionSSLDirect)
-		// Pass freshConn with nil extraData - io.Copy will read clientHello from buffer
-		// This matches the original behavior before SNI extraction was added
-		ConnectDirect(freshConn, serverAddr, nil, passthru)
-	}
+	ConnectDirect(freshConn, serverAddr, nil, passthru)
 }
 
 type prependConn struct {
