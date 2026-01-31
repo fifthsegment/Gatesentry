@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## v1.20.0 (31 January 2026)
+
+- Fix transparent mode not picking up rules or logging traffic.
+
 ## v1.19.3 (31 January 2026)
 
 - Added TPROXY support for transparent proxy mode (enables handling forwarded traffic from Tailscale exit nodes and routers)
