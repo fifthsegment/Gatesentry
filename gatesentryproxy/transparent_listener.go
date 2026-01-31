@@ -186,19 +186,32 @@ func (l *TransparentProxyListener) handleTransparentHTTPS(conn net.Conn, origina
 	// Read the TLS Client Hello to extract SNI (domain name) BEFORE rule matching
 	clientHello, err := gsClientHello.ReadClientHello(conn)
 	if err != nil {
-		if DebugLogging {
-			log.Printf("[Transparent] Error reading client hello: %v", err)
+		log.Printf("[Transparent] Error reading client hello for %s: %v, falling back to direct tunnel", serverAddr, err)
+		// Fall back to direct tunnel with whatever data we got
+		// Create a fresh prependConn with the partial data we read
+		if len(clientHello) > 0 {
+			freshConn := &prependConn{
+				Conn:   realConn,
+				buf:    clientHello,
+				offset: 0,
+			}
+			LogProxyAction("https://"+serverAddr, user, ProxyActionSSLDirect)
+			ConnectDirect(freshConn, serverAddr, nil, passthru)
+		} else {
+			// No data read at all, just close
+			conn.Close()
 		}
-		// If we can't read the client hello, close the connection
-		// We can't reliably tunnel partial/corrupt data
-		conn.Close()
 		return
 	}
 
 	// Extract SNI from the client hello
 	serverName := ""
 	var hello gsClientHello.ClientHello
-	if err := hello.Unmarshall(clientHello); err == nil && hello.SNI != "" {
+	if unmarshalErr := hello.Unmarshall(clientHello); unmarshalErr != nil {
+		log.Printf("[Transparent] Failed to parse ClientHello for %s: %v (len=%d)", serverAddr, unmarshalErr, len(clientHello))
+	} else if hello.SNI == "" {
+		log.Printf("[Transparent] No SNI in ClientHello for %s (TLS version: %d, extensions: %d)", serverAddr, hello.HandshakeVersion, len(hello.Extensions))
+	} else {
 		serverName = hello.SNI
 		if DebugLogging {
 			log.Printf("[Transparent] Extracted SNI: %s from connection to %s", serverName, serverAddr)
