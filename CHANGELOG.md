@@ -1,10 +1,11 @@
 # CHANGELOG
 
-## v1.20.2 (31 January 2026)
+## v1.20.3 (31 January 2026)
 
 - Fix transparent HTTPS mode showing IP addresses instead of domain names
 - Fixed SNI extraction to enable domain-based rule matching in transparent proxy mode
 - Fixed multiple SNI parsing bugs in TLS Client Hello parser (length calculation and data extraction)
+- Fixed connection handling in transparent proxy to properly forward TLS handshake data
 
 ## v1.20.0 (31 January 2026)
 
