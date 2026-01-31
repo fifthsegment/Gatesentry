@@ -32,7 +32,7 @@ func CreateTransparentListener(addr string) (net.Listener, error) {
 		Control: func(network, address string, c syscall.RawConn) error {
 			var opErr error
 			err := c.Control(func(fd uintptr) {
-				opErr = syscall.SetsockoptInt(int(fd), syscall.SOL_IP, syscall.IP_TRANSPARENT, 1)
+				opErr = syscall.SetsockoptInt(int(fd), syscall.SOL_IP, 19, 1) // 19 = IP_TRANSPARENT
 			})
 			if err != nil {
 				return err
@@ -191,7 +191,7 @@ func (c *prependConn) Read(b []byte) (int, error) {
 
 type dummyConn struct{}
 
-func (c *dummyConn) Read(b []byte) (n int, err error)   { return 0, io.EOF }
+func (c *dummyConn) Read(b []byte) (n int, err error)  { return 0, io.EOF }
 func (c *dummyConn) Write(b []byte) (n int, err error) { return len(b), nil }
 func (c *dummyConn) Close() error                      { return nil }
 func (c *dummyConn) LocalAddr() net.Addr               { return &net.TCPAddr{} }
