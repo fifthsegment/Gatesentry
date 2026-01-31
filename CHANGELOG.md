@@ -1,13 +1,27 @@
 # CHANGELOG
 
+## v1.20.5 (31 January 2026)
+
+- Fixed HTTP/2 compatibility issue with MITM connections in transparent proxy mode
+- MITM connections now bypass early SNI extraction to avoid connection wrapper issues
+
 ## v1.20.4 (31 January 2026)
+
+- Improved error handling: fall back to direct tunnel instead of closing connection when ClientHello parsing fails
+- Added diagnostic logging for SNI extraction failures
+
+## v1.20.3 (31 January 2026)
+
+- Fixed connection handling in transparent proxy to properly forward TLS handshake data
+
+## v1.20.2 (31 January 2026)
+
+- Fixed multiple SNI parsing bugs in TLS Client Hello parser (length calculation and data extraction)
+
+## v1.20.1 (31 January 2026)
 
 - Fix transparent HTTPS mode showing IP addresses instead of domain names
 - Fixed SNI extraction to enable domain-based rule matching in transparent proxy mode
-- Fixed multiple SNI parsing bugs in TLS Client Hello parser (length calculation and data extraction)
-- Fixed connection handling in transparent proxy to properly forward TLS handshake data
-- Improved error handling: fall back to direct tunnel instead of closing connection when ClientHello parsing fails
-- Added diagnostic logging for SNI extraction failures
 
 ## v1.20.0 (31 January 2026)
 
