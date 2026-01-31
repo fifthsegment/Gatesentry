@@ -13,6 +13,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	gsClientHello "bitbucket.org/abdullah_irfan/gatesentryproxy/clienthello"
 )
 
 type TransparentProxyListener struct {
@@ -173,13 +175,46 @@ func (l *TransparentProxyListener) handleTransparentHTTPS(conn net.Conn, origina
 
 	passthru := NewGSProxyPassthru()
 
-	// Check proxy rules before processing
-	shouldBlock, ruleMatch, ruleShouldMitm := CheckProxyRules(host, user)
+	// Read the TLS Client Hello to extract SNI (domain name) BEFORE rule matching
+	clientHello, err := gsClientHello.ReadClientHello(conn)
+	if err != nil {
+		if DebugLogging {
+			log.Printf("[Transparent] Error reading client hello: %v", err)
+		}
+		// If we can't read the client hello, fall back to direct connection with IP
+		LogProxyAction("https://"+serverAddr, user, ProxyActionSSLDirect)
+		ConnectDirect(conn, serverAddr, clientHello, passthru)
+		return
+	}
+
+	// Extract SNI from the client hello
+	serverName := ""
+	var hello gsClientHello.ClientHello
+	if err := hello.Unmarshall(clientHello); err == nil && hello.SNI != "" {
+		serverName = hello.SNI
+		if DebugLogging {
+			log.Printf("[Transparent] Extracted SNI: %s from connection to %s", serverName, serverAddr)
+		}
+	}
+
+	// Use SNI for rule matching if available, otherwise fall back to IP
+	ruleMatchHost := host
+	if serverName != "" {
+		ruleMatchHost = serverName
+	}
+
+	// Check proxy rules using the domain name (SNI) instead of IP
+	shouldBlock, ruleMatch, ruleShouldMitm := CheckProxyRules(ruleMatchHost, user)
 	if shouldBlock {
 		if DebugLogging {
-			log.Printf("[Transparent] Blocking HTTPS connection to %s by rule", serverAddr)
+			log.Printf("[Transparent] Blocking HTTPS connection to %s (SNI: %s) by rule", serverAddr, serverName)
 		}
-		LogProxyAction("https://"+serverAddr, user, ProxyActionBlockedUrl)
+		// Log with domain name if available
+		logUrl := "https://" + serverAddr
+		if serverName != "" {
+			logUrl = "https://" + serverName
+		}
+		LogProxyAction(logUrl, user, ProxyActionBlockedUrl)
 		conn.Close()
 		return
 	}
@@ -191,7 +226,12 @@ func (l *TransparentProxyListener) handleTransparentHTTPS(conn net.Conn, origina
 
 	shouldMitm := false
 	if IProxy != nil && IProxy.DoMitm != nil {
-		shouldMitm = IProxy.DoMitm(serverAddr)
+		// Use domain for MITM decision if available
+		mitmCheckHost := serverAddr
+		if serverName != "" {
+			mitmCheckHost = net.JoinHostPort(serverName, port)
+		}
+		shouldMitm = IProxy.DoMitm(mitmCheckHost)
 	}
 
 	// If rule matched and specified MITM setting, use it
@@ -199,17 +239,29 @@ func (l *TransparentProxyListener) handleTransparentHTTPS(conn net.Conn, origina
 		shouldMitm = ruleShouldMitm
 	}
 
+	// Use domain name for logging if available
+	logUrl := "https://" + serverAddr
+	if serverName != "" {
+		logUrl = "https://" + serverName
+	}
+
 	if shouldMitm {
 		if DebugLogging {
-			log.Printf("[Transparent] Performing SSL Bump for %s", serverAddr)
+			log.Printf("[Transparent] Performing SSL Bump for %s (SNI: %s)", serverAddr, serverName)
 		}
-		SSLBump(conn, serverAddr, user, "", nil, passthru, l.ProxyHandler.Iproxy)
+		// Pass the already-read client hello to SSLBump via an insertingConn
+		wrappedConn := &prependConn{
+			Conn:   conn,
+			buf:    clientHello,
+			offset: 0,
+		}
+		SSLBump(wrappedConn, serverAddr, user, "", nil, passthru, l.ProxyHandler.Iproxy)
 	} else {
 		if DebugLogging {
-			log.Printf("[Transparent] Direct tunnel for %s", serverAddr)
+			log.Printf("[Transparent] Direct tunnel for %s (SNI: %s)", serverAddr, serverName)
 		}
-		LogProxyAction("https://"+serverAddr, user, ProxyActionSSLDirect)
-		ConnectDirect(conn, serverAddr, nil, passthru)
+		LogProxyAction(logUrl, user, ProxyActionSSLDirect)
+		ConnectDirect(conn, serverAddr, clientHello, passthru)
 	}
 }
 
