@@ -6,6 +6,11 @@
 # This script performs comprehensive DNS server testing to ensure the
 # GateSentry DNS server implementation is robust and meets all DNS service demands.
 #
+# Platform Support:
+#   - Linux (GNU coreutils) - Full support
+#   - macOS/BSD - Requires GNU tools: brew install coreutils grep
+#     Then use: PATH="/opt/homebrew/opt/coreutils/libexec/gnubin:$PATH"
+#
 # Usage:
 #   ./dns_deep_test.sh [OPTIONS]
 #
@@ -28,14 +33,109 @@
 # Requirements:
 #   - dig (dnsutils package)
 #   - nc (netcat)
-#   - timeout command
+#   - timeout command (GNU coreutils)
 #   - bc (for calculations)
+#   - grep with PCRE support (-P flag) or GNU grep
 #
 # Author: GateSentry Team
 # Date: 2026-02-07
 #
 
 set -euo pipefail
+
+# =============================================================================
+# Platform Detection and Compatibility
+# =============================================================================
+
+# Detect platform
+PLATFORM="unknown"
+case "$(uname -s)" in
+    Linux*)  PLATFORM="linux";;
+    Darwin*) PLATFORM="macos";;
+    CYGWIN*|MINGW*|MSYS*) PLATFORM="windows";;
+    FreeBSD*) PLATFORM="freebsd";;
+    *) PLATFORM="unknown";;
+esac
+
+# Check for GNU grep with PCRE support
+HAS_GREP_PCRE=false
+if grep --version 2>/dev/null | grep -q "GNU"; then
+    if echo "test" | grep -oP 'test' &>/dev/null; then
+        HAS_GREP_PCRE=true
+    fi
+fi
+
+# Portable grep -oP replacement using sed/awk
+# Usage: extract_pattern "string" "prefix_regex" 
+# Extracts value after the prefix pattern
+extract_after() {
+    local input="$1"
+    local prefix="$2"
+    if [[ "$HAS_GREP_PCRE" == "true" ]]; then
+        echo "$input" | grep -oP "${prefix}\\K[^ ]+" 2>/dev/null || echo ""
+    else
+        # Portable fallback using sed
+        echo "$input" | sed -n "s/.*${prefix}\([^ ]*\).*/\1/p" | head -1
+    fi
+}
+
+# Extract DNS status code from dig output (portable)
+extract_dns_status() {
+    local output="$1"
+    if [[ "$HAS_GREP_PCRE" == "true" ]]; then
+        echo "$output" | grep -oP 'status: \K[A-Z]+' 2>/dev/null || echo "UNKNOWN"
+    else
+        echo "$output" | sed -n 's/.*status: \([A-Z]*\).*/\1/p' | head -1
+    fi
+}
+
+# Extract numeric value after a key= pattern (portable)
+# Usage: extract_key_value "string" "keyname"
+extract_key_value() {
+    local input="$1"
+    local key="$2"
+    if [[ "$HAS_GREP_PCRE" == "true" ]]; then
+        echo "$input" | grep -oP "${key}=\\K[0-9.]+" 2>/dev/null || echo "0"
+    else
+        echo "$input" | sed -n "s/.*${key}=\([0-9.]*\).*/\1/p" | head -1
+    fi
+}
+
+# Get current time in milliseconds (portable)
+get_time_ms() {
+    if [[ "$PLATFORM" == "macos" ]]; then
+        # macOS: use python or perl for millisecond precision
+        if command -v python3 &>/dev/null; then
+            python3 -c 'import time; print(int(time.time() * 1000))'
+        elif command -v perl &>/dev/null; then
+            perl -MTime::HiRes=time -e 'printf "%d\n", time * 1000'
+        else
+            # Fallback to seconds only
+            echo "$(($(date +%s) * 1000))"
+        fi
+    else
+        # Linux: date supports nanoseconds
+        echo "$(($(date +%s%N) / 1000000))"
+    fi
+}
+
+# Get current time in nanoseconds (portable, with fallback to milliseconds)
+get_time_ns() {
+    if [[ "$PLATFORM" == "macos" ]]; then
+        # macOS: use python or perl, convert ms to ns
+        if command -v python3 &>/dev/null; then
+            python3 -c 'import time; print(int(time.time() * 1000000000))'
+        elif command -v perl &>/dev/null; then
+            perl -MTime::HiRes=time -e 'printf "%d\n", time * 1000000000'
+        else
+            # Fallback to seconds converted to ns
+            echo "$(($(date +%s) * 1000000000))"
+        fi
+    else
+        # Linux: date supports nanoseconds
+        date +%s%N
+    fi
+}
 
 # =============================================================================
 # Configuration and Defaults
@@ -166,7 +266,9 @@ check_dependencies() {
     print_section "Checking Dependencies"
 
     local missing_deps=()
+    local warnings=()
 
+    # Check required commands
     for cmd in dig nc timeout bc awk sed grep; do
         if command -v "$cmd" &> /dev/null; then
             print_verbose "Found: $cmd ($(command -v "$cmd"))"
@@ -175,14 +277,49 @@ check_dependencies() {
         fi
     done
 
+    # Platform-specific checks
+    if [[ "$PLATFORM" == "macos" ]]; then
+        print_info "Detected macOS platform"
+        
+        # Check for GNU grep (needed for -P flag)
+        if [[ "$HAS_GREP_PCRE" != "true" ]]; then
+            warnings+=("GNU grep not found - using portable fallbacks (may be slower)")
+            print_warning "For better performance: brew install grep && export PATH=\"/opt/homebrew/opt/grep/libexec/gnubin:\$PATH\""
+        fi
+        
+        # Check for nanosecond timing support
+        if ! command -v python3 &>/dev/null && ! command -v perl &>/dev/null; then
+            warnings+=("Neither python3 nor perl found - timing precision reduced to seconds")
+        fi
+        
+        # Check for gtimeout (GNU timeout)
+        if ! command -v timeout &>/dev/null; then
+            if command -v gtimeout &>/dev/null; then
+                print_info "Using gtimeout instead of timeout"
+                # Create alias for gtimeout
+                timeout() { gtimeout "$@"; }
+            else
+                missing_deps+=("timeout (install with: brew install coreutils)")
+            fi
+        fi
+    fi
+
     if [[ ${#missing_deps[@]} -gt 0 ]]; then
         print_fail "Missing dependencies: ${missing_deps[*]}"
         echo -e "\nInstall missing dependencies:"
         echo "  Ubuntu/Debian: sudo apt-get install dnsutils netcat bc"
         echo "  RHEL/CentOS:   sudo yum install bind-utils nc bc"
-        echo "  macOS:         brew install bind"
+        echo "  macOS:         brew install bind coreutils grep"
+        echo "                 Then add to PATH: export PATH=\"/opt/homebrew/opt/coreutils/libexec/gnubin:\$PATH\""
         exit 1
     fi
+
+    # Show warnings but continue
+    for warn in "${warnings[@]:-}"; do
+        if [[ -n "$warn" ]]; then
+            print_warning "$warn"
+        fi
+    done
 
     print_pass "All dependencies satisfied"
 }
@@ -386,7 +523,7 @@ validate_dns_response() {
     # Check for NOERROR status (successful query)
     if ! echo "$full_output" | grep -q "status: NOERROR"; then
         local status
-        status=$(echo "$full_output" | grep -oP 'status: \K[A-Z]+' || echo "UNKNOWN")
+        status=$(extract_dns_status "$full_output")
         # NXDOMAIN is valid for non-existent domains, but for our test domains it's an error
         if [[ "$status" == "NXDOMAIN" ]]; then
             VALIDATION_ERROR="Domain not found (NXDOMAIN)"
@@ -588,13 +725,21 @@ dns_query_edns() {
 # Get query time from dig output
 get_query_time() {
     local output="$1"
-    echo "$output" | grep -oP 'Query time: \K[0-9]+' || echo "0"
+    if [[ "$HAS_GREP_PCRE" == "true" ]]; then
+        echo "$output" | grep -oP 'Query time: \K[0-9]+' || echo "0"
+    else
+        echo "$output" | sed -n 's/.*Query time: \([0-9]*\).*/\1/p' | head -1
+    fi
 }
 
 # Get message size from dig output
 get_msg_size() {
     local output="$1"
-    echo "$output" | grep -oP 'MSG SIZE\s+rcvd:\s*\K[0-9]+' || echo "0"
+    if [[ "$HAS_GREP_PCRE" == "true" ]]; then
+        echo "$output" | grep -oP 'MSG SIZE\s+rcvd:\s*\K[0-9]+' || echo "0"
+    else
+        echo "$output" | sed -n 's/.*MSG SIZE.*rcvd:[[:space:]]*\([0-9]*\).*/\1/p' | head -1
+    fi
 }
 
 # Check if response is truncated
@@ -615,9 +760,9 @@ measure_timing() {
     local min=999999 max=0 total=0
 
     for i in $(seq 1 "$iterations"); do
-        local start_ns=$(date +%s%N)
+        local start_ns=$(get_time_ns)
         dns_query "$domain" "$record_type" "$server" "$port" > /dev/null
-        local end_ns=$(date +%s%N)
+        local end_ns=$(get_time_ns)
         local elapsed_ms=$(( (end_ns - start_ns) / 1000000 ))
         times+=("$elapsed_ms")
         total=$((total + elapsed_ms))
@@ -943,7 +1088,7 @@ test_performance() {
     local temp_dir
     temp_dir=$(mktemp -d)
     local start_time
-    start_time=$(date +%s%N)
+    start_time=$(get_time_ns)
 
     # Launch concurrent queries
     for i in $(seq 1 "$CONCURRENCY"); do
@@ -961,7 +1106,7 @@ test_performance() {
     wait
 
     local end_time
-    end_time=$(date +%s%N)
+    end_time=$(get_time_ns)
     local duration_ms=$(( (end_time - start_time) / 1000000 ))
 
     # Count results
@@ -994,7 +1139,7 @@ test_performance() {
 
     print_test "Running 100 sequential queries"
     local seq_start
-    seq_start=$(date +%s%N)
+    seq_start=$(get_time_ns)
     local seq_success=0
 
     for i in $(seq 1 100); do
@@ -1004,7 +1149,7 @@ test_performance() {
     done
 
     local seq_end
-    seq_end=$(date +%s%N)
+    seq_end=$(get_time_ns)
     local seq_duration_ms=$(( (seq_end - seq_start) / 1000000 ))
 
     if [[ $seq_success -ge 95 ]]; then
@@ -1051,7 +1196,7 @@ test_dns_features() {
     # Test response code
     print_test "Response status code"
     local status
-    status=$(echo "$output" | grep -oP 'status: \K[A-Z]+' || echo "UNKNOWN")
+    status=$(extract_dns_status "$output")
     if [[ "$status" == "NOERROR" ]]; then
         print_pass "Response status: NOERROR"
     elif [[ "$status" != "UNKNOWN" ]]; then
@@ -1064,7 +1209,8 @@ test_dns_features() {
 
     print_test "TTL values in responses"
     local ttl
-    ttl=$(echo "$output" | grep -oP '\s+\K[0-9]+\s+IN\s+A' | awk '{print $1}' | head -1 || echo "")
+    # Extract TTL value - the number before "IN A" in the answer section
+    ttl=$(echo "$output" | awk '/IN[[:space:]]+A[[:space:]]/ {print $2}' | head -1 || echo "")
     if [[ -n "$ttl" ]] && [[ "$ttl" =~ ^[0-9]+$ ]]; then
         print_pass "TTL present in response: ${ttl}s"
     else
@@ -1313,9 +1459,9 @@ test_ptr_records() {
     local timing_result
     timing_result=$(measure_timing "8.8.8.8.in-addr.arpa" "PTR" 5)
 
-    local avg=$(echo "$timing_result" | grep -oP 'avg=\K[0-9]+' || echo "0")
-    local min=$(echo "$timing_result" | grep -oP 'min=\K[0-9]+' || echo "0")
-    local max=$(echo "$timing_result" | grep -oP 'max=\K[0-9]+' || echo "0")
+    local avg=$(extract_key_value "$timing_result" "avg")
+    local min=$(extract_key_value "$timing_result" "min")
+    local max=$(extract_key_value "$timing_result" "max")
 
     print_info "PTR query timing - Min: ${min}ms, Avg: ${avg}ms, Max: ${max}ms"
 
@@ -1487,7 +1633,7 @@ test_detailed_queries() {
     output=$(timeout "$QUERY_TIMEOUT" dig @"$DNS_SERVER" -p "$DNS_PORT" "google.com" A +norec 2>/dev/null || echo "")
     if [[ -n "$output" ]]; then
         print_pass "Non-recursive query handled"
-        print_verbose "Response: $(echo "$output" | grep -oP 'status: \K[A-Z]+' || echo 'UNKNOWN')"
+        print_verbose "Response: $(extract_dns_status "$output")"
     else
         print_info "Non-recursive query returned no result (expected for forwarder)"
     fi
@@ -1569,7 +1715,7 @@ test_large_queries_tcp() {
     tcp_output=$(dns_query_tcp "google.com" "TXT")
     if [[ -n "$tcp_output" ]]; then
         local tcp_size
-        tcp_size=$(echo "$tcp_output" | grep -oP 'MSG SIZE\s+rcvd:\s*\K[0-9]+' || echo "0")
+        tcp_size=$(get_msg_size "$tcp_output")
         print_pass "Large TCP query successful"
         print_info "TCP response size: ${tcp_size} bytes"
         if [[ "$VERBOSE" == "true" ]]; then
@@ -1639,11 +1785,11 @@ test_timing_diagnostics() {
         timing_result=$(measure_timing "$domain" "$rtype" 5)
 
         # Parse timing result
-        local min=$(echo "$timing_result" | grep -oP 'min=\K[0-9]+' || echo "0")
-        local max=$(echo "$timing_result" | grep -oP 'max=\K[0-9]+' || echo "0")
-        local avg=$(echo "$timing_result" | grep -oP 'avg=\K[0-9]+' || echo "0")
-        local stddev=$(echo "$timing_result" | grep -oP 'stddev=\K[0-9.]+' || echo "0")
-        local samples=$(echo "$timing_result" | grep -oP 'samples=\K[0-9 ]+' || echo "0")
+        local min=$(extract_key_value "$timing_result" "min")
+        local max=$(extract_key_value "$timing_result" "max")
+        local avg=$(extract_key_value "$timing_result" "avg")
+        local stddev=$(extract_key_value "$timing_result" "stddev")
+        local samples=$(extract_key_value "$timing_result" "samples")
 
         printf "%-30s %-6s %-6s %-6s %-8s %s\n" "$description" "${min}ms" "${max}ms" "${avg}ms" "${stddev}ms" "[$samples]"
     done
@@ -1654,9 +1800,9 @@ test_timing_diagnostics() {
 
     local samples=()
     for i in $(seq 1 20); do
-        local start_ns=$(date +%s%N)
+        local start_ns=$(get_time_ns)
         dns_query "google.com" "A" > /dev/null
-        local end_ns=$(date +%s%N)
+        local end_ns=$(get_time_ns)
         local elapsed_ms=$(( (end_ns - start_ns) / 1000000 ))
         samples+=("$elapsed_ms")
     done
@@ -1703,16 +1849,16 @@ test_timing_diagnostics() {
     local udp_timing
     udp_timing=$(measure_timing "google.com" "A" 5)
     local udp_avg
-    udp_avg=$(echo "$udp_timing" | grep -oP 'avg=\K[0-9]+' || echo "0")
+    udp_avg=$(extract_key_value "$udp_timing" "avg")
 
     # TCP timing (if available)
     local tcp_times=()
     local tcp_success=0
     for i in $(seq 1 5); do
-        local start_ns=$(date +%s%N)
+        local start_ns=$(get_time_ns)
         local result
         result=$(timeout "$QUERY_TIMEOUT" dig @"$DNS_SERVER" -p "$DNS_PORT" "google.com" A +tcp +short 2>/dev/null || true)
-        local end_ns=$(date +%s%N)
+        local end_ns=$(get_time_ns)
         if [[ -n "$result" ]]; then
             local elapsed_ms=$(( (end_ns - start_ns) / 1000000 ))
             tcp_times+=("$elapsed_ms")
@@ -1742,18 +1888,18 @@ test_timing_diagnostics() {
     print_test "Measuring cold start vs warm performance"
 
     # Use a unique domain to avoid caching
-    local unique_domain="timing-test-$(date +%s%N).example.com"
+    local unique_domain="timing-test-$(get_time_ns).example.com"
 
     # This will likely fail (NXDOMAIN) but we measure the time anyway
-    local cold_start=$(date +%s%N)
+    local cold_start=$(get_time_ns)
     dns_query "$unique_domain" "A" > /dev/null 2>&1
-    local cold_end=$(date +%s%N)
+    local cold_end=$(get_time_ns)
     local cold_time=$(( (cold_end - cold_start) / 1000000 ))
 
     # Subsequent query to known domain
-    local warm_start=$(date +%s%N)
+    local warm_start=$(get_time_ns)
     dns_query "google.com" "A" > /dev/null
-    local warm_end=$(date +%s%N)
+    local warm_end=$(get_time_ns)
     local warm_time=$(( (warm_end - warm_start) / 1000000 ))
 
     print_info "Cold query (unknown domain): ${cold_time}ms"
