@@ -13,11 +13,15 @@ import (
 	gatesentryTypes "bitbucket.org/abdullah_irfan/gatesentryf/types"
 )
 
-func InitializeFilters(blockedDomains *map[string]bool, blockedLists *[]string, internalRecords *map[string]string, exceptionDomains *map[string]bool, mutex *sync.Mutex, settings *gatesentry2storage.MapStore, dnsinfo *gatesentryTypes.DnsServerInfo) {
+func InitializeFilters(blockedDomains *map[string]bool, blockedLists *[]string, internalRecords *map[string]string, exceptionDomains *map[string]bool, mutex *sync.RWMutex, settings *gatesentry2storage.MapStore, dnsinfo *gatesentryTypes.DnsServerInfo) {
+	// Hold write lock while replacing the maps to prevent race with readers
+	mutex.Lock()
 	*blockedDomains = make(map[string]bool)
 	*blockedLists = []string{}
 	*internalRecords = make(map[string]string)
 	*exceptionDomains = make(map[string]bool)
+	mutex.Unlock()
+
 	dnsinfo.NumberDomainsBlocked = 0
 	custom_entries := settings.Get("dns_custom_entries")
 	log.Println("[DNS.SERVER] Custom entries found")
@@ -50,7 +54,7 @@ func InitializeFilters(blockedDomains *map[string]bool, blockedLists *[]string, 
 	InitializeExceptionDomains(exceptionDomains, mutex)
 }
 
-func InitializeBlockedDomains(blockedDomains *map[string]bool, blocklists *[]string, mutex *sync.Mutex, dnsinfo *gatesentryTypes.DnsServerInfo) {
+func InitializeBlockedDomains(blockedDomains *map[string]bool, blocklists *[]string, mutex *sync.RWMutex, dnsinfo *gatesentryTypes.DnsServerInfo) {
 	var wg sync.WaitGroup
 	log.Println("[DNS] Downloading blocklists...")
 
@@ -110,7 +114,7 @@ func fetchDomainsFromBlocklist(url string) ([]string, error) {
 	return domains, nil
 }
 
-func addDomainsToBlockedMap(blockedDomains *map[string]bool, newDomains []string, mutex *sync.Mutex, dnsinfo *gatesentryTypes.DnsServerInfo) {
+func addDomainsToBlockedMap(blockedDomains *map[string]bool, newDomains []string, mutex *sync.RWMutex, dnsinfo *gatesentryTypes.DnsServerInfo) {
 	mutex.Lock()
 	defer mutex.Unlock()
 

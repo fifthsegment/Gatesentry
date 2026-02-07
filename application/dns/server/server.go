@@ -18,14 +18,42 @@ import (
 	"github.com/miekg/dns"
 )
 
+// normalizeResolver ensures the resolver address has a port suffix
+// If no port is specified, :53 is appended
+func normalizeResolver(resolver string) string {
+	if resolver == "" {
+		return "8.8.8.8:53"
+	}
+	// Check if port is already specified
+	if !strings.Contains(resolver, ":") {
+		return resolver + ":53"
+	}
+	return resolver
+}
+
 type QueryLog struct {
 	Domain string
 	Time   time.Time
 }
 
+// Environment variable names for DNS server configuration
+const (
+	// ENV_DNS_LISTEN_ADDR sets the IP address to bind the DNS server (default: 0.0.0.0)
+	ENV_DNS_LISTEN_ADDR = "GATESENTRY_DNS_ADDR"
+	// ENV_DNS_LISTEN_PORT sets the port for UDP/TCP DNS server (default: 53)
+	ENV_DNS_LISTEN_PORT = "GATESENTRY_DNS_PORT"
+	// ENV_DNS_EXTERNAL_RESOLVER sets the external DNS resolver (default: 8.8.8.8:53)
+	ENV_DNS_EXTERNAL_RESOLVER = "GATESENTRY_DNS_RESOLVER"
+)
+
 var (
 	externalResolver = "8.8.8.8:53"
-	mutex            sync.Mutex // Mutex to control access to blockedDomains
+	listenAddr       = "0.0.0.0"
+	listenPort       = "53"
+	// RWMutex allows concurrent reads while blocking writes.
+	// Use RLock() for reading blockedDomains/exceptionDomains/internalRecords
+	// Use Lock() when updating these maps (in scheduler/filter initialization)
+	mutex            sync.RWMutex
 	blockedDomains   = make(map[string]bool)
 	exceptionDomains = make(map[string]bool)
 	internalRecords  = make(map[string]string)
@@ -38,13 +66,54 @@ var (
 	logger           *gatesentryLogger.Log
 )
 
-func SetExternalResolver(resolver string) {
-	if resolver != "" {
-		externalResolver = resolver
+func init() {
+	// Load configuration from environment variables
+	if envAddr := os.Getenv(ENV_DNS_LISTEN_ADDR); envAddr != "" {
+		listenAddr = envAddr
+		log.Printf("[DNS] Using listen address from environment: %s", listenAddr)
+	}
+	if envPort := os.Getenv(ENV_DNS_LISTEN_PORT); envPort != "" {
+		listenPort = envPort
+		log.Printf("[DNS] Using listen port from environment: %s", listenPort)
+	}
+	if envResolver := os.Getenv(ENV_DNS_EXTERNAL_RESOLVER); envResolver != "" {
+		externalResolver = normalizeResolver(envResolver)
+		log.Printf("[DNS] Using external resolver from environment: %s", externalResolver)
 	}
 }
 
-var server *dns.Server
+// GetListenAddr returns the current DNS listen address
+func GetListenAddr() string {
+	return listenAddr
+}
+
+// SetListenAddr sets the DNS listen address
+func SetListenAddr(addr string) {
+	if addr != "" {
+		listenAddr = addr
+	}
+}
+
+// GetListenPort returns the current DNS listen port
+func GetListenPort() string {
+	return listenPort
+}
+
+// SetListenPort sets the DNS listen port
+func SetListenPort(port string) {
+	if port != "" {
+		listenPort = port
+	}
+}
+
+func SetExternalResolver(resolver string) {
+	if resolver != "" {
+		externalResolver = normalizeResolver(resolver)
+	}
+}
+
+var server *dns.Server    // UDP server
+var tcpServer *dns.Server // TCP server for large queries (>512 bytes)
 var serverRunning bool = false
 var restartDnsSchedulerChan chan bool
 
@@ -81,11 +150,25 @@ func StartDNSServer(basePath string, ilogger *gatesentryLogger.Log, blockedLists
 
 	serverRunning = true
 	// go PrintQueryLogsPeriodically()
-	// Listen for incoming DNS requests on port 53
-	server = &dns.Server{Addr: "0.0.0.0:53", Net: "udp"}
+	// Listen for incoming DNS requests on configured address:port (default: 0.0.0.0:53)
+	bindAddr := fmt.Sprintf("%s:%s", listenAddr, listenPort)
+
+	// Start TCP server in a goroutine for large DNS queries (>512 bytes)
+	// TCP is required for DNSSEC, large TXT records, zone transfers, etc.
+	tcpServer = &dns.Server{Addr: bindAddr, Net: "tcp"}
+	tcpServer.Handler = dns.HandlerFunc(handleDNSRequest)
+	go func() {
+		fmt.Printf("DNS forwarder listening on %s (TCP). Handles large queries >512 bytes.\n", bindAddr)
+		if err := tcpServer.ListenAndServe(); err != nil {
+			log.Printf("[DNS] TCP server error: %v", err)
+		}
+	}()
+
+	// Start UDP server (blocks)
+	server = &dns.Server{Addr: bindAddr, Net: "udp"}
 	server.Handler = dns.HandlerFunc(handleDNSRequest)
 
-	fmt.Println("DNS forwarder listening on :53 . Binded on : ", localIp)
+	fmt.Printf("DNS forwarder listening on %s (UDP). Local IP: %s. External resolver: %s\n", bindAddr, localIp, externalResolver)
 	err := server.ListenAndServe()
 	if err != nil {
 		fmt.Println(err)
@@ -103,19 +186,31 @@ func StopDNSServer() {
 	}
 
 	gatesentryDnsHttpServer.StopHTTPServer()
+
+	// Stop TCP server if running
+	if tcpServer != nil {
+		if err := tcpServer.Shutdown(); err != nil {
+			log.Printf("[DNS] Error shutting down TCP server: %v", err)
+		}
+		tcpServer = nil
+	}
+
+	// Stop UDP server
+	if server != nil {
+		if err := server.Shutdown(); err != nil {
+			log.Printf("[DNS] Error shutting down UDP server: %v", err)
+		}
+		server = nil
+	}
+
 	serverRunning = false
-	server = nil
 }
 
 func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
-	mutex.Lock()
-	defer mutex.Unlock()
-
-	// send an error if the server is not running
-	if serverRunning == false {
-		fmt.Println("DNS server is not running")
+	// Check if server is running (quick check without lock)
+	if !serverRunning {
+		log.Println("DNS server is not running")
 		w.Close()
-		w.Hijack()
 		return
 	}
 
@@ -127,18 +222,26 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 		domain := strings.ToLower(q.Name)
 		log.Println("[DNS] Domain requested:", domain, " Length of internal records = ", len(internalRecords))
 		domain = domain[:len(domain)-1]
+
+		// Use read lock - allows concurrent DNS queries while blocking filter updates
+		mutex.RLock()
+		isException := exceptionDomains[domain]
+		internalIP, isInternal := internalRecords[domain]
+		isBlocked := blockedDomains[domain]
+		mutex.RUnlock()
+
 		// LogQuery(domain)
-		if _, exists := exceptionDomains[domain]; exists {
+		if isException {
 			log.Println("Domain is exception : ", domain)
 			logger.LogDNS(domain, "dns", "exception")
 
-		} else if ip, exists := internalRecords[domain]; exists {
-			log.Println("Domain is internal : ", domain, " - ", ip)
+		} else if isInternal {
+			log.Println("Domain is internal : ", domain, " - ", internalIP)
 			response := new(dns.Msg)
 			response.SetRcode(r, dns.RcodeSuccess)
 			response.Answer = append(response.Answer, &dns.A{
 				Hdr: dns.RR_Header{Name: q.Name, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 60},
-				A:   net.ParseIP(ip),
+				A:   net.ParseIP(internalIP),
 			})
 
 			// msg.Answer = append(msg.Answer, &dns.A{
@@ -149,7 +252,7 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 			logger.LogDNS(domain, "dns", "internal")
 			w.WriteMsg(response)
 			return
-		} else if blockedDomains[domain] {
+		} else if isBlocked {
 			log.Println("[DNS] Domain is blocked : ", domain)
 			response := new(dns.Msg)
 			response.SetRcode(r, dns.RcodeNameError)
@@ -164,6 +267,8 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 			logger.LogDNS(domain, "dns", "forward")
 		}
 
+		// Forward request WITHOUT holding the mutex - this is the key fix!
+		// External DNS queries can take time and should not block other requests
 		resp, err := forwardDNSRequest(r)
 		if err != nil {
 			log.Println("[DNS] Error forwarding DNS request:", err)
