@@ -281,7 +281,9 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 
 		// Forward request WITHOUT holding the mutex - this is the key fix!
 		// External DNS queries can take time and should not block other requests
-		resp, err := forwardDNSRequest(r)
+		// Detect if client connected via TCP and preserve that for forwarding
+		useTCP := w.LocalAddr().Network() == "tcp"
+		resp, err := forwardDNSRequest(r, useTCP)
 		if err != nil {
 			log.Println("[DNS] Error forwarding DNS request:", err)
 			return
@@ -294,12 +296,33 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 	w.WriteMsg(m)
 }
 
-func forwardDNSRequest(r *dns.Msg) (*dns.Msg, error) {
+func forwardDNSRequest(r *dns.Msg, useTCP bool) (*dns.Msg, error) {
 	c := new(dns.Client)
+	
+	// Use TCP if requested (e.g., client connected via TCP)
+	if useTCP {
+		c.Net = "tcp"
+	}
+	
 	resp, _, err := c.Exchange(r, externalResolver)
 	if err != nil {
 		return nil, err
 	}
+	
+	// If response is truncated and we used UDP, retry with TCP
+	// This handles cases where upstream response is too large for UDP
+	if resp.Truncated && !useTCP {
+		log.Println("[DNS] Response truncated, retrying with TCP")
+		c.Net = "tcp"
+		tcpResp, _, tcpErr := c.Exchange(r, externalResolver)
+		if tcpErr != nil {
+			// TCP retry failed, return the truncated UDP response
+			log.Println("[DNS] TCP retry failed:", tcpErr)
+			return resp, nil
+		}
+		return tcpResp, nil
+	}
+	
 	return resp, nil
 }
 
