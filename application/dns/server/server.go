@@ -229,15 +229,18 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 
 	for _, q := range r.Question {
 		domain := strings.ToLower(q.Name)
-		log.Println("[DNS] Domain requested:", domain, " Length of internal records = ", len(internalRecords))
 		domain = domain[:len(domain)-1]
 
 		// Use read lock - allows concurrent DNS queries while blocking filter updates
+		// Must hold lock before reading any shared maps (including len())
 		mutex.RLock()
+		internalRecordsLen := len(internalRecords)
 		isException := exceptionDomains[domain]
 		internalIP, isInternal := internalRecords[domain]
 		isBlocked := blockedDomains[domain]
 		mutex.RUnlock()
+
+		log.Println("[DNS] Domain requested:", domain, " Length of internal records = ", internalRecordsLen)
 
 		// LogQuery(domain)
 		if isException {
