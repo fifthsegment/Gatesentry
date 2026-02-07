@@ -159,7 +159,8 @@ func StartDNSServer(basePath string, ilogger *gatesentryLogger.Log, blockedLists
 	serverRunning = true
 	// go PrintQueryLogsPeriodically()
 	// Listen for incoming DNS requests on configured address:port (default: 0.0.0.0:53)
-	bindAddr := fmt.Sprintf("%s:%s", listenAddr, listenPort)
+	// Use net.JoinHostPort to properly handle IPv6 addresses (adds brackets)
+	bindAddr := net.JoinHostPort(listenAddr, listenPort)
 
 	// Start TCP server in a goroutine for large DNS queries (>512 bytes)
 	// TCP is required for DNSSEC, large TXT records, zone transfers, etc.
