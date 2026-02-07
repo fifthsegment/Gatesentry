@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	gatesentryDnsHttpServer "bitbucket.org/abdullah_irfan/gatesentryf/dns/http"
@@ -122,14 +123,14 @@ func SetExternalResolver(resolver string) {
 
 var server *dns.Server    // UDP server
 var tcpServer *dns.Server // TCP server for large queries (>512 bytes)
-var serverRunning bool = false
+var serverRunning atomic.Bool // Thread-safe flag for server state
 var restartDnsSchedulerChan chan bool
 
 const BLOCKLIST_HOURLY_UPDATE_INTERVAL = 10
 
 func StartDNSServer(basePath string, ilogger *gatesentryLogger.Log, blockedLists []string, settings *gatesentry2storage.MapStore, dnsinfo *gatesentryTypes.DnsServerInfo) {
 
-	if server != nil || serverRunning == true {
+	if server != nil || serverRunning.Load() {
 		fmt.Println("DNS server is already running")
 		restartDnsSchedulerChan <- true
 		return
@@ -156,7 +157,7 @@ func StartDNSServer(basePath string, ilogger *gatesentryLogger.Log, blockedLists
 	)
 	restartDnsSchedulerChan <- true
 
-	serverRunning = true
+	serverRunning.Store(true)
 	// go PrintQueryLogsPeriodically()
 	// Listen for incoming DNS requests on configured address:port (default: 0.0.0.0:53)
 	// Use net.JoinHostPort to properly handle IPv6 addresses (adds brackets)
@@ -188,8 +189,7 @@ func StartDNSServer(basePath string, ilogger *gatesentryLogger.Log, blockedLists
 }
 
 func StopDNSServer() {
-	// if server == nil || serverRunning == false {
-	if server == nil || serverRunning == false {
+	if server == nil || !serverRunning.Load() {
 		fmt.Println("DNS server is already stopped")
 		return
 	}
@@ -212,12 +212,12 @@ func StopDNSServer() {
 		server = nil
 	}
 
-	serverRunning = false
+	serverRunning.Store(false)
 }
 
 func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
-	// Check if server is running (quick check without lock)
-	if !serverRunning {
+	// Check if server is running (atomic read - no lock needed)
+	if !serverRunning.Load() {
 		log.Println("DNS server is not running")
 		w.Close()
 		return
