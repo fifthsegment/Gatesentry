@@ -121,8 +121,8 @@ func SetExternalResolver(resolver string) {
 	}
 }
 
-var server *dns.Server    // UDP server
-var tcpServer *dns.Server // TCP server for large queries (>512 bytes)
+var server *dns.Server        // UDP server
+var tcpServer *dns.Server     // TCP server for large queries (>512 bytes)
 var serverRunning atomic.Bool // Thread-safe flag for server state
 var restartDnsSchedulerChan chan bool
 
@@ -286,6 +286,12 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 		resp, err := forwardDNSRequest(r, useTCP)
 		if err != nil {
 			log.Println("[DNS] Error forwarding DNS request:", err)
+			// Send SERVFAIL response instead of silently dropping the request.
+			// Without this, the client never receives a reply and hangs until
+			// its own timeout expires, which causes concurrent query failures.
+			errMsg := new(dns.Msg)
+			errMsg.SetRcode(r, dns.RcodeServerFailure)
+			w.WriteMsg(errMsg)
 			return
 		}
 
@@ -298,17 +304,18 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 
 func forwardDNSRequest(r *dns.Msg, useTCP bool) (*dns.Msg, error) {
 	c := new(dns.Client)
-	
+	c.Timeout = 3 * time.Second // Explicit timeout to prevent hanging under concurrent load
+
 	// Use TCP if requested (e.g., client connected via TCP)
 	if useTCP {
 		c.Net = "tcp"
 	}
-	
+
 	resp, _, err := c.Exchange(r, externalResolver)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// If response is truncated and we used UDP, retry with TCP
 	// This handles cases where upstream response is too large for UDP
 	if resp.Truncated && !useTCP {
@@ -322,7 +329,7 @@ func forwardDNSRequest(r *dns.Msg, useTCP bool) (*dns.Msg, error) {
 		}
 		return tcpResp, nil
 	}
-	
+
 	return resp, nil
 }
 

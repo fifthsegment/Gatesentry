@@ -29,12 +29,12 @@ The original `handleDNSRequest()` function held a global mutex during the **enti
 func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
     mutex.Lock()         // Lock acquired here
     defer mutex.Unlock() // Not released until function returns
-    
+
     // ... check blockedDomains, exceptionDomains, internalRecords ...
-    
+
     // PROBLEM: This external call takes 50-500ms and blocks ALL other queries!
-    resp, err := forwardDNSRequest(r)  
-    
+    resp, err := forwardDNSRequest(r)
+
     // mutex.Unlock() happens here via defer
 }
 ```
@@ -62,7 +62,7 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
     internalIP, isInternal := internalRecords[domain]
     isBlocked := blockedDomains[domain]
     mutex.RUnlock()  // Released immediately after reading!
-    
+
     // Now forward WITHOUT holding any lock
     resp, err := forwardDNSRequest(r)
 }
@@ -85,7 +85,7 @@ In `application/dns/filter/domains.go`, the `InitializeFilters()` function was r
 func InitializeFilters(...) {
     tempBlockedMap := make(map[string]bool)
     // ... populate tempBlockedMap ...
-    
+
     // RACE CONDITION: Reading from handleDNSRequest while this runs!
     *blockedDomains = tempBlockedMap  // Pointer reassignment without lock
 }
@@ -107,7 +107,7 @@ Added proper mutex locking around all map pointer reassignments:
 func InitializeFilters(..., mutex *sync.RWMutex, ...) {
     tempBlockedMap := make(map[string]bool)
     // ... populate tempBlockedMap (no lock needed) ...
-    
+
     // Lock before reassigning pointers
     mutex.Lock()
     *blockedDomains = tempBlockedMap
@@ -167,7 +167,7 @@ server.ListenAndServe()
 $ dig @127.0.0.1 -p 10053 google.com A +short
 142.251.12.101
 
-# TCP query  
+# TCP query
 $ dig @127.0.0.1 -p 10053 google.com A +tcp +short
 74.125.200.100
 ```
@@ -324,7 +324,7 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
     internalIP, isInternal := internalRecords[domain]
     isBlocked := blockedDomains[domain]
     mutex.RUnlock()
-    
+
     // Forward WITHOUT holding lock
     resp, err := forwardDNSRequest(r)
 }
@@ -337,7 +337,7 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 
 **Modified Functions:**
 - `RunScheduler()` - mutex parameter type change
-- `doInitialize()` - mutex parameter type change  
+- `doInitialize()` - mutex parameter type change
 - `InitializerType` type definition - mutex type change
 
 **Reason:** Required to match the RWMutex type used in server.go. The scheduler passes the mutex to filter initialization functions.
