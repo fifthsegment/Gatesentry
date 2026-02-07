@@ -58,6 +58,10 @@ func InitializeBlockedDomains(blockedDomains *map[string]bool, blocklists *[]str
 	var wg sync.WaitGroup
 	log.Println("[DNS] Downloading blocklists...")
 
+	// Use a channel to collect domains from all goroutines
+	// This avoids holding the lock during HTTP downloads
+	domainsChan := make(chan []string, len(*blocklists))
+
 	for _, blocklistURL := range *blocklists {
 		wg.Add(1)
 		go func(url string) {
@@ -65,14 +69,40 @@ func InitializeBlockedDomains(blockedDomains *map[string]bool, blocklists *[]str
 			domains, err := fetchDomainsFromBlocklist(url)
 			if err != nil {
 				log.Println("[DNS] [Error] Failed to fetch blocklist:", err)
+				domainsChan <- nil
 				return
 			}
-			addDomainsToBlockedMap(blockedDomains, domains, mutex, dnsinfo)
+			domainsChan <- domains
 		}(blocklistURL)
 	}
-	dnsinfo.LastUpdated = int(time.Now().Unix())
 
-	wg.Wait()
+	// Wait for all downloads to complete in a goroutine, then close the channel
+	go func() {
+		wg.Wait()
+		close(domainsChan)
+	}()
+
+	// Collect all domains first (no lock held during downloads)
+	var allDomains []string
+	for domains := range domainsChan {
+		if domains != nil {
+			allDomains = append(allDomains, domains...)
+		}
+	}
+
+	// Now apply all domains with a single write lock
+	// This minimizes the time the lock is held
+	mutex.Lock()
+	for _, domain := range allDomains {
+		(*blockedDomains)[domain] = true
+		dnsinfo.NumberDomainsBlocked++
+	}
+	mutex.Unlock()
+
+	log.Println("[DNS] Added", len(allDomains), "domains to blocked map")
+	log.Println("[DNS] Total domains in blocked map:", len(*blockedDomains))
+
+	dnsinfo.LastUpdated = int(time.Now().Unix())
 	log.Println("[DNS] Blocklists downloaded and processed.")
 }
 

@@ -20,13 +20,21 @@ import (
 
 // normalizeResolver ensures the resolver address has a port suffix
 // If no port is specified, :53 is appended
+// Properly handles IPv6 addresses (e.g., [2001:4860:4860::8888]:53)
 func normalizeResolver(resolver string) string {
 	if resolver == "" {
 		return "8.8.8.8:53"
 	}
-	// Check if port is already specified
-	if !strings.Contains(resolver, ":") {
-		return resolver + ":53"
+	// Try to split host and port - if it fails, no port is specified
+	host, port, err := net.SplitHostPort(resolver)
+	if err != nil {
+		// No port specified (or invalid format), add default port
+		// net.JoinHostPort handles IPv6 bracketing automatically
+		return net.JoinHostPort(resolver, "53")
+	}
+	// Port was specified, return as-is (already valid format)
+	if port == "" {
+		return net.JoinHostPort(host, "53")
 	}
 	return resolver
 }

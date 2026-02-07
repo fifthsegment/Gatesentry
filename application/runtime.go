@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"os/exec"
 	"strings"
 	"time"
@@ -180,10 +181,14 @@ func (R *GSRuntime) Init() {
 	// Environment variable takes precedence over stored settings to allow
 	// containerized/deployment-time configuration
 	if envResolver := os.Getenv("GATESENTRY_DNS_RESOLVER"); envResolver != "" {
+		// Normalize resolver address - ensure port is included
+		// Use net.SplitHostPort to properly handle IPv6 addresses
 		dnsResolverValue := envResolver
-		// Ensure port is included
-		if !strings.Contains(dnsResolverValue, ":") {
-			dnsResolverValue = dnsResolverValue + ":53"
+		_, _, err := net.SplitHostPort(envResolver)
+		if err != nil {
+			// No port specified, add default :53
+			// net.JoinHostPort handles IPv6 bracketing automatically
+			dnsResolverValue = net.JoinHostPort(envResolver, "53")
 		}
 		log.Printf("[DNS] Using resolver from environment (overrides settings): %s", dnsResolverValue)
 		R.GSSettings.Update("dns_resolver", dnsResolverValue)
