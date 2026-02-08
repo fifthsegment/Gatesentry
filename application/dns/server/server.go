@@ -132,10 +132,19 @@ var restartDnsSchedulerChan chan bool
 // Initialized in StartDNSServer().
 var deviceStore *discovery.DeviceStore
 
+// mdnsBrowser performs periodic mDNS/Bonjour scanning to discover devices.
+// Initialized in StartDNSServer() when mDNS browsing is enabled.
+var mdnsBrowser *discovery.MDNSBrowser
+
 // GetDeviceStore returns the global device store for use by discovery sources,
 // the API layer, and other packages. Returns nil before StartDNSServer is called.
 func GetDeviceStore() *discovery.DeviceStore {
 	return deviceStore
+}
+
+// GetMDNSBrowser returns the global mDNS browser instance, or nil if not started.
+func GetMDNSBrowser() *discovery.MDNSBrowser {
+	return mdnsBrowser
 }
 
 const BLOCKLIST_HOURLY_UPDATE_INTERVAL = 10
@@ -155,15 +164,38 @@ func StartDNSServer(basePath string, ilogger *gatesentryLogger.Log, blockedLists
 	// InitializeLogs()
 	// go gatesentryDnsFilter.InitializeBlockedDomains(&blockedDomains, &blockedLists)
 
-	// Initialize the device store with configured zone (default: "local").
-	// The store starts empty and is populated by discovery sources (passive,
-	// mDNS, DDNS, lease reader) and optionally by importing legacy records.
-	zone := settings.Get("dns_local_zone")
-	if zone == "" {
-		zone = "local"
+	// Initialize the device store with configured zones (default: "local").
+	// Supports multiple comma-separated zones for split-horizon DNS.
+	// Example: "jvj28.com,local" → devices resolve as both
+	//   macmini.jvj28.com AND macmini.local
+	// The first zone is the primary (used for PTR targets).
+	zoneSetting := settings.Get("dns_local_zone")
+	if zoneSetting == "" {
+		zoneSetting = "local"
 	}
-	deviceStore = discovery.NewDeviceStore(zone)
-	log.Printf("[DNS] Device store initialized with zone: %s", zone)
+	// Parse comma-separated zones
+	var zones []string
+	for _, z := range strings.Split(zoneSetting, ",") {
+		z = strings.TrimSpace(z)
+		if z != "" {
+			zones = append(zones, z)
+		}
+	}
+	if len(zones) == 0 {
+		zones = []string{"local"}
+	}
+	deviceStore = discovery.NewDeviceStoreMultiZone(zones...)
+	log.Printf("[DNS] Device store initialized with zones: %v (primary: %s)", zones, zones[0])
+
+	// Start mDNS/Bonjour browser for automatic device discovery (Phase 3).
+	// Browses common service types (_airplay._tcp, _googlecast._tcp, _printer._tcp, etc.)
+	// and feeds discovered devices into the device store.
+	// Enabled by default. Set setting "mdns_browser_enabled" to "false" to disable.
+	mdnsEnabled := settings.Get("mdns_browser_enabled")
+	if mdnsEnabled != "false" {
+		mdnsBrowser = discovery.NewMDNSBrowser(deviceStore, discovery.DefaultScanInterval)
+		mdnsBrowser.Start()
+	}
 
 	restartDnsSchedulerChan = make(chan bool)
 
@@ -218,6 +250,12 @@ func StopDNSServer() {
 	}
 
 	gatesentryDnsHttpServer.StopHTTPServer()
+
+	// Stop mDNS browser if running
+	if mdnsBrowser != nil {
+		mdnsBrowser.Stop()
+		mdnsBrowser = nil
+	}
 
 	// Stop TCP server if running
 	if tcpServer != nil {

@@ -99,12 +99,17 @@ type DeviceStore struct {
 	// deviceByIP maps IP string → device ID for passive discovery.
 	deviceByIP map[string]string
 
-	// zone is the DNS zone suffix for generated records.
-	// Default: "local" → devices get names like "macmini.local"
-	zone string
+	// zones contains the DNS zone suffixes for generated records.
+	// The first entry is the "primary" zone used for PTR targets and display.
+	// Records are generated for ALL zones so that e.g. both "macmini.local"
+	// and "macmini.jvj28.com" resolve to the same device.
+	// Default: ["local"]
+	zones []string
 }
 
 // NewDeviceStore creates an empty DeviceStore with the given zone suffix.
+// For backward compatibility, accepts a single zone string. Use SetZones()
+// to configure multiple zones after creation.
 func NewDeviceStore(zone string) *DeviceStore {
 	if zone == "" {
 		zone = "local"
@@ -116,15 +121,96 @@ func NewDeviceStore(zone string) *DeviceStore {
 		deviceByHostname: make(map[string]string),
 		deviceByMAC:      make(map[string]string),
 		deviceByIP:       make(map[string]string),
-		zone:             zone,
+		zones:            []string{zone},
 	}
 }
 
-// Zone returns the configured zone suffix.
+// NewDeviceStoreMultiZone creates a DeviceStore with multiple zone suffixes.
+// The first zone is the primary zone (used for PTR targets and display).
+// Records are generated for ALL zones.
+// Example: NewDeviceStoreMultiZone("jvj28.com", "local")
+//   → macmini.jvj28.com AND macmini.local both resolve
+func NewDeviceStoreMultiZone(zones ...string) *DeviceStore {
+	if len(zones) == 0 {
+		zones = []string{"local"}
+	}
+	// Filter out empty strings
+	var filtered []string
+	for _, z := range zones {
+		z = strings.TrimSpace(z)
+		if z != "" {
+			filtered = append(filtered, z)
+		}
+	}
+	if len(filtered) == 0 {
+		filtered = []string{"local"}
+	}
+	return &DeviceStore{
+		devices:          make(map[string]*Device),
+		recordsByName:    make(map[string][]DnsRecord),
+		recordsByReverse: make(map[string][]DnsRecord),
+		deviceByHostname: make(map[string]string),
+		deviceByMAC:      make(map[string]string),
+		deviceByIP:       make(map[string]string),
+		zones:            filtered,
+	}
+}
+
+// Zone returns the primary (first) zone suffix.
+// For multi-zone setups, use Zones() to get all zones.
 func (ds *DeviceStore) Zone() string {
 	ds.mu.RLock()
 	defer ds.mu.RUnlock()
-	return ds.zone
+	if len(ds.zones) == 0 {
+		return "local"
+	}
+	return ds.zones[0]
+}
+
+// Zones returns all configured zone suffixes.
+// The first entry is the primary zone.
+func (ds *DeviceStore) Zones() []string {
+	ds.mu.RLock()
+	defer ds.mu.RUnlock()
+	result := make([]string, len(ds.zones))
+	copy(result, ds.zones)
+	return result
+}
+
+// SetZones replaces all zones and rebuilds DNS records.
+// The first zone is the primary. Requires at least one zone.
+func (ds *DeviceStore) SetZones(zones []string) {
+	ds.mu.Lock()
+	defer ds.mu.Unlock()
+	var filtered []string
+	for _, z := range zones {
+		z = strings.TrimSpace(z)
+		if z != "" {
+			filtered = append(filtered, z)
+		}
+	}
+	if len(filtered) == 0 {
+		filtered = []string{"local"}
+	}
+	ds.zones = filtered
+	ds.rebuildIndexes()
+}
+
+// AddZone adds a zone suffix if not already present and rebuilds DNS records.
+func (ds *DeviceStore) AddZone(zone string) {
+	zone = strings.TrimSpace(zone)
+	if zone == "" {
+		return
+	}
+	ds.mu.Lock()
+	defer ds.mu.Unlock()
+	for _, z := range ds.zones {
+		if strings.EqualFold(z, zone) {
+			return // already present
+		}
+	}
+	ds.zones = append(ds.zones, zone)
+	ds.rebuildIndexes()
 }
 
 // --- Query methods (called from DNS handler with RLock) ---
@@ -301,6 +387,17 @@ func (ds *DeviceStore) UpsertDevice(device *Device) string {
 		device.Hostnames = mergeStringSlice(device.Hostnames, existing.Hostnames)
 		device.MDNSNames = mergeStringSlice(device.MDNSNames, existing.MDNSNames)
 		device.MACs = mergeStringSlice(device.MACs, existing.MACs)
+
+		// Preserve existing IP addresses when new values are empty.
+		// This prevents discovery sources that lack IP info from wiping
+		// addresses learned by other sources (e.g., mDNS enriching a
+		// passive device that only had an IP).
+		if device.IPv4 == "" && existing.IPv4 != "" {
+			device.IPv4 = existing.IPv4
+		}
+		if device.IPv6 == "" && existing.IPv6 != "" {
+			device.IPv6 = existing.IPv6
+		}
 
 		if !device.Persistent && existing.Persistent {
 			device.Persistent = true
@@ -504,37 +601,65 @@ func (ds *DeviceStore) rebuildIndexes() {
 			ds.deviceByIP[device.IPv6] = device.ID
 		}
 
-		// Generate DNS records for devices that have a name and an address
+		// Generate DNS records for devices that have a name and an address.
+		// Records are generated for EVERY configured zone so that both
+		// "macmini.local" and "macmini.jvj28.com" resolve.
 		if device.DNSName == "" {
 			continue
 		}
 
-		fqdn := device.DNSName + "." + ds.zone
 		ttl := DefaultTTL
 		if device.Persistent {
 			ttl = ManualTTL
 		}
 
-		// A record
-		if device.IPv4 != "" {
-			rec := DnsRecord{
-				Name:     fqdn,
-				Type:     dns.TypeA,
-				Value:    device.IPv4,
-				TTL:      ttl,
-				DeviceID: device.ID,
-				Source:   device.Source,
-			}
-			ds.recordsByName[strings.ToLower(fqdn)] = append(
-				ds.recordsByName[strings.ToLower(fqdn)], rec)
+		// Primary FQDN is used for PTR targets (reverse DNS should point
+		// to one canonical name, not multiple — RFC 1033 §2.2).
+		primaryFQDN := device.DNSName + "." + ds.zones[0]
 
-			// Reverse PTR
+		// Generate forward records (A/AAAA) for each zone
+		for _, zone := range ds.zones {
+			fqdn := device.DNSName + "." + zone
+			fqdnKey := strings.ToLower(fqdn)
+
+			// A record
+			if device.IPv4 != "" {
+				rec := DnsRecord{
+					Name:     fqdn,
+					Type:     dns.TypeA,
+					Value:    device.IPv4,
+					TTL:      ttl,
+					DeviceID: device.ID,
+					Source:   device.Source,
+				}
+				ds.recordsByName[fqdnKey] = append(
+					ds.recordsByName[fqdnKey], rec)
+			}
+
+			// AAAA record
+			if device.IPv6 != "" {
+				rec := DnsRecord{
+					Name:     fqdn,
+					Type:     dns.TypeAAAA,
+					Value:    device.IPv6,
+					TTL:      ttl,
+					DeviceID: device.ID,
+					Source:   device.Source,
+				}
+				ds.recordsByName[fqdnKey] = append(
+					ds.recordsByName[fqdnKey], rec)
+			}
+		}
+
+		// Reverse PTR records point to the PRIMARY zone's FQDN only.
+		// Each IP gets exactly one PTR target (the canonical name).
+		if device.IPv4 != "" {
 			rev := reverseIPv4(device.IPv4)
 			if rev != "" {
 				ptr := DnsRecord{
 					Name:     rev,
 					Type:     dns.TypePTR,
-					Value:    fqdn,
+					Value:    primaryFQDN,
 					TTL:      ttl,
 					DeviceID: device.ID,
 					Source:   device.Source,
@@ -543,27 +668,13 @@ func (ds *DeviceStore) rebuildIndexes() {
 					ds.recordsByReverse[strings.ToLower(rev)], ptr)
 			}
 		}
-
-		// AAAA record
 		if device.IPv6 != "" {
-			rec := DnsRecord{
-				Name:     fqdn,
-				Type:     dns.TypeAAAA,
-				Value:    device.IPv6,
-				TTL:      ttl,
-				DeviceID: device.ID,
-				Source:   device.Source,
-			}
-			ds.recordsByName[strings.ToLower(fqdn)] = append(
-				ds.recordsByName[strings.ToLower(fqdn)], rec)
-
-			// Reverse PTR for IPv6
 			rev := reverseIPv6(device.IPv6)
 			if rev != "" {
 				ptr := DnsRecord{
 					Name:     rev,
 					Type:     dns.TypePTR,
-					Value:    fqdn,
+					Value:    primaryFQDN,
 					TTL:      ttl,
 					DeviceID: device.ID,
 					Source:   device.Source,
@@ -573,11 +684,12 @@ func (ds *DeviceStore) rebuildIndexes() {
 			}
 		}
 
-		// Also index the bare hostname (without zone) for convenience lookups.
-		// This allows queries for just "macmini" to match "macmini.local".
+		// Index the bare hostname (without any zone) for convenience.
+		// This allows queries for just "macmini" to work.
 		bareKey := strings.ToLower(device.DNSName)
-		if bareKey != strings.ToLower(fqdn) {
-			for _, rec := range ds.recordsByName[strings.ToLower(fqdn)] {
+		primaryKey := strings.ToLower(primaryFQDN)
+		if bareKey != primaryKey {
+			for _, rec := range ds.recordsByName[primaryKey] {
 				ds.recordsByName[bareKey] = append(ds.recordsByName[bareKey], rec)
 			}
 		}

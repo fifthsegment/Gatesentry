@@ -1,0 +1,17 @@
+Branch: feature/1-device-discovery @ feb1353
+Repo: myfork (jbarwick/Gatesentry)
+
+Done:
+
+✅ Phase 1: Device data model, store, 30 tests
+✅ Phase 1: DNS handler wired — A/AAAA/PTR from device store
+✅ Phase 2: Passive discovery (client IP tracking, ARP, goroutine)
+✅ Pre-existing setup_test.go fix + TEST_CHANGES.md
+54 tests passing (30 store + 12 passive + 12 server)
+Next up (when you're back):
+
+Phase 3: mDNS/Bonjour browser — with bridged WSL you'll actually be able to see LAN devices
+Phase 4: RFC 2136 DDNS handler
+Phase 5: DHCP lease reader
+Phase 6: UI Devices page
+Switching to bridged mode is great timing — once WSL has a real LAN IP, avahi will see actual mDNS traffic and Phase 3 becomes testable live.
