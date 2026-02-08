@@ -130,26 +130,26 @@ type Device struct {
     ID          string    // UUID — stable primary key
     DisplayName string    // User-assigned: "Vivienne's iPad" (or auto-derived)
     DNSName     string    // Sanitized: "viviennes-ipad" (auto-generated from hostname)
-    
+
     // Identity — how we recognize this device across IP changes
     Hostnames   []string  // DHCP Option 12 hostnames seen
     MDNSNames   []string  // Bonjour service names seen
     MACs        []string  // MAC addresses seen (may change with randomization)
-    
+
     // Current addresses — DHCP gives these, we DON'T control them
     IPv4        string    // Current IPv4 address
     IPv6        string    // Current IPv6 address (link-local or GUA)
-    
+
     // Metadata
     Source      string    // "ddns", "lease", "mdns", "passive", "manual"
     FirstSeen   time.Time
     LastSeen    time.Time
     Online      bool      // Seen within last N minutes
-    
+
     // User categorization
     Owner       string    // "Vivienne", "Dad", etc.
     Category    string    // "family", "iot", "guest", etc.
-    
+
     // Manual overrides
     ManualName  string    // User-assigned name (overrides auto-derived)
     Persistent  bool      // Manual entries survive restart; auto-discovered may not
@@ -499,9 +499,56 @@ device inventory with `source: "manual"`.
 
 ### Parental controls integration
 
-The blocklist system works independently of device discovery. A blocked domain is blocked
-regardless of which device queries it. Future enhancement: per-device or per-category
-blocking rules (e.g., stricter filtering for "family" category devices).
+Gatesentry's core purpose is parental controls — protecting children from inappropriate
+content. The device discovery system is a critical enabler for **per-device filtering
+policies**, but this branch intentionally does NOT implement the policy engine.
+
+#### Current state: Global blocklists
+
+Today, the blocklist system is global — a blocked domain is blocked for ALL devices. The
+DNS handler has no concept of "who is asking" — it only sees the domain being queried.
+
+#### Future state: Per-device/per-group filtering
+
+With the device store in place, the DNS handler gains the ability to identify the
+querying device:
+
+```
+DNS query arrives from 192.168.1.42
+  → DeviceStore.FindDeviceByIP("192.168.1.42") → "Vivienne's iPad"
+  → Device.Category = "kids"  (or Device.Groups = ["kids", "family"])
+  → Apply "kids" filtering policy (stricter blocklists, time restrictions)
+```
+
+The existing `Rule` system (`types/rule.go`) already has:
+- `Users []string` — maps to device Owner
+- `TimeRestriction` — bedtime enforcement
+- `RuleAction` — allow/block per domain
+
+The missing piece today is: **query source IP → device → group → policy**.
+The device store provides the first two links in that chain.
+
+#### Design decisions for this branch
+
+| Decision | Rationale |
+|----------|----------|
+| `Category string` not `Groups []string` | Simple for now. Can migrate to slice later; JSON deserialization handles both. |
+| `Owner string` stays a plain string | Maps to Rule.Users. No need for a User type yet. |
+| No `PolicyID` or `FilterProfile` on Device | Policy assignment is a separate concern. Don't couple it to the discovery model. |
+| `FindDeviceByIP()` is a fast map lookup | This is the hot path — called on every DNS query once per-device filtering exists. |
+| Store has no filtering logic | The store is pure data. Filtering decisions belong in the handler or a policy engine. |
+
+#### Migration path (future branch)
+
+When per-device filtering is implemented:
+1. Add a `FilterPolicy` type (name, blocklists, time rules, allowed overrides)
+2. Add a `deviceGroups` map in the settings store (group name → FilterPolicy ID)
+3. In `handleDNSRequest`: after device lookup, resolve group → policy → check domain
+4. `Category string` may evolve to `Groups []string` — backward-compatible via JSON
+5. The global blocklist becomes the "default" policy for ungrouped devices
+
+This is a separate feature branch. The device store is designed to support it without
+modification.
 
 ### UI integration
 

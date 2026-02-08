@@ -3,3 +3,6 @@ log.txt
 docker_root
 test-binaries
 pr-binaries
+dns_test_server.log
+ui/.yarn/
+ui/dist/

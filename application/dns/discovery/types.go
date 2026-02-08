@@ -85,9 +85,16 @@ type Device struct {
 	ManualName string `json:"manual_name,omitempty"`
 
 	// Owner identifies who the device belongs to (e.g., "Vivienne", "Dad").
+	// NOTE: This maps to Rule.Users in the existing rule engine. When per-device
+	// filtering is implemented, the DNS handler will use FindDeviceByIP() to
+	// resolve query source → device → owner → filtering policy.
 	Owner string `json:"owner,omitempty"`
 
-	// Category for grouping devices (e.g., "family", "iot", "guest").
+	// Category assigns this device to a filtering group (e.g., "kids", "adults", "iot").
+	// NOTE: Intentionally a single string for now. May evolve to Groups []string
+	// in a future branch when per-group parental control policies are implemented.
+	// The device store itself has no filtering logic — policy decisions belong in
+	// the DNS handler or a dedicated policy engine.
 	Category string `json:"category,omitempty"`
 
 	// Persistent indicates this device entry should survive restarts

@@ -298,9 +298,9 @@ func TestUpsertDevice_MergeOnUpdate(t *testing.T) {
 
 	// First upsert — from passive discovery
 	device := &Device{
-		ID:   "dev-123",
-		IPv4: "192.168.1.42",
-		MACs: []string{"aa:bb:cc:dd:ee:ff"},
+		ID:      "dev-123",
+		IPv4:    "192.168.1.42",
+		MACs:    []string{"aa:bb:cc:dd:ee:ff"},
 		Source:  SourcePassive,
 		Sources: []DiscoverySource{SourcePassive},
 	}
