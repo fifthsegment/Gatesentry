@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"bitbucket.org/abdullah_irfan/gatesentryf/dns/discovery"
 	gatesentryDnsHttpServer "bitbucket.org/abdullah_irfan/gatesentryf/dns/http"
 	gatesentryDnsScheduler "bitbucket.org/abdullah_irfan/gatesentryf/dns/scheduler"
 	gatesentryDnsUtils "bitbucket.org/abdullah_irfan/gatesentryf/dns/utils"
@@ -126,6 +127,17 @@ var tcpServer *dns.Server     // TCP server for large queries (>512 bytes)
 var serverRunning atomic.Bool // Thread-safe flag for server state
 var restartDnsSchedulerChan chan bool
 
+// deviceStore is the central device inventory and DNS record store.
+// Discovery sources populate it; handleDNSRequest reads from it.
+// Initialized in StartDNSServer().
+var deviceStore *discovery.DeviceStore
+
+// GetDeviceStore returns the global device store for use by discovery sources,
+// the API layer, and other packages. Returns nil before StartDNSServer is called.
+func GetDeviceStore() *discovery.DeviceStore {
+	return deviceStore
+}
+
 const BLOCKLIST_HOURLY_UPDATE_INTERVAL = 10
 
 func StartDNSServer(basePath string, ilogger *gatesentryLogger.Log, blockedLists []string, settings *gatesentry2storage.MapStore, dnsinfo *gatesentryTypes.DnsServerInfo) {
@@ -142,6 +154,17 @@ func StartDNSServer(basePath string, ilogger *gatesentryLogger.Log, blockedLists
 	go gatesentryDnsHttpServer.StartHTTPServer()
 	// InitializeLogs()
 	// go gatesentryDnsFilter.InitializeBlockedDomains(&blockedDomains, &blockedLists)
+
+	// Initialize the device store with configured zone (default: "local").
+	// The store starts empty and is populated by discovery sources (passive,
+	// mDNS, DDNS, lease reader) and optionally by importing legacy records.
+	zone := settings.Get("dns_local_zone")
+	if zone == "" {
+		zone = "local"
+	}
+	deviceStore = discovery.NewDeviceStore(zone)
+	log.Printf("[DNS] Device store initialized with zone: %s", zone)
+
 	restartDnsSchedulerChan = make(chan bool)
 
 	go gatesentryDnsScheduler.RunScheduler(
@@ -227,12 +250,53 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 	m.SetReply(r)
 	m.Authoritative = true
 
+	// Passive discovery: record that we saw a query from this client IP.
+	// Runs in a goroutine to avoid adding latency to DNS responses.
+	// The device store handles deduplication and MAC correlation internally.
+	if deviceStore != nil {
+		clientIP := discovery.ExtractClientIP(w.RemoteAddr())
+		if clientIP != "" {
+			go deviceStore.ObservePassiveQuery(clientIP)
+		}
+	}
+
 	for _, q := range r.Question {
 		domain := strings.ToLower(q.Name)
-		domain = domain[:len(domain)-1]
+		domain = domain[:len(domain)-1] // Strip trailing dot
 
-		// Use read lock - allows concurrent DNS queries while blocking filter updates
-		// Must hold lock before reading any shared maps (including len())
+		// --- 1. Device store lookup (supports A, AAAA, PTR) ---
+		// The device store has its own RWMutex — no need to hold the shared mutex.
+		if deviceStore != nil {
+			var records []discovery.DnsRecord
+
+			// PTR queries: check reverse lookup index
+			if q.Qtype == dns.TypePTR && isReverseDomain(domain) {
+				records = deviceStore.LookupReverse(domain)
+			} else {
+				// Forward queries: A, AAAA, or ANY
+				records = deviceStore.LookupName(domain, q.Qtype)
+			}
+
+			if len(records) > 0 {
+				log.Printf("[DNS] Device store hit: %s %s (%d records)",
+					domain, dns.TypeToString[q.Qtype], len(records))
+				response := new(dns.Msg)
+				response.SetRcode(r, dns.RcodeSuccess)
+				response.Authoritative = true
+				for _, rec := range records {
+					rr := rec.ToRR()
+					if rr != nil {
+						response.Answer = append(response.Answer, rr)
+					}
+				}
+				logger.LogDNS(domain, "dns", "device")
+				w.WriteMsg(response)
+				return
+			}
+		}
+
+		// --- 2. Legacy path: exception / internal / blocked ---
+		// Use read lock — allows concurrent DNS queries while blocking filter updates
 		mutex.RLock()
 		internalRecordsLen := len(internalRecords)
 		isException := exceptionDomains[domain]
@@ -255,12 +319,6 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 				Hdr: dns.RR_Header{Name: q.Name, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 60},
 				A:   net.ParseIP(internalIP),
 			})
-
-			// msg.Answer = append(msg.Answer, &dns.A{
-			// 	Hdr: dns.RR_Header{Name: question.Name, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 60},
-			// 	A:   net.ParseIP(ip),
-			// })
-
 			logger.LogDNS(domain, "dns", "internal")
 			w.WriteMsg(response)
 			return
@@ -279,6 +337,7 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 			logger.LogDNS(domain, "dns", "forward")
 		}
 
+		// --- 3. Forward to external resolver ---
 		// Forward request WITHOUT holding the mutex - this is the key fix!
 		// External DNS queries can take time and should not block other requests
 		// Detect if client connected via TCP and preserve that for forwarding
@@ -287,8 +346,6 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 		if err != nil {
 			log.Println("[DNS] Error forwarding DNS request:", err)
 			// Send SERVFAIL response instead of silently dropping the request.
-			// Without this, the client never receives a reply and hangs until
-			// its own timeout expires, which causes concurrent query failures.
 			errMsg := new(dns.Msg)
 			errMsg.SetRcode(r, dns.RcodeServerFailure)
 			w.WriteMsg(errMsg)
@@ -300,6 +357,12 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 		}
 	}
 	w.WriteMsg(m)
+}
+
+// isReverseDomain returns true if the domain is a PTR reverse-lookup name.
+func isReverseDomain(domain string) bool {
+	return strings.HasSuffix(domain, ".in-addr.arpa") ||
+		strings.HasSuffix(domain, ".ip6.arpa")
 }
 
 func forwardDNSRequest(r *dns.Msg, useTCP bool) (*dns.Msg, error) {
