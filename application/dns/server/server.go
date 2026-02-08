@@ -197,6 +197,43 @@ func StartDNSServer(basePath string, ilogger *gatesentryLogger.Log, blockedLists
 		mdnsBrowser.Start()
 	}
 
+	// Configure DDNS (Phase 4: RFC 2136 Dynamic DNS UPDATE handler).
+	// Settings: ddns_enabled, ddns_tsig_required, ddns_tsig_key_name,
+	//           ddns_tsig_key_secret, ddns_tsig_algorithm
+	ddnsEnabledStr := settings.Get("ddns_enabled")
+	if ddnsEnabledStr == "false" {
+		ddnsEnabled = false
+	} else {
+		ddnsEnabled = true
+	}
+
+	ddnsTSIGRequiredStr := settings.Get("ddns_tsig_required")
+	if ddnsTSIGRequiredStr == "true" {
+		ddnsTSIGRequired = true
+	} else {
+		ddnsTSIGRequired = false
+	}
+
+	// Build TSIG secret map for server-level TSIG verification.
+	// The miekg/dns server automatically verifies TSIG on incoming messages
+	// when TsigSecret is set, and exposes the result via w.TsigStatus().
+	var tsigSecrets map[string]string
+	tsigKeyName := settings.Get("ddns_tsig_key_name")
+	tsigKeySecret := settings.Get("ddns_tsig_key_secret")
+	if tsigKeyName != "" && tsigKeySecret != "" {
+		if !strings.HasSuffix(tsigKeyName, ".") {
+			tsigKeyName += "."
+		}
+		tsigSecrets = map[string]string{tsigKeyName: tsigKeySecret}
+		log.Printf("[DDNS] TSIG configured: key=%s", strings.TrimSuffix(tsigKeyName, "."))
+	}
+
+	if ddnsEnabled {
+		log.Printf("[DDNS] Dynamic DNS updates enabled (TSIG required: %v)", ddnsTSIGRequired)
+	} else {
+		log.Println("[DDNS] Dynamic DNS updates disabled")
+	}
+
 	restartDnsSchedulerChan = make(chan bool)
 
 	go gatesentryDnsScheduler.RunScheduler(
@@ -220,7 +257,14 @@ func StartDNSServer(basePath string, ilogger *gatesentryLogger.Log, blockedLists
 
 	// Start TCP server in a goroutine for large DNS queries (>512 bytes)
 	// TCP is required for DNSSEC, large TXT records, zone transfers, etc.
-	tcpServer = &dns.Server{Addr: bindAddr, Net: "tcp"}
+	// MsgAcceptFunc is overridden to accept UPDATE opcode (default rejects it).
+	// TsigSecret enables server-level TSIG verification for DDNS.
+	tcpServer = &dns.Server{
+		Addr:          bindAddr,
+		Net:           "tcp",
+		MsgAcceptFunc: ddnsMsgAcceptFunc,
+		TsigSecret:    tsigSecrets,
+	}
 	tcpServer.Handler = dns.HandlerFunc(handleDNSRequest)
 	go func() {
 		fmt.Printf("DNS forwarder listening on %s (TCP). Handles large queries >512 bytes.\n", bindAddr)
@@ -230,7 +274,12 @@ func StartDNSServer(basePath string, ilogger *gatesentryLogger.Log, blockedLists
 	}()
 
 	// Start UDP server (blocks)
-	server = &dns.Server{Addr: bindAddr, Net: "udp"}
+	server = &dns.Server{
+		Addr:          bindAddr,
+		Net:           "udp",
+		MsgAcceptFunc: ddnsMsgAcceptFunc,
+		TsigSecret:    tsigSecrets,
+	}
 	server.Handler = dns.HandlerFunc(handleDNSRequest)
 
 	fmt.Printf("DNS forwarder listening on %s (UDP). Local IP: %s. External resolver: %s\n", bindAddr, localIp, externalResolver)
@@ -281,6 +330,14 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 	if !serverRunning.Load() {
 		log.Println("DNS server is not running")
 		w.Close()
+		return
+	}
+
+	// Route DDNS UPDATE messages to the dedicated handler.
+	// UPDATE messages have a different structure (zone section, update section)
+	// and are handled entirely separately from standard queries.
+	if r.Opcode == dns.OpcodeUpdate {
+		handleDDNSUpdate(w, r)
 		return
 	}
 

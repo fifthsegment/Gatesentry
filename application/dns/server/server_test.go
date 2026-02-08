@@ -52,6 +52,8 @@ func setupTestServer(t *testing.T) func() {
 	origException := exceptionDomains
 	origInternal := internalRecords
 	origRunning := serverRunning.Load()
+	origDDNSEnabled := ddnsEnabled
+	origDDNSTSIGRequired := ddnsTSIGRequired
 
 	// Initialize test state
 	deviceStore = discovery.NewDeviceStore("local")
@@ -59,6 +61,8 @@ func setupTestServer(t *testing.T) func() {
 	exceptionDomains = make(map[string]bool)
 	internalRecords = make(map[string]string)
 	serverRunning.Store(true)
+	ddnsEnabled = true
+	ddnsTSIGRequired = false
 
 	// Create a temp logger
 	logger = gatesentryLogger.NewLogger(t.TempDir() + "/test.db")
@@ -71,6 +75,8 @@ func setupTestServer(t *testing.T) func() {
 		exceptionDomains = origException
 		internalRecords = origInternal
 		serverRunning.Store(origRunning)
+		ddnsEnabled = origDDNSEnabled
+		ddnsTSIGRequired = origDDNSTSIGRequired
 	}
 }
 

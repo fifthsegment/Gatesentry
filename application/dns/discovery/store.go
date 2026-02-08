@@ -129,7 +129,8 @@ func NewDeviceStore(zone string) *DeviceStore {
 // The first zone is the primary zone (used for PTR targets and display).
 // Records are generated for ALL zones.
 // Example: NewDeviceStoreMultiZone("jvj28.com", "local")
-//   → macmini.jvj28.com AND macmini.local both resolve
+//
+//	→ macmini.jvj28.com AND macmini.local both resolve
 func NewDeviceStoreMultiZone(zones ...string) *DeviceStore {
 	if len(zones) == 0 {
 		zones = []string{"local"}
@@ -458,6 +459,27 @@ func (ds *DeviceStore) UpdateDeviceIP(id string, ipv4 string, ipv6 string) {
 		device.Online = true
 		ds.rebuildIndexes()
 	}
+}
+
+// ClearDeviceAddress removes specific addresses from a device and
+// regenerates DNS records. The device itself is NOT removed even if no
+// addresses remain — the caller handles orphan cleanup. This avoids
+// losing device identity during delete-then-add sequences in DDNS.
+func (ds *DeviceStore) ClearDeviceAddress(id string, clearIPv4, clearIPv6 bool) {
+	ds.mu.Lock()
+	defer ds.mu.Unlock()
+
+	device := ds.devices[id]
+	if device == nil {
+		return
+	}
+	if clearIPv4 {
+		device.IPv4 = ""
+	}
+	if clearIPv6 {
+		device.IPv6 = ""
+	}
+	ds.rebuildIndexes()
 }
 
 // TouchDevice updates the LastSeen timestamp for a device.
