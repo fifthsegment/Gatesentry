@@ -62,27 +62,35 @@ IP as the DNS server to every device. This means **every device already talks to
 | Tier | Method | Router Requirement | Automatic? | What you learn |
 |------|--------|--------------------|------------|----------------|
 | **1** | **RFC 2136 DDNS** | pfSense, Kea, ISC dhcpd, Ubiquiti | ✅ Fully automatic | hostname, A, AAAA, PTR |
-| **2** | **DHCP lease file reader** | Access to lease files (pfSense, Linux) | ✅ Fully automatic | hostname, IP, MAC, lease time |
-| **3** | **mDNS/Bonjour browser** | None (listens on the network) | ✅ Fully automatic | hostname, services, IPs |
-| **4** | **Passive DNS query log** | None (Gatesentry already sees queries) | ✅ Fully automatic | client IP, query patterns, first/last seen |
-| **5** | **Manual entries** | None (user enters via UI) | ❌ Manual | whatever the user types |
+| **2** | **mDNS/Bonjour browser** | None (listens on the network) | ✅ Fully automatic | hostname, services, IPs |
+| **3** | **Passive DNS query log** | None (Gatesentry already sees queries) | ✅ Fully automatic | client IP, query patterns, first/last seen |
+| **4** | **Manual entries** | None (user enters via UI) | ❌ Manual | whatever the user types |
 
-**Tier 5 already exists** — that's the `DNSCustomEntry` / `internalRecords` system.
+> **Why no DHCP lease file reader?** Gatesentry runs in a Docker container. The DHCP
+> server runs on the router or a separate appliance. Reading local lease files from inside
+> a container is the wrong model — the files don't exist there. Instead, **Tier 1 (DDNS)
+> IS the DHCP integration**: the DHCP server sends RFC 2136 UPDATE messages to Gatesentry
+> over the network. This is the standard, RFC-compliant way for DHCP and DNS to
+> communicate, and it works regardless of whether they're on the same machine.
 
-**Tier 4 is basically free** — `handleDNSRequest` receives `w dns.ResponseWriter` which has
+**Tier 4 already exists** — that's the `DNSCustomEntry` / `internalRecords` system.
+
+**Tier 3 is basically free** — `handleDNSRequest` receives `w dns.ResponseWriter` which has
 `RemoteAddr()`. Every DNS query reveals a device's IP address. The DNS server sees every
 device on the network, every few seconds. ARP table lookup can get the MAC.
 
-**Tier 3 is almost free** — `bonjour.go` already imports `github.com/oleksandr/bonjour`. It
-currently only *advertises* Gatesentry but doesn't *browse*. Adding `Browse()` calls would
-discover every Apple device, printer, Chromecast, and smart speaker automatically.
-
-**Tier 2 is proven technology** — we already built a DHCP lease file reader in the
-[unbound-dhcp](https://github.com/jbarwick/unbound-dhcp) project (Python). Porting the
-concept to Go, or running it as a sidecar, is straightforward.
+**Tier 2 requires `--net=host`** — mDNS uses multicast (224.0.0.251:5353) which doesn't
+cross Docker's bridge network NAT. With `network_mode: host`, the container shares the
+host's network stack and can see multicast traffic. The `bonjour.go` module already imports
+`github.com/oleksandr/bonjour`. Adding `Browse()` calls discovers Apple devices, printers,
+Chromecasts, and smart speakers automatically. **mDNS is an optional enrichment layer** —
+passive discovery + DDNS are the reliable core.
 
 **Tier 1 is the power-user feature** — RFC 2136 Dynamic DNS UPDATE support for users with
-capable routers (pfSense, Kea, Ubiquiti, etc.).
+capable routers (pfSense, Kea, Ubiquiti, etc.). The DHCP server is configured to send
+UPDATE messages to Gatesentry whenever it assigns a lease. **This IS the DHCP integration**
+— no lease file parsing, no sidecar containers, just the standard RFC 2136 protocol over
+the network.
 
 ### All tiers feed one unified store
 
@@ -108,12 +116,12 @@ from it. The web UI displays it. The source tag tells the user how the device wa
 
           Sources (all feed INTO the inventory):
 
-    ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐
-    │ RFC 2136 │ │  Lease   │ │  mDNS    │ │ Passive  │ │  Manual  │
-    │  DDNS    │ │  Reader  │ │ Browser  │ │ DNS Log  │ │  (UI)    │
-    │          │ │          │ │          │ │          │ │          │
-    │ Tier 1   │ │ Tier 2   │ │ Tier 3   │ │ Tier 4   │ │ Tier 5   │
-    └──────────┘ └──────────┘ └──────────┘ └──────────┘ └──────────┘
+    ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐
+    │ RFC 2136 │ │  mDNS    │ │ Passive  │ │  Manual  │
+    │  DDNS    │ │ Browser  │ │ DNS Log  │ │  (UI)    │
+    │          │ │          │ │          │ │          │
+    │ Tier 1   │ │ Tier 2   │ │ Tier 3   │ │ Tier 4   │
+    └──────────┘ └──────────┘ └──────────┘ └──────────┘
 ```
 
 ---
@@ -141,7 +149,7 @@ type Device struct {
     IPv6        string    // Current IPv6 address (link-local or GUA)
 
     // Metadata
-    Source      string    // "ddns", "lease", "mdns", "passive", "manual"
+    Source      string    // "ddns", "mdns", "passive", "manual"
     FirstSeen   time.Time
     LastSeen    time.Time
     Online      bool      // Seen within last N minutes
@@ -177,7 +185,7 @@ type InternalRecord struct {
     Name       string    // "macmini.local" or "macmini.jvj28.com"
     Type       uint16    // dns.TypeA, dns.TypeAAAA, dns.TypePTR
     Value      string    // IP address or PTR target
-    Source     string    // "ddns", "lease", "mdns", "passive", "manual"
+    Source     string    // "ddns", "mdns", "passive", "manual"
     TTL        uint32    // seconds
     DeviceID   string    // Links back to the Device
     LastSeen   time.Time // For expiry
@@ -301,14 +309,14 @@ seen, all hostnames seen, and the option to name/rename/categorize.
 
 | Component | Location | Priority |
 |-----------|----------|----------|
-| Device data model | `dns/discovery/types.go` | Phase 1 |
-| Enhanced record store | `dns/discovery/store.go` | Phase 1 |
-| Query handler upgrade (AAAA, PTR) | `dns/server/server.go` | Phase 1 |
-| Passive discovery (DNS query tracking) | `dns/server/server.go` | Phase 2 |
-| mDNS/Bonjour browser | `dns/discovery/mdns.go` | Phase 3 |
-| RFC 2136 UPDATE handler | `dns/server/ddns.go` | Phase 4 |
-| TSIG authentication | `dns/server/ddns.go` | Phase 4 |
-| DHCP lease file reader | `dns/discovery/leases.go` | Phase 5 |
+| Device data model | `dns/discovery/types.go` | Phase 1 ✅ |
+| Enhanced record store | `dns/discovery/store.go` | Phase 1 ✅ |
+| Query handler upgrade (AAAA, PTR) | `dns/server/server.go` | Phase 1 ✅ |
+| Passive discovery (DNS query tracking) | `dns/server/server.go` | Phase 2 ✅ |
+| mDNS/Bonjour browser | `dns/discovery/mdns.go` | Phase 3 ✅ |
+| RFC 2136 UPDATE handler | `dns/server/ddns.go` | Phase 4 ✅ |
+| TSIG authentication | `dns/server/ddns.go` | Phase 4 ✅ |
+| Docker deployment | `Dockerfile`, `docker-compose.yml` | Phase 5 ✅ |
 | UI Devices page | `ui/src/routes/devices/` | Phase 6 |
 | API endpoints | `webserver/endpoints/handler_devices.go` | Phase 6 |
 
@@ -343,7 +351,7 @@ DNS query arrives
 
 ## Implementation Phases
 
-### Phase 1: Foundation — Enhanced Record Store (Days 1-2)
+### Phase 1: Foundation — Enhanced Record Store ✅
 
 - `dns/discovery/types.go` — Device and InternalRecord types
 - `dns/discovery/store.go` — Thread-safe device + record store with RWMutex
@@ -351,7 +359,7 @@ DNS query arrives
 - Backward compatibility: existing `DNSCustomEntry` entries still work
 - Persistence: device inventory saved to BuntDB
 
-### Phase 2: Passive Discovery (Day 3)
+### Phase 2: Passive Discovery ✅
 
 - Extract client IP from `w.RemoteAddr()` in `handleDNSRequest`
 - ARP table lookup for MAC (`ip neigh` / `arp -a`)
@@ -359,27 +367,39 @@ DNS query arrives
 - Track first seen / last seen / online status
 - Zero configuration required — works with any router
 
-### Phase 3: mDNS/Bonjour Browser (Days 4-5)
+### Phase 3: mDNS/Bonjour Browser ✅
 
 - Add `Browse()` calls for common service types (_http._tcp, _airplay._tcp, etc.)
 - Correlate mDNS names with existing devices (by IP or MAC)
 - Run as background goroutine with configurable interval
 - Auto-names Apple devices, printers, Chromecasts, smart speakers
+- **Requires `--net=host` Docker networking** for multicast visibility
 
-### Phase 4: RFC 2136 DDNS Handler (Days 5-7)
+### Phase 4: RFC 2136 DDNS Handler ✅
 
 - Add opcode dispatch in `handleDNSRequest`
 - Implement UPDATE message processing (prerequisite + update sections)
 - TSIG key configuration and verification (miekg/dns has built-in support)
 - Accept A, AAAA, PTR updates from DHCP servers
 - Correlate DDNS hostnames with existing devices in inventory
+- **This IS the DHCP integration** — no lease file parsing needed
 
-### Phase 5: DHCP Lease File Reader (Days 7-8)
+### ~~Phase 5: DHCP Lease File Reader~~ — DROPPED
 
-- ISC dhcpd lease file parser (port concepts from unbound-dhcp project)
-- Kea DHCP lease file/API support
-- Configurable lease file paths
-- Periodic re-scan on timer
+> This phase was dropped during the Docker deployment architecture review. GateSentry
+> runs in a Docker container; the DHCP server runs on the router or a separate appliance.
+> Reading local lease files from inside a container is the wrong model. Phase 4 (RFC 2136
+> DDNS) provides the correct, network-based integration: the DHCP server sends UPDATE
+> messages to GateSentry over the wire, exactly as RFC 2136 intended.
+
+### Phase 5: Docker Deployment ✅
+
+- Runtime-only Dockerfile (Alpine + pre-built binary, ~30MB)
+- `build.sh` handles full pipeline: Svelte UI → embed into Go → static binary
+- `docker-compose.yml` with `network_mode: host`
+- `.dockerignore` for minimal build context
+- Deployment documentation (`DOCKER_DEPLOYMENT.md`)
+- Environment variable configuration (TZ, debug logging, scan limits)
 
 ### Phase 6: UI — Devices Page (Days 8-10)
 
@@ -390,6 +410,91 @@ DNS query arrives
 - Device detail panel (identity history, all IPs/MACs seen)
 - API endpoints: `GET /api/devices`, `POST /api/devices/:id/name`, etc.
 - Side navigation menu entry
+
+---
+
+## Docker Deployment Architecture
+
+### Why `--net=host`?
+
+GateSentry is a network infrastructure service — it needs to be a first-class citizen on
+the network, not hidden behind Docker's NAT. Like Pi-Hole, it uses host networking:
+
+| Requirement | Bridge Mode | Host Mode |
+|-------------|-------------|-----------|
+| Bind to port 53 (DNS) | ⚠️ Works but hides client IPs | ✅ Sees real source IPs |
+| mDNS multicast (224.0.0.251) | ❌ Multicast doesn't cross NAT | ✅ Full multicast visibility |
+| RFC 2136 DDNS from router | ⚠️ Router must target Docker host IP | ✅ Router targets GateSentry directly |
+| Passive discovery (client IP tracking) | ❌ All clients appear as 172.17.0.1 | ✅ Real client IPs visible |
+| Port conflicts | ✅ Isolated | ⚠️ Must not conflict with host services |
+
+**Host networking is not optional** for a DNS server that needs to know who is asking.
+Without it, passive discovery (Tier 3) sees only Docker's gateway IP, and per-device
+filtering policies become impossible.
+
+### Container architecture
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    Host Network Stack                    │
+│                                                         │
+│  :53 (DNS)  :80 (Web UI)  :10413 (proxy)                   │
+│      │          │           │               │           │
+│  ┌───┴──────────┴───────────┴───────────────┴────────┐  │
+│  │              GateSentry Container                  │  │
+│  │                                                    │  │
+│  │  /usr/local/gatesentry/gatesentry-bin  (binary)   │  │
+│  │  /usr/local/gatesentry/gatesentry/     (data vol) │  │
+│  │      ├── settings.db  (BuntDB)                    │  │
+│  │      ├── devices.db   (device inventory)          │  │
+│  │      ├── logs/                                    │  │
+│  │      └── certs/       (MITM CA if enabled)        │  │
+│  └────────────────────────────────────────────────────┘  │
+│                                                         │
+│  :5353 (mDNS multicast) ←── optional, auto-discovery   │
+└─────────────────────────────────────────────────────────┘
+                          │
+              ┌───────────┴───────────┐
+              │    Home Network       │
+              │                       │
+              │  Router/DHCP Server   │──── RFC 2136 DDNS UPDATEs ──→ :53
+              │  Phones, Laptops      │──── DNS queries ──→ :53
+              │  IoT, Printers        │──── mDNS announcements ──→ :5353
+              └───────────────────────┘
+```
+
+### Build pipeline
+
+The build happens entirely on the host — the Docker image is runtime-only:
+
+1. **`build.sh`** builds the Svelte UI (`cd ui && npm run build`)
+2. Copies `ui/dist/*` into `application/webserver/frontend/files/` (the `//go:embed` dir)
+3. Builds the Go binary — all frontend assets are embedded at compile time
+4. **Dockerfile** copies the single binary into Alpine (~30MB final image)
+
+No Node toolchain, no Go toolchain, no build dependencies in the container.
+The Go binary is fully self-contained — the Svelte UI, filter data, and block page
+assets are all embedded at compile time. The only external state is the mounted data
+volume for settings, device database, and logs.
+
+### Deployment
+
+```bash
+# Build and start
+docker compose up -d --build
+
+# View logs
+docker compose logs -f gatesentry
+
+# Rebuild after code changes
+docker compose up -d --build
+
+# Stop
+docker compose down
+```
+
+See `DOCKER_DEPLOYMENT.md` for complete deployment instructions including DHCP server
+configuration for DDNS integration.
 
 ---
 
@@ -561,10 +666,12 @@ entries are a subset of the larger system.
 ## Related Projects
 
 - **[unbound-dhcp](https://github.com/jbarwick/unbound-dhcp)** — Python module for Unbound
-  that reads DHCP lease files directly. Proves the lease-reading concept. DUID-to-MAC
-  correlation logic already implemented and tested.
+  that reads DHCP lease files directly. Proved the lease-reading concept, but the approach
+  doesn't apply to Docker-deployed GateSentry. The RFC 2136 DDNS approach (Phase 4) is the
+  correct network-based alternative.
 - **DDNS server prototype** (`/home/jbarwick/Development/DDNS`) — Python-based RFC 2136
-  DDNS server. Proves the protocol handling concept.
+  DDNS server. Proved the protocol handling concept. The Go implementation in Phase 4
+  supersedes this prototype.
 - **Gatesentry PR #135** — DNS server concurrency fixes (data races, TCP support, IPv6).
   This feature builds on top of those fixes.
 

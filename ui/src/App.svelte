@@ -14,7 +14,7 @@
   import Sidenavmenu from "./components/sidenavmenu.svelte";
   import Headerrightnav from "./components/headerrightnav.svelte";
   import { store } from "./store/apistore";
-  import { navigate } from "svelte-routing/src/history";
+  import { gsNavigate, getBasePath } from "./lib/navigate";
   import Filter from "./routes/filter/filter.svelte";
   import Notifications from "./components/notifications.svelte";
   import Settings from "./routes/settings/settings.svelte";
@@ -64,7 +64,7 @@
       }
 
       if (!loggedIn) {
-        navigate("/login");
+        gsNavigate("/login");
       }
     }
   }
@@ -83,7 +83,7 @@
   // }
 </script>
 
-<Router {url}>
+<Router {url} basepath={getBasePath()}>
   {#await setupResult}
     Loading...
   {:then}

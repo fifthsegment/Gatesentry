@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"bitbucket.org/abdullah_irfan/gatesentryf/dns/discovery"
-	gatesentryDnsHttpServer "bitbucket.org/abdullah_irfan/gatesentryf/dns/http"
 	gatesentryDnsScheduler "bitbucket.org/abdullah_irfan/gatesentryf/dns/scheduler"
 	gatesentryDnsUtils "bitbucket.org/abdullah_irfan/gatesentryf/dns/utils"
 	gatesentryLogger "bitbucket.org/abdullah_irfan/gatesentryf/logger"
@@ -160,7 +159,6 @@ func StartDNSServer(basePath string, ilogger *gatesentryLogger.Log, blockedLists
 	logger = ilogger
 	logsPath = basePath + logsPath
 	SetExternalResolver(settings.Get("dns_resolver"))
-	go gatesentryDnsHttpServer.StartHTTPServer()
 	// InitializeLogs()
 	// go gatesentryDnsFilter.InitializeBlockedDomains(&blockedDomains, &blockedLists)
 
@@ -297,8 +295,6 @@ func StopDNSServer() {
 		fmt.Println("DNS server is already stopped")
 		return
 	}
-
-	gatesentryDnsHttpServer.StopHTTPServer()
 
 	// Stop mDNS browser if running
 	if mdnsBrowser != nil {

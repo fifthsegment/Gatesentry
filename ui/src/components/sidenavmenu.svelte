@@ -8,7 +8,7 @@
   import { menuItems } from "../menu";
   import { store } from "../store/apistore";
   import { afterUpdate } from "svelte";
-  import { navigate } from "svelte-routing/src/history";
+  import { gsNavigate } from "../lib/navigate";
   $: loggedIn = $store.api.loggedIn;
 
   let menuItemsToRender = [...menuItems];
@@ -29,7 +29,7 @@
         text={item.text}
         isSelected={item.isSelected}
         on:click={() => {
-          navigate(item.href);
+          gsNavigate(item.href);
         }}
       />
     {:else if item.type === "menu"}
@@ -39,7 +39,7 @@
             icon={child.icon}
             text={child.text}
             on:click={() => {
-              navigate(child.href);
+              gsNavigate(child.href);
             }}
           />
         {/each}

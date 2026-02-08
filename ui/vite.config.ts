@@ -4,13 +4,17 @@ import { svelte } from "@sveltejs/vite-plugin-svelte";
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [svelte()],
+  base: "./", // Relative asset paths — Go injects <base href> for reverse proxy base path
   server: {
     cors: true,
     proxy: {
-      "/api": {
-        target: "http://localhost:10786",
+      "/gatesentry/api": {
+        target: "http://localhost:80",
         changeOrigin: true,
-        //rewrite: (path) => path.replace(/^\/api/, ''),
+      },
+      "/api": {
+        target: "http://localhost:80",
+        changeOrigin: true,
       },
     },
   },

@@ -36,12 +36,44 @@ const (
 )
 
 func TestMain(m *testing.M) {
+	// Use a non-privileged port for tests (port 80 requires root)
+	os.Setenv("GS_ADMIN_PORT", "10786")
+
 	// Start proxy server in background
 	go main()
 	
 	// Initialize test variables
 	proxyURL = "http://localhost:" + GSPROXYPORT
-	gatesentryWebserverBaseEndpoint = "http://localhost:" + GSWEBADMINPORT + "/api"
+	// GS_ADMIN_PORT override for tests
+	testPort := os.Getenv("GS_ADMIN_PORT")
+	if testPort == "" {
+		testPort = GSWEBADMINPORT
+	}
+	// Default GS_BASE_PATH is "/gatesentry", so the API lives under that prefix
+	basePath := os.Getenv("GS_BASE_PATH")
+	if basePath == "" {
+		basePath = "/gatesentry"
+	}
+	if basePath == "/" {
+		basePath = ""
+	}
+	gatesentryWebserverBaseEndpoint = "http://localhost:" + testPort + basePath + "/api"
+
+	// Wait for the webserver to be ready before running tests
+	fmt.Printf("Waiting for webserver at %s ...\n", gatesentryWebserverBaseEndpoint)
+	client := &http.Client{Timeout: 2 * time.Second}
+	for i := 0; i < 30; i++ {
+		resp, err := client.Get(gatesentryWebserverBaseEndpoint + "/about")
+		if err == nil {
+			resp.Body.Close()
+			fmt.Println("Webserver is ready!")
+			break
+		}
+		if i == 29 {
+			fmt.Println("WARNING: webserver not ready after 60s, running tests anyway")
+		}
+		time.Sleep(2 * time.Second)
+	}
 
 	// Run tests
 	code := m.Run()
@@ -76,7 +108,7 @@ func waitForProxyReady(tb testing.TB, proxyURLStr string, maxAttempts int) error
 	if err != nil {
 		return fmt.Errorf("failed to parse proxy URL: %w", err)
 	}
-	
+
 	client := &http.Client{
 		Transport: &http.Transport{
 			Proxy:           http.ProxyURL(parsedURL),
@@ -475,7 +507,7 @@ func TestProxyServer(t *testing.T) {
 
 	t.Run("Integration test: MITM proxy filtering with actual website access", func(t *testing.T) {
 		redirectLogs(t)
-		
+
 		// Enable HTTPS filtering (MITM)
 		R.GSSettings.Update("enable_https_filtering", "true")
 		t.Log("Enabled HTTPS filtering for MITM test")
@@ -524,7 +556,7 @@ func TestProxyServer(t *testing.T) {
 		}
 
 		if !isMITM {
-			t.Fatalf("MITM is not working. Certificate issuer: %s (expected: %s)", 
+			t.Fatalf("MITM is not working. Certificate issuer: %s (expected: %s)",
 				certIssuer, gatesentryCertificateCommonName)
 		}
 		t.Log("✓ MITM certificate interception verified")
@@ -549,7 +581,7 @@ func TestProxyServer(t *testing.T) {
 
 		// Test 3: Test content filtering with keyword blocking
 		t.Log("Test 3: Testing content filtering through MITM...")
-		
+
 		// Add a keyword filter that should block content containing "google"
 		username := gatesentryAdminUsername
 		password := gatesentryAdminPassword
@@ -561,7 +593,7 @@ func TestProxyServer(t *testing.T) {
 		}
 
 		// Get auth token
-		tokenResp, err := http.Post(gatesentryWebserverBaseEndpoint+"/auth/token", 
+		tokenResp, err := http.Post(gatesentryWebserverBaseEndpoint+"/auth/token",
 			"application/json", bytes.NewBuffer(jsonData))
 		if err != nil {
 			t.Fatal("Failed to get auth token:", err)
@@ -580,8 +612,8 @@ func TestProxyServer(t *testing.T) {
 
 		// Add keyword filter for "google"
 		filterData := `[{"Content":"example","Score":10000}]`
-		req, err := http.NewRequest("POST", 
-			gatesentryWebserverBaseEndpoint+"/filters/bVxTPTOXiqGRbhF", 
+		req, err := http.NewRequest("POST",
+			gatesentryWebserverBaseEndpoint+"/filters/bVxTPTOXiqGRbhF",
 			bytes.NewBuffer([]byte(filterData)))
 		if err != nil {
 			t.Fatal("Failed to create filter request:", err)
@@ -615,7 +647,7 @@ func TestProxyServer(t *testing.T) {
 		}
 
 		filteredBodyStr := string(filteredBody)
-		
+
 		// Should be blocked and show the Gatesentry block page
 		if strings.Contains(filteredBodyStr, "<title>Blocked</title>") {
 			t.Log("✓ Content filtering through MITM verified - keyword blocked successfully")
@@ -626,11 +658,11 @@ func TestProxyServer(t *testing.T) {
 
 		// Test 5: Verify non-filtered HTTPS traffic still works
 		t.Log("Test 5: Verifying non-filtered HTTPS traffic...")
-		
+
 		// Clear the keyword filter
 		clearFilter := `[]`
-		req2, err := http.NewRequest("POST", 
-			gatesentryWebserverBaseEndpoint+"/filters/bVxTPTOXiqGRbhF", 
+		req2, err := http.NewRequest("POST",
+			gatesentryWebserverBaseEndpoint+"/filters/bVxTPTOXiqGRbhF",
 			bytes.NewBuffer([]byte(clearFilter)))
 		if err != nil {
 			t.Fatal("Failed to create clear filter request:", err)
@@ -661,10 +693,10 @@ func TestProxyServer(t *testing.T) {
 		}
 
 		unfilteredBodyStr := string(unfilteredBody)
-		
+
 		// Should NOT be blocked now
-		if !strings.Contains(unfilteredBodyStr, "<title>Blocked</title>") && 
-		   strings.Contains(unfilteredBodyStr, "Example Domain") {
+		if !strings.Contains(unfilteredBodyStr, "<title>Blocked</title>") &&
+			strings.Contains(unfilteredBodyStr, "Example Domain") {
 			t.Log("✓ Non-filtered HTTPS traffic works correctly")
 		}
 
@@ -676,7 +708,7 @@ func TestProxyServer(t *testing.T) {
 			t.Logf("  Certificate Issuer: %s", cert.Issuer.CommonName)
 			t.Logf("  Valid From: %s", cert.NotBefore)
 			t.Logf("  Valid Until: %s", cert.NotAfter)
-			
+
 			// Verify it's a Gatesentry certificate
 			if cert.Issuer.CommonName != gatesentryCertificateCommonName {
 				t.Errorf("Expected Gatesentry certificate, got: %s", cert.Issuer.CommonName)
@@ -954,4 +986,3 @@ func TestProxyServer(t *testing.T) {
 	})
 
 }
-
