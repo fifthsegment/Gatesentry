@@ -5,7 +5,7 @@ import (
 	"sync"
 )
 
-func InitializeExceptionDomains(exceptionDomains *map[string]bool, mutex *sync.Mutex) {
+func InitializeExceptionDomains(exceptionDomains *map[string]bool, mutex *sync.RWMutex) {
 	mutex.Lock()
 	defer mutex.Unlock()
 	fmt.Println("Initializing exception domains...")
