@@ -386,6 +386,22 @@ func RegisterEndpointsStartServer(
 	})
 	log.Println("All rule endpoints registered successfully")
 
+	// Device inventory endpoints
+	log.Println("Registering device API endpoints...")
+	internalServer.Get("/api/devices", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiDevicesGetAll(w, r)
+	})
+	internalServer.Get("/api/devices/{id}", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiDeviceGet(w, r)
+	})
+	internalServer.Post("/api/devices/{id}/name", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiDeviceSetName(w, r)
+	})
+	internalServer.Delete("/api/devices/{id}", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiDeviceDelete(w, r)
+	})
+	log.Println("Device API endpoints registered")
+
 	// Serve static assets from the embedded files/fs/ directory.
 	// GetFSHandler() returns fs.Sub(build, "files"), so files live at fs/bundle.js etc.
 	// We only strip the basePath prefix (not /fs), so the remaining path /fs/bundle.js
@@ -414,6 +430,7 @@ func RegisterEndpointsStartServer(
 	internalServer.Get("/blockedurls", baseIndexHandler)
 	internalServer.Get("/excludehosts", baseIndexHandler)
 	internalServer.Get("/services", baseIndexHandler)
+	internalServer.Get("/devices", baseIndexHandler)
 	internalServer.Get("/ai", baseIndexHandler)
 
 	internalServer.ListenAndServe(":" + port)

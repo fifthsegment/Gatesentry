@@ -317,8 +317,8 @@ seen, all hostnames seen, and the option to name/rename/categorize.
 | RFC 2136 UPDATE handler | `dns/server/ddns.go` | Phase 4 ✅ |
 | TSIG authentication | `dns/server/ddns.go` | Phase 4 ✅ |
 | Docker deployment | `Dockerfile`, `docker-compose.yml` | Phase 5 ✅ |
-| UI Devices page | `ui/src/routes/devices/` | Phase 6 |
-| API endpoints | `webserver/endpoints/handler_devices.go` | Phase 6 |
+| UI Devices page | `ui/src/routes/devices/` | Phase 6 ✅ |
+| API endpoints | `webserver/endpoints/handler_devices.go` | Phase 6 ✅ |
 
 ---
 
@@ -401,15 +401,17 @@ DNS query arrives
 - Deployment documentation (`DOCKER_DEPLOYMENT.md`)
 - Environment variable configuration (TZ, debug logging, scan limits)
 
-### Phase 6: UI — Devices Page (Days 8-10)
+### Phase 6: UI — Devices Page ✅
 
 - New Svelte route `/devices`
 - DataTable with device inventory (Carbon Design System components)
 - Online/offline status indicators
 - Click-to-name for unknown devices
 - Device detail panel (identity history, all IPs/MACs seen)
-- API endpoints: `GET /api/devices`, `POST /api/devices/:id/name`, etc.
+- API endpoints: `GET /api/devices`, `GET /api/devices/{id}`, `POST /api/devices/{id}/name`, `DELETE /api/devices/{id}`
 - Side navigation menu entry
+- Go handler: `webserver/endpoints/handler_devices.go`
+- Svelte components: `devices.svelte`, `devicelist.svelte`, `devicedetail.svelte`
 
 ---
 

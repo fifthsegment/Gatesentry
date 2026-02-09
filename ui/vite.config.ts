@@ -6,15 +6,11 @@ export default defineConfig({
   plugins: [svelte()],
   base: "./", // Relative asset paths — Go injects <base href> for reverse proxy base path
   server: {
-    cors: true,
     proxy: {
-      "/gatesentry/api": {
-        target: "http://localhost:80",
-        changeOrigin: true,
-      },
       "/api": {
-        target: "http://localhost:80",
+        target: "http://localhost:8080",
         changeOrigin: true,
+        rewrite: (path) => `/gatesentry${path}`,
       },
     },
   },

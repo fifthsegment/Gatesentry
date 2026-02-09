@@ -28,6 +28,7 @@
   import Users from "./routes/users/users.svelte";
   import Globalheader from "./components/globalheader.svelte";
   import Rules from "./routes/rules/rules.svelte";
+  import Devices from "./routes/devices/devices.svelte";
   export let url = "";
 
   let loaded = false;
@@ -121,6 +122,9 @@
         </Route>
         <Route path="/rules">
           <Rules />
+        </Route>
+        <Route path="/devices">
+          <Devices />
         </Route>
         <Route path="/stats">
           <Stats />
