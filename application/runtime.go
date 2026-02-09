@@ -48,6 +48,7 @@ const NONCONSUMPTIONUPDATESBEFOREKILL = 24
 var INSTALLATIONID = "a"
 var GSAPIBASEPOINT = "a"
 var GSBASEDIR = "./"
+var GSBASEPATH = "/"
 
 // const INSTALLATIONID = "3";
 var GSVerString = ""
@@ -91,6 +92,29 @@ func SetBaseDir(a string) {
 
 func GetBaseDir() string {
 	return GSBASEDIR
+}
+
+// SetBasePath sets the URL base path for reverse proxy deployments.
+// Normalizes to ensure leading slash, strips trailing slash (unless root "/").
+// e.g., "gatesentry" → "/gatesentry", "/gatesentry/" → "/gatesentry", "" → "/"
+func SetBasePath(p string) {
+	if p == "" || p == "/" {
+		GSBASEPATH = "/"
+		return
+	}
+	// Ensure leading slash
+	if p[0] != '/' {
+		p = "/" + p
+	}
+	// Strip trailing slash
+	if len(p) > 1 && p[len(p)-1] == '/' {
+		p = p[:len(p)-1]
+	}
+	GSBASEPATH = p
+}
+
+func GetBasePath() string {
+	return GSBASEPATH
 }
 
 func (R *GSRuntime) GSWasUpdated() {

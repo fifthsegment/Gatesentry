@@ -1,13 +1,41 @@
-version: '3.8'
 services:
   gatesentry:
-    restart: always
-    image: abdullahi1/gatesentry:latest
-    ports:
-      - "80:80"
-      - "53:53"
-      - "53:53/udp"
-      - "10413:10413"
-      - "10786:10786"
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: gatesentry
+    restart: unless-stopped
+
+    # Host networking — required for:
+    #   - Binding to port 53 as the network's DNS server
+    #   - Receiving mDNS multicast traffic (224.0.0.251:5353)
+    #   - Accepting RFC 2136 DDNS updates from the DHCP server
+    #   - Seeing real client source IPs (no Docker NAT)
+    network_mode: host
+
     volumes:
-      - ./docker_root:/usr/local/gatesentry/gatesentry # this is where the config file will be stored
+      # Persistent data: settings, BuntDB database, certificates, logs
+      - ./docker_root:/usr/local/gatesentry/gatesentry
+
+    environment:
+      # Timezone for time-based access rules
+      - TZ=Asia/Singapore
+      # Set to "true" to enable verbose proxy debug logging
+      # - GS_DEBUG_LOGGING=false
+      # Max content scan size in MB (default: 10)
+      # - GS_MAX_SCAN_SIZE_MB=10
+      # Set to "false" to disable the transparent proxy listener
+      # - GS_TRANSPARENT_PROXY=true
+      # Custom transparent proxy port (default: auto)
+      # - GS_TRANSPARENT_PROXY_PORT=10414
+      # Override the admin UI port (default: 80)
+      # - GS_ADMIN_PORT=8080
+      # URL base path prefix (default: /gatesentry)
+      # Set to / for root-level access (e.g., http://gatesentry.local/)
+      # - GS_BASE_PATH=/gatesentry
+
+    # Note: "ports" is not used with network_mode: host.
+    # The container binds directly to the host's network interfaces:
+    #   53/udp+tcp  - DNS server
+    #   80          - Web admin UI (http://gatesentry.local)
+    #   10413       - HTTP(S) filtering proxy
