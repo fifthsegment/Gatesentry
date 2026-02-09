@@ -10,13 +10,13 @@ import (
 	gatesentryTypes "bitbucket.org/abdullah_irfan/gatesentryf/types"
 )
 
-type InitializerType func(*map[string]bool, *[]string, *sync.Mutex)
+type InitializerType func(*map[string]bool, *[]string, *sync.RWMutex)
 
 func RunScheduler(blockedDomains *map[string]bool,
 	blockedLists *[]string,
 	internalRecords *map[string]string,
 	exceptionDomains *map[string]bool,
-	mutex *sync.Mutex,
+	mutex *sync.RWMutex,
 	settings *gatesentry2storage.MapStore, dnsinfo *gatesentryTypes.DnsServerInfo,
 	updateIntervalHourly int,
 	restartChan chan bool,
@@ -43,7 +43,7 @@ func doInitialize(blockedDomains *map[string]bool,
 	blockedLists *[]string,
 	internalRecords *map[string]string,
 	exceptionDomains *map[string]bool,
-	mutex *sync.Mutex,
+	mutex *sync.RWMutex,
 	settings *gatesentry2storage.MapStore, dnsinfo *gatesentryTypes.DnsServerInfo,
 	updateIntervalHourly int,
 	restartChan chan bool) {

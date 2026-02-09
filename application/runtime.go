@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"os/exec"
 	"strings"
 	"time"
@@ -47,6 +48,7 @@ const NONCONSUMPTIONUPDATESBEFOREKILL = 24
 var INSTALLATIONID = "a"
 var GSAPIBASEPOINT = "a"
 var GSBASEDIR = "./"
+var GSBASEPATH = "/"
 
 // const INSTALLATIONID = "3";
 var GSVerString = ""
@@ -90,6 +92,29 @@ func SetBaseDir(a string) {
 
 func GetBaseDir() string {
 	return GSBASEDIR
+}
+
+// SetBasePath sets the URL base path for reverse proxy deployments.
+// Normalizes to ensure leading slash, strips trailing slash (unless root "/").
+// e.g., "gatesentry" → "/gatesentry", "/gatesentry/" → "/gatesentry", "" → "/"
+func SetBasePath(p string) {
+	if p == "" || p == "/" {
+		GSBASEPATH = "/"
+		return
+	}
+	// Ensure leading slash
+	if p[0] != '/' {
+		p = "/" + p
+	}
+	// Strip trailing slash
+	if len(p) > 1 && p[len(p)-1] == '/' {
+		p = p[:len(p)-1]
+	}
+	GSBASEPATH = p
+}
+
+func GetBasePath() string {
+	return GSBASEPATH
 }
 
 func (R *GSRuntime) GSWasUpdated() {
@@ -176,7 +201,24 @@ func (R *GSRuntime) Init() {
 	R.GSSettings.SetDefault("timezone", "Europe/Oslo")
 	R.GSSettings.SetDefault("enable_https_filtering", "false")
 	R.GSSettings.SetDefault("enable_dns_server", "true")
-	R.GSSettings.SetDefault("dns_resolver", "8.8.8.8:53")
+	// Use environment variable for DNS resolver if set, otherwise use default
+	// Environment variable takes precedence over stored settings to allow
+	// containerized/deployment-time configuration
+	if envResolver := os.Getenv("GATESENTRY_DNS_RESOLVER"); envResolver != "" {
+		// Normalize resolver address - ensure port is included
+		// Use net.SplitHostPort to properly handle IPv6 addresses
+		dnsResolverValue := envResolver
+		_, _, err := net.SplitHostPort(envResolver)
+		if err != nil {
+			// No port specified, add default :53
+			// net.JoinHostPort handles IPv6 bracketing automatically
+			dnsResolverValue = net.JoinHostPort(envResolver, "53")
+		}
+		log.Printf("[DNS] Using resolver from environment (overrides settings): %s", dnsResolverValue)
+		R.GSSettings.Update("dns_resolver", dnsResolverValue)
+	} else {
+		R.GSSettings.SetDefault("dns_resolver", "8.8.8.8:53")
+	}
 	R.GSSettings.SetDefault("idemail", "")
 	R.GSSettings.SetDefault("enable_ai_image_filtering", "false")
 	R.GSSettings.SetDefault("ai_scanner_url", "")
