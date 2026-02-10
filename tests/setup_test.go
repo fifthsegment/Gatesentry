@@ -30,10 +30,16 @@ const (
 	defaultTimeout                  = 30 * time.Second
 	proxyReadyWaitTime              = 2 * time.Second
 	GSPROXYPORT                     = "10413"
-	GSWEBADMINPORT                  = "80"
+	GSWEBADMINPORT_DEFAULT          = "8080"
 )
 
 func TestMain(m *testing.M) {
+	// Derive admin port from environment (non-privileged default for dev/CI)
+	adminPort := os.Getenv("GS_ADMIN_PORT")
+	if adminPort == "" {
+		adminPort = GSWEBADMINPORT_DEFAULT
+	}
+
 	// Initialize test variables
 	proxyURL = "http://localhost:" + GSPROXYPORT
 	// Default GS_BASE_PATH is "/gatesentry", so the API lives under that prefix
@@ -44,7 +50,7 @@ func TestMain(m *testing.M) {
 	if basePath == "/" {
 		basePath = ""
 	}
-	gatesentryWebserverBaseEndpoint = "http://localhost:" + GSWEBADMINPORT + basePath + "/api"
+	gatesentryWebserverBaseEndpoint = "http://localhost:" + adminPort + basePath + "/api"
 
 	// Wait for server to be ready (assumes it's already running via `make test`)
 	fmt.Println("Waiting for Gatesentry server to be ready...")

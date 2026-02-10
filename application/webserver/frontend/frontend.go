@@ -2,6 +2,8 @@ package gatesentryWebserverFrontend
 
 import (
 	"embed"
+	"encoding/json"
+	"html"
 	"io/fs"
 	"log"
 	"net/http"
@@ -43,17 +45,18 @@ func GetIndexHtmlWithBasePath(basePath string) []byte {
 		return raw
 	}
 
-	html := string(raw)
+	htmlStr := string(raw)
 
-	// Build injection tags
-	baseHref := basePath + "/"
+	// Build injection tags — escape basePath for safe HTML/JS injection
+	baseHref := html.EscapeString(basePath + "/")
+	jsPath, _ := json.Marshal(basePath) // produces a safely-quoted JSON string
 	injection := `<base href="` + baseHref + `">` + "\n" +
-		`    <script>window.__GS_BASE_PATH__ = "` + basePath + `";</script>`
+		`    <script>window.__GS_BASE_PATH__ = ` + string(jsPath) + `;</script>`
 
 	// Inject after <head> or after first <meta> tag
-	html = strings.Replace(html, "<head>", "<head>\n    "+injection, 1)
+	htmlStr = strings.Replace(htmlStr, "<head>", "<head>\n    "+injection, 1)
 
-	return []byte(html)
+	return []byte(htmlStr)
 }
 
 func GetFileSystem(dir string, fsys fs.FS) http.FileSystem {

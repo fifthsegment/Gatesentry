@@ -2,9 +2,8 @@ package gatesentryf
 
 import (
 	"log"
-	// "os"
-	// "os/signal"
-	// "time"
+	"os"
+	"strconv"
 
 	"github.com/oleksandr/bonjour"
 )
@@ -12,9 +11,23 @@ import (
 func StartBonjour() {
 	log.Println("Starting Bonjour service")
 
+	// Derive admin port from environment (same source of truth as main.go)
+	adminPort := 80
+	if envPort := os.Getenv("GS_ADMIN_PORT"); envPort != "" {
+		if p, err := strconv.Atoi(envPort); err == nil && p > 0 {
+			adminPort = p
+		}
+	}
+
+	// Derive base path for TXT record
+	basePath := os.Getenv("GS_BASE_PATH")
+	if basePath == "" {
+		basePath = "/"
+	}
+
 	// Advertise the web admin UI so browsers resolve http://gatesentry.local
 	go func() {
-		_, err := bonjour.Register("GateSentry", "_http._tcp", "", 80, []string{"txtv=1", "app=gatesentry", "path=/"}, nil)
+		_, err := bonjour.Register("GateSentry", "_http._tcp", "", adminPort, []string{"txtv=1", "app=gatesentry", "path=" + basePath}, nil)
 		if err != nil {
 			log.Println("[Bonjour] HTTP registration error:", err.Error())
 		}

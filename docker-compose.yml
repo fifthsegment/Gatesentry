@@ -31,7 +31,7 @@ services:
       # Set to "true" to enable verbose proxy debug logging
       # - GS_DEBUG_LOGGING=false
       # Max content scan size in MB (default: 10)
-      # - GS_MAX_SCAN_SIZE_MB=10
+      - GS_MAX_SCAN_SIZE_MB=2
       # Set to "false" to disable the transparent proxy listener
       # - GS_TRANSPARENT_PROXY=true
       # Custom transparent proxy port (default: auto)

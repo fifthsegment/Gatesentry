@@ -7,6 +7,9 @@ import (
 )
 
 func isLanAddress(addr string) bool {
+	if addr == "" {
+		return false
+	}
 	ip := net.ParseIP(addr)
 	if ip == nil {
 		return false
@@ -34,6 +37,17 @@ func isLanAddress(addr string) bool {
 	}
 
 	return false
+}
+
+// extractPort returns the port portion of a host:port string.
+// If no port is present, returns empty string.
+func extractPort(hostport string) string {
+	_, port, err := net.SplitHostPort(hostport)
+	if err != nil {
+		// No port in the string — could be bare hostname
+		return ""
+	}
+	return port
 }
 
 func isAVIF(data []byte) bool {

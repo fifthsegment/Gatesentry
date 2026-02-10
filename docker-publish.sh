@@ -149,7 +149,11 @@ if [[ "$TARGET" == "nexus" ]]; then
     fi
 
     echo "── Logging in to Nexus: ${REGISTRY} ─────────────────────────"
-    run docker login "${REGISTRY}" -u "${NEXUS_USERNAME}" -p "${NEXUS_PASSWORD}"
+    if [[ "$DRY_RUN" == true ]]; then
+        echo "[DRY RUN] echo <password> | docker login \"${REGISTRY}\" -u ${NEXUS_USERNAME} --password-stdin"
+    else
+        echo "${NEXUS_PASSWORD}" | docker login "${REGISTRY}" -u "${NEXUS_USERNAME}" --password-stdin
+    fi
 
 else
     # ── Docker Hub ──

@@ -16,7 +16,6 @@ require (
 require (
 	github.com/CloudyKit/jet/v6 v6.1.0 // indirect
 	github.com/StackExchange/wmi v0.0.0-20190523213315-cbe66965904d // indirect
-	github.com/elazarl/goproxy/ext v0.0.0-20190711103511-473e67f1d7d2 // indirect
 	github.com/go-ole/go-ole v1.2.6 // indirect
 	github.com/goccy/go-json v0.9.4 // indirect
 	github.com/golang-jwt/jwt/v5 v5.3.0 // indirect
@@ -27,7 +26,6 @@ require (
 	github.com/josharian/intern v1.0.0 // indirect
 	github.com/jpillora/s3 v1.1.4 // indirect
 	golang.org/x/image v0.33.0 // indirect
-	gopkg.in/elazarl/goproxy.v1 v1.0.0-20180725130230-947c36da3153 // indirect
 	gopkg.in/yaml.v2 v2.3.0 // indirect
 )
 
