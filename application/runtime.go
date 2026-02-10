@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"bitbucket.org/abdullah_irfan/gatesentryf/internalfiles"
-	gatesentry2proxy "bitbucket.org/abdullah_irfan/gatesentryf/proxy"
 	GatesentryTypes "bitbucket.org/abdullah_irfan/gatesentryf/types"
 	gatesentryWebserverTypes "bitbucket.org/abdullah_irfan/gatesentryf/webserver/types"
 	"bitbucket.org/abdullah_irfan/gatesentryproxy"
@@ -75,7 +74,6 @@ type GSRuntime struct {
 	GSSettings                  *gatesentry2storage.MapStore
 	GSUpdateLog                 *gatesentry2storage.MapStore
 	Logger                      *gatesentry2logger.Log
-	Proxy                       *gatesentry2proxy.GSProxy
 	AuthUsers                   []GatesentryTypes.GSUser
 	FailedConsumptionUpdates    int
 	GSUserDataSaverRunning      bool

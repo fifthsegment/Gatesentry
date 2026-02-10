@@ -951,14 +951,15 @@ ngp := gatesentryproxy.NewGSProxy()
 
 ### Cleanup Plan
 
-- [ ] Remove `application/proxy/` directory (4 files: `certs.go`, `session.go`,
+- [x] Remove `application/proxy/` directory (4 files: `certs.go`, `session.go`,
       `structures.go`, `ext/html.go`)
-- [ ] Remove `gatesentry2proxy` import from `application/runtime.go`
-- [ ] Remove `Proxy *gatesentry2proxy.GSProxy` field from `GSRuntime` struct
-- [ ] Remove goproxy import from `application/filters.go` if unused
-- [ ] Remove `gopkg.in/elazarl/goproxy.v1` and `github.com/abourget/goproxy`
-      from `go.mod` / `go.sum`
-- [ ] Verify `go build` succeeds after cleanup
+- [x] Remove `gatesentry2proxy` import from `application/runtime.go`
+- [x] Remove `Proxy *gatesentry2proxy.GSProxy` field from `GSRuntime` struct
+- [x] Remove goproxy import and dead `ConditionalMitm` var from `application/filters.go`
+- [x] Remove `gopkg.in/elazarl/goproxy.v1` and `github.com/abourget/goproxy`
+      from `go.mod` / `go.sum` (root and application)
+- [x] Clean commented-out proxy references from `application/start.go`
+- [x] Verify `go build` succeeds after cleanup
 - [ ] Run full test suite to confirm no regressions
 
 **Risk: Very Low** — this is dead code removal. The old proxy is never
