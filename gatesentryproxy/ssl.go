@@ -46,6 +46,7 @@ var insecureHTTPTransport = &http.Transport{
 	DialContext:           safeDialContext,
 	TLSHandshakeTimeout:   10 * time.Second,
 	ExpectContinueTimeout: 1 * time.Second,
+	DisableCompression:    true, // Phase 3: don't auto-decompress; proxy handles it per-path
 }
 
 var http2Transport = &http2.Transport{

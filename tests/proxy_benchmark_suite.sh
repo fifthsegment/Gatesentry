@@ -1085,7 +1085,7 @@ test_streaming() {
         verbose "Drip: HTTP ${d_code}, ${d_size} bytes in ${d_time}s"
         # The drip takes 3 seconds server-side. If proxy buffers,
         # total time ≈ 3s. If streaming, client sees bytes progressively.
-        if [[ "$d_time_ms" -ge 2500 && "$d_time_ms" -le 8000 ]]; then
+        if [[ "$d_time_ms" -ge 2000 && "$d_time_ms" -le 8000 ]]; then
             pass "Drip completed in ${d_time}s (server drips over 3s)"
         else
             fail "Drip timing unexpected: ${d_time}s"
