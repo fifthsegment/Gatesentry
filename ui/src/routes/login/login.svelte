@@ -12,7 +12,7 @@
   } from "carbon-components-svelte";
   import { ChevronRight, Close } from "carbon-icons-svelte";
   import { store } from "../../store/apistore";
-  import { navigate } from "svelte-routing/src/history";
+  import { gsNavigate } from "../../lib/navigate";
   import { afterUpdate } from "svelte";
   import { notificationstore } from "../../store/notifications";
   import { createNotificationError } from "../../lib/utils";
@@ -74,7 +74,7 @@
 
   afterUpdate(() => {
     if (loggedIn) {
-      navigate("/");
+      gsNavigate("/");
     }
   });
 </script>
