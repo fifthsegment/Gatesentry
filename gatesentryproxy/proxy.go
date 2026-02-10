@@ -391,6 +391,17 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Via-based loop detection (RFC 7230 §5.7.1)
+	// If the incoming Via header already contains our identifier, this request
+	// has already passed through us — it's a loop.
+	if viaHeader := r.Header.Get("Via"); viaHeader != "" {
+		if strings.Contains(strings.ToLower(viaHeader), strings.ToLower(ViaIdentifier)) {
+			log.Printf("[SECURITY] Proxy loop detected via Via header from %s to %v", client, r.URL)
+			http.Error(w, "Proxy loop detected", http.StatusLoopDetected)
+			return
+		}
+	}
+
 	gzipOK := strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") && !isLanAddress(client)
 	r.Header.Del("Accept-Encoding")
 
@@ -408,17 +419,40 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	removeHopByHopHeaders(r.Header)
 
+	// Add our Via identifier to the outgoing request (RFC 7230 §5.7.1).
+	// This enables loop detection: if the request comes back to us, the
+	// incoming Via header check at the top of ServeHTTP will catch it.
+	reqVia := r.Header.Get("Via")
+	if reqVia != "" {
+		r.Header.Set("Via", reqVia+", "+fmt.Sprintf("%d.%d %s", r.ProtoMajor, r.ProtoMinor, ViaIdentifier))
+	} else {
+		r.Header.Set("Via", fmt.Sprintf("%d.%d %s", r.ProtoMajor, r.ProtoMinor, ViaIdentifier))
+	}
+
 	resp, err := rt.RoundTrip(r)
 	if err != nil {
 		log.Printf("error fetching %s: %s", r.URL, err)
-		// errorBytes := []byte(err.Error())
-		// IProxy.RunHandler("proxyerror", "", &errorBytes, passthru)
 		errorData := &GSProxyErrorData{Error: err.Error()}
 		IProxy.ProxyErrorHandler(errorData)
-		sendBlockMessageBytes(w, r, nil, errorData.FilterResponse, nil)
+		// Transport errors (upstream unreachable, malformed response, TLS failure)
+		// must always return 502 Bad Gateway per HTTP semantics.
+		// The ProxyErrorHandler is notified for logging/metrics but does not
+		// control the HTTP status code for transport-level failures.
+		http.Error(w, "Bad Gateway", http.StatusBadGateway)
 		return
 	}
 	defer resp.Body.Close()
+
+	// Phase 1: Sanitize response headers before any processing.
+	// Rejects responses with conflicting Content-Length, negative Content-Length,
+	// response splitting (\r\n in header values), and strips null bytes.
+	if reason := sanitizeResponseHeaders(resp); reason != "" {
+		log.Printf("[SECURITY] Rejecting response from %s: %s", r.URL, reason)
+		errorData := &GSProxyErrorData{Error: "Upstream response rejected: " + reason}
+		IProxy.ProxyErrorHandler(errorData)
+		http.Error(w, "Bad Gateway", http.StatusBadGateway)
+		return
+	}
 
 	if passthru.UserData != nil {
 		matchVal := reflect.ValueOf(passthru.UserData)
@@ -491,32 +525,40 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if limitedReader.N == 0 {
 		log.Println("response body too long to filter:", r.URL)
+
 		if gzipOK {
 			resp.Header.Set("Content-Encoding", "gzip")
-			gzw := gzip.NewWriter(w)
-			defer gzw.Close()
-		} else if resp.ContentLength > 0 {
-			w.Header().Set("Content-Length", strconv.FormatInt(resp.ContentLength, 10))
-		}
-
-		destwithcounter := &DataPassThru{
-			Writer:      w,
-			Contenttype: contentType,
-			Passthru:    passthru,
 		}
 
 		copyResponseHeader(w, resp)
 
-		_, err := io.Copy(destwithcounter, resp.Body)
-		resp.Header.Set("Content-Encoding", "gzip")
+		// For gzip path, Content-Length cannot be known ahead of time
+		// For non-gzip, set Content-Length from upstream if available
+		if !gzipOK && resp.ContentLength > 0 {
+			w.Header().Set("Content-Length", strconv.FormatInt(resp.ContentLength, 10))
+		}
 
+		var dest io.Writer = w
+		var gzw *gzip.Writer
+		if gzipOK {
+			gzw = gzip.NewWriter(w)
+			defer gzw.Close()
+			dest = gzw
+		}
+
+		destwithcounter := &DataPassThru{
+			Writer:      dest,
+			Contenttype: contentType,
+			Passthru:    passthru,
+		}
+
+		_, err := io.Copy(destwithcounter, resp.Body)
 		if err != nil {
 			log.Printf("error while copying response (URL: %s): %s", r.URL, err)
-			errorData := &GSProxyErrorData{Error: err.Error()}
-			IProxy.ProxyErrorHandler(errorData)
-			sendBlockMessageBytes(w, r, nil, errorData.FilterResponse, nil)
+			// Note: headers already sent, can't send error page
 			return
 		}
+		return
 	}
 
 	kind, _ := filetype.Match(localCopyData)
@@ -552,7 +594,13 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		destwithcounter.Write(localCopyData)
 		gzw.Close()
 	} else {
-		w.Header().Set("Content-Length", strconv.Itoa(len(localCopyData)))
+		// For HEAD responses, preserve upstream's Content-Length since there's no body to measure.
+		// For GET responses, use the actual body length we read.
+		if r.Method == "HEAD" && resp.ContentLength >= 0 {
+			w.Header().Set("Content-Length", strconv.FormatInt(resp.ContentLength, 10))
+		} else {
+			w.Header().Set("Content-Length", strconv.Itoa(len(localCopyData)))
+		}
 		copyResponseHeader(w, resp)
 		destwithcounter := &DataPassThru{Writer: w, Contenttype: contentType, Passthru: passthru}
 		destwithcounter.Write(localCopyData)
@@ -678,16 +726,98 @@ func LogProxyAction(url string, user string, action ProxyAction) {
 	}
 }
 
+// ViaIdentifier is the token used in Via headers for loop detection.
+const ViaIdentifier = "gatesentry"
+
+// sanitizeResponseHeaders validates upstream response headers and returns an
+// error description if the response should be rejected. It also sanitises
+// individual header values in-place (strips null bytes, detects response
+// splitting characters). Called before copyResponseHeader.
+func sanitizeResponseHeaders(resp *http.Response) string {
+	// 1. Reject conflicting / invalid Content-Length
+	clValues := resp.Header.Values("Content-Length")
+	if len(clValues) > 1 {
+		// RFC 9110 §8.6: multiple differing Content-Length values MUST be rejected
+		first := clValues[0]
+		for _, v := range clValues[1:] {
+			if v != first {
+				return "conflicting Content-Length values"
+			}
+		}
+		// All identical — deduplicate to a single value
+		resp.Header.Set("Content-Length", first)
+	}
+	if len(clValues) >= 1 {
+		cl, err := strconv.ParseInt(strings.TrimSpace(clValues[0]), 10, 64)
+		if err != nil || cl < 0 {
+			return "invalid Content-Length value"
+		}
+	}
+
+	// 2. Scan all header values for response splitting / null byte injection
+	for key, values := range resp.Header {
+		for i, v := range values {
+			if strings.ContainsAny(v, "\r\n") {
+				log.Printf("[SECURITY] Response splitting detected in header %q from upstream", key)
+				return "response splitting in header: " + key
+			}
+			// Strip null bytes in-place (prevents C-parser header injection)
+			if strings.Contains(v, "\x00") {
+				log.Printf("[SECURITY] Null bytes stripped from header %q", key)
+				resp.Header[key][i] = strings.ReplaceAll(v, "\x00", "")
+			}
+		}
+	}
+
+	return "" // headers OK
+}
+
 // copyResponseHeader writes resp's header and status code to w.
+// It sanitises headers via sanitizeResponseHeaders, skips hop-by-hop headers
+// in the response direction, adds a Via header, and sets X-Content-Type-Options.
 func copyResponseHeader(w http.ResponseWriter, resp *http.Response) {
 	newHeader := w.Header()
+
+	// Build set of response hop-by-hop headers to skip
+	respHopByHop := map[string]bool{
+		"Connection":          true,
+		"Keep-Alive":          true,
+		"Proxy-Authenticate":  true,
+		"Proxy-Authorization": true,
+		"Proxy-Connection":    true,
+		"TE":                  true,
+		"Trailer":             true,
+		"Transfer-Encoding":   true,
+	}
+	if c := resp.Header.Get("Connection"); c != "" {
+		for _, key := range strings.Split(c, ",") {
+			respHopByHop[http.CanonicalHeaderKey(strings.TrimSpace(key))] = true
+		}
+	}
+
 	for key, values := range resp.Header {
 		if key == "Content-Length" {
+			continue
+		}
+		if respHopByHop[key] {
 			continue
 		}
 		for _, v := range values {
 			newHeader.Add(key, v)
 		}
+	}
+
+	// Add Via header (RFC 7230 §5.7.1)
+	existingVia := resp.Header.Get("Via")
+	viaValue := fmt.Sprintf("%d.%d %s", resp.ProtoMajor, resp.ProtoMinor, ViaIdentifier)
+	if existingVia != "" {
+		viaValue = existingVia + ", " + viaValue
+	}
+	newHeader.Set("Via", viaValue)
+
+	// Defensive header: prevent MIME-type sniffing in browsers
+	if newHeader.Get("X-Content-Type-Options") == "" {
+		newHeader.Set("X-Content-Type-Options", "nosniff")
 	}
 
 	w.WriteHeader(resp.StatusCode)
