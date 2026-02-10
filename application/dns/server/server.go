@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	dnscache "bitbucket.org/abdullah_irfan/gatesentryf/dns/cache"
 	"bitbucket.org/abdullah_irfan/gatesentryf/dns/discovery"
 	gatesentryDnsScheduler "bitbucket.org/abdullah_irfan/gatesentryf/dns/scheduler"
 	gatesentryDnsUtils "bitbucket.org/abdullah_irfan/gatesentryf/dns/utils"
@@ -75,128 +76,15 @@ var (
 	logger           *gatesentryLogger.Log
 )
 
-// Phase 4: DNS response cache — keyed by (qname, qtype), TTL-aware.
-// Reduces upstream queries from ~20ms per lookup to <1ms for cached entries.
-type dnsCacheEntry struct {
-	msg       *dns.Msg  // cached response (deep-copied on insert)
-	expiresAt time.Time // absolute expiry based on minimum TTL
-}
+// dnsResponseCache is the sharded, TTL-aware DNS response cache.
+// Initialised in StartDNSServer() with environment-driven configuration.
+// Accessible via GetDNSCache() for the SSE endpoint and admin API.
+var dnsResponseCache *dnscache.DNSCache
 
-var (
-	dnsCache    = make(map[string]*dnsCacheEntry)
-	dnsCacheMu  sync.RWMutex
-	dnsCacheMax = 10000 // max entries before eviction
-)
-
-// dnsCacheKey builds a cache key from question name and type.
-func dnsCacheKey(qname string, qtype uint16) string {
-	t := dns.TypeToString[qtype]
-	if t == "" {
-		// Fall back to numeric qtype for unknown/unsupported types to avoid key collisions.
-		return strings.ToLower(qname) + "/" + fmt.Sprint(qtype)
-	}
-	return strings.ToLower(qname) + "/" + t
-}
-
-// dnsCacheGet returns a cached response if it exists and hasn't expired.
-// The returned message has TTLs decremented to reflect elapsed time.
-func dnsCacheGet(qname string, qtype uint16) *dns.Msg {
-	key := dnsCacheKey(qname, qtype)
-	dnsCacheMu.RLock()
-	entry, ok := dnsCache[key]
-	dnsCacheMu.RUnlock()
-	if !ok {
-		return nil
-	}
-
-	remaining := time.Until(entry.expiresAt)
-	if remaining <= 0 {
-		// Expired — remove lazily
-		dnsCacheMu.Lock()
-		delete(dnsCache, key)
-		dnsCacheMu.Unlock()
-		return nil
-	}
-
-	// Deep-copy the cached message and adjust TTLs
-	msg := entry.msg.Copy()
-	ttlSec := uint32(remaining.Seconds())
-	for _, rr := range msg.Answer {
-		rr.Header().Ttl = ttlSec
-	}
-	for _, rr := range msg.Ns {
-		rr.Header().Ttl = ttlSec
-	}
-	for _, rr := range msg.Extra {
-		if rr.Header().Rrtype != dns.TypeOPT {
-			rr.Header().Ttl = ttlSec
-		}
-	}
-	return msg
-}
-
-// dnsCachePut stores a DNS response in the cache. TTL is taken from the
-// minimum TTL across all answer/authority records (minimum 5s, maximum 1h).
-func dnsCachePut(qname string, qtype uint16, msg *dns.Msg) {
-	if msg == nil {
-		return
-	}
-
-	// Find minimum TTL across all records
-	var minTTL uint32 = 3600 // 1 hour cap
-	found := false
-	for _, rr := range msg.Answer {
-		if rr.Header().Ttl < minTTL {
-			minTTL = rr.Header().Ttl
-			found = true
-		}
-	}
-	for _, rr := range msg.Ns {
-		if rr.Header().Ttl < minTTL {
-			minTTL = rr.Header().Ttl
-			found = true
-		}
-	}
-	if !found {
-		// No records with TTL — cache for 60s (negative responses, etc.)
-		minTTL = 60
-	}
-	// Enforce minimum cache time of 5 seconds
-	if minTTL < 5 {
-		minTTL = 5
-	}
-
-	key := dnsCacheKey(qname, qtype)
-
-	dnsCacheMu.Lock()
-	// Incremental eviction: remove expired entries first, then oldest if still over limit
-	if len(dnsCache) >= dnsCacheMax {
-		now := time.Now()
-		expired := 0
-		for k, e := range dnsCache {
-			if now.After(e.expiresAt) {
-				delete(dnsCache, k)
-				expired++
-			}
-		}
-		// If still over 90% capacity after removing expired, evict 10% oldest
-		if len(dnsCache) >= dnsCacheMax*9/10 {
-			evictCount := dnsCacheMax / 10
-			for k := range dnsCache {
-				delete(dnsCache, k)
-				evictCount--
-				if evictCount <= 0 {
-					break
-				}
-			}
-		}
-		log.Printf("[DNS Cache] Evicted %d expired + trimmed to %d entries (max %d)", expired, len(dnsCache), dnsCacheMax)
-	}
-	dnsCache[key] = &dnsCacheEntry{
-		msg:       msg.Copy(),
-		expiresAt: time.Now().Add(time.Duration(minTTL) * time.Second),
-	}
-	dnsCacheMu.Unlock()
+// GetDNSCache returns the DNS response cache instance.
+// Returns nil before StartDNSServer() is called.
+func GetDNSCache() *dnscache.DNSCache {
+	return dnsResponseCache
 }
 
 func init() {
@@ -309,6 +197,20 @@ func StartDNSServer(basePath string, ilogger *gatesentryLogger.Log, blockedLists
 	deviceStore = discovery.NewDeviceStoreMultiZone(zones...)
 	log.Printf("[DNS] Device store initialized with zones: %v (primary: %s)", zones, zones[0])
 
+	// Initialise the DNS response cache with environment-tuneable limits.
+	// GS_DNS_CACHE_MAX overrides the default 10,000 entry limit.
+	cacheCfg := dnscache.DefaultConfig()
+	if maxStr := os.Getenv("GS_DNS_CACHE_MAX"); maxStr != "" {
+		var maxVal int
+		if _, err := fmt.Sscan(maxStr, &maxVal); err == nil && maxVal > 0 {
+			cacheCfg.MaxEntries = maxVal
+			log.Printf("[DNS Cache] Max entries set to %d via GS_DNS_CACHE_MAX", maxVal)
+		}
+	}
+	dnsResponseCache = dnscache.New(cacheCfg)
+	log.Printf("[DNS Cache] Initialised: max=%d, minTTL=%s, maxTTL=%s, negativeTTL=%s, reap=%s",
+		cacheCfg.MaxEntries, cacheCfg.MinTTL, cacheCfg.MaxTTL, cacheCfg.NegativeTTL, cacheCfg.ReapInterval)
+
 	// Start mDNS/Bonjour browser for automatic device discovery (Phase 3).
 	// Browses common service types (_airplay._tcp, _googlecast._tcp, _printer._tcp, etc.)
 	// and feeds discovered devices into the device store.
@@ -418,6 +320,12 @@ func StopDNSServer() {
 	if server == nil || !serverRunning.Load() {
 		fmt.Println("DNS server is already stopped")
 		return
+	}
+
+	// Stop DNS response cache (stops reaper goroutine)
+	if dnsResponseCache != nil {
+		dnsResponseCache.Stop()
+		dnsResponseCache = nil
 	}
 
 	// Stop mDNS browser if running
@@ -554,11 +462,13 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 
 		// --- 3. Forward to external resolver (with cache) ---
 		// Check cache first — avoids upstream round-trip for repeated queries.
-		if cached := dnsCacheGet(q.Name, q.Qtype); cached != nil {
-			cached.SetReply(r)
-			cached.Authoritative = false
-			w.WriteMsg(cached)
-			return
+		if dnsResponseCache != nil {
+			if cached := dnsResponseCache.Get(q.Name, q.Qtype); cached != nil {
+				cached.SetReply(r)
+				cached.Authoritative = false
+				w.WriteMsg(cached)
+				return
+			}
 		}
 
 		// Cache miss — forward to external resolver.
@@ -577,7 +487,9 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 		}
 
 		// Cache the upstream response for future queries.
-		dnsCachePut(q.Name, q.Qtype, resp)
+		if dnsResponseCache != nil {
+			dnsResponseCache.Put(q.Name, q.Qtype, resp)
+		}
 
 		// Phase 4: Propagate the upstream rcode (NXDOMAIN, NOERROR, etc.)
 		// and copy answers + authority section (contains SOA for negative responses).

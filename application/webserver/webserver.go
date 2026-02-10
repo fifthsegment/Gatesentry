@@ -314,6 +314,17 @@ func RegisterEndpointsStartServer(
 		runtime.Reload()
 	})
 
+	// DNS cache stats and SSE event stream
+	internalServer.Get("/api/dns/cache/stats", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiDNSCacheStats(w, r)
+	})
+	internalServer.Post("/api/dns/cache/flush", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiDNSCacheFlush(w, r)
+	})
+	internalServer.Get("/api/dns/events", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiDNSEvents(w, r)
+	})
+
 	internalServer.Post("/api/stats", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
 		params := mux.Vars(r)
 		fromTimeParam := params["fromTime"]
