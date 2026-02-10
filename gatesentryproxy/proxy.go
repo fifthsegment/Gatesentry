@@ -493,6 +493,15 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Block TRACE method — RFC 9110 §9.3.8. TRACE reflects the request
+	// (including Cookie/Authorization) in the response body, enabling
+	// Cross-Site Tracing (XST) credential theft. Standard proxy practice
+	// is to refuse TRACE rather than forward it.
+	if r.Method == "TRACE" {
+		http.Error(w, "TRACE method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
 	if r.Header.Get("Upgrade") == "websocket" {
 		HandleWebsocketConnection(r, w)
 		return
@@ -504,9 +513,15 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Via-based loop detection (RFC 7230 §5.7.1)
-	// If the incoming Via header already contains our identifier, this request
-	// has already passed through us — it's a loop.
+	// Loop detection: check for our private loop-detection header and Via.
+	// We use X-GateSentry-Loop (a private header that upstream servers ignore)
+	// instead of adding Via to outgoing requests, because Via triggers nginx's
+	// gzip_proxied off default and kills compression for millions of servers.
+	if r.Header.Get("X-GateSentry-Loop") == ViaIdentifier {
+		log.Printf("[SECURITY] Proxy loop detected via X-GateSentry-Loop from %s to %v", client, r.URL)
+		http.Error(w, "Proxy loop detected", http.StatusLoopDetected)
+		return
+	}
 	if viaHeader := r.Header.Get("Via"); viaHeader != "" {
 		if strings.Contains(strings.ToLower(viaHeader), strings.ToLower(ViaIdentifier)) {
 			log.Printf("[SECURITY] Proxy loop detected via Via header from %s to %v", client, r.URL)
@@ -542,15 +557,16 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	removeHopByHopHeaders(r.Header)
 
-	// Add our Via identifier to the outgoing request (RFC 7230 §5.7.1).
-	// This enables loop detection: if the request comes back to us, the
-	// incoming Via header check at the top of ServeHTTP will catch it.
-	reqVia := r.Header.Get("Via")
-	if reqVia != "" {
-		r.Header.Set("Via", reqVia+", "+fmt.Sprintf("%d.%d %s", r.ProtoMajor, r.ProtoMinor, ViaIdentifier))
-	} else {
-		r.Header.Set("Via", fmt.Sprintf("%d.%d %s", r.ProtoMajor, r.ProtoMinor, ViaIdentifier))
-	}
+	// Add a private loop-detection header to outgoing requests.
+	// We deliberately do NOT set the standard Via header on outgoing requests
+	// because nginx's default gzip_proxied=off refuses to compress responses
+	// when Via is present — killing gzip for millions of default-configured
+	// servers. The Via header is still added to responses back to the client
+	// (in copyResponseHeader) for RFC 7230 §5.7.1 compliance.
+	r.Header.Set("X-GateSentry-Loop", ViaIdentifier)
+	// Strip any existing Via header from the client — it's not ours to forward
+	// and it would also trigger the same nginx gzip issue at upstream.
+	r.Header.Del("Via")
 
 	resp, err := rt.RoundTrip(r)
 	if err != nil {
@@ -651,18 +667,52 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch pipeline {
 	case pipelineStream:
 		// PATH A: Stream Passthrough — JS, CSS, fonts, JSON, binary, downloads.
-		// Zero buffering. Upstream's Content-Encoding (if any) passes through
-		// to the client unchanged, giving true end-to-end compression.
-		// Set Content-Length before copyResponseHeader (which calls WriteHeader).
-		if resp.ContentLength >= 0 {
+		//
+		// If upstream already sent Content-Encoding (e.g. gzip), pass it through
+		// unchanged (true end-to-end compression).
+		//
+		// If upstream did NOT compress (common: nginx default gzip_proxied=off
+		// refuses to compress when it sees our Via header), the proxy compresses
+		// compressible text types (JS, CSS, JSON, XML, SVG, etc.) itself.
+		// This avoids a massive performance penalty for the millions of nginx
+		// sites running default config.
+		upstreamCompressed := resp.Header.Get("Content-Encoding") != ""
+		proxyCompress := !upstreamCompressed && clientAcceptsGzip &&
+			!isLanAddress(client) && isCompressibleType(contentType) &&
+			r.Method != "HEAD" && resp.ContentLength > 256
+
+		if proxyCompress {
+			// We'll gzip-compress on the fly — remove Content-Length (size changes)
+			// and set Content-Encoding before writing headers.
+			resp.Header.Set("Content-Encoding", "gzip")
+			resp.Header.Del("Content-Length")
+		} else if resp.ContentLength >= 0 {
 			w.Header().Set("Content-Length", strconv.FormatInt(resp.ContentLength, 10))
 		}
 		copyResponseHeader(w, resp)
-		dest := &DataPassThru{Writer: w, Contenttype: contentType, Passthru: passthru}
-		if flusher, ok := w.(http.Flusher); ok {
-			streamWithFlusher(dest, resp.Body, flusher)
+
+		// HEAD responses have no body — skip the copy to avoid blocking
+		// on a connection that will never send data.
+		if r.Method == "HEAD" {
+			break
+		}
+
+		if proxyCompress {
+			gzw, _ := gzip.NewWriterLevel(w, gzip.BestSpeed)
+			dest := &DataPassThru{Writer: gzw, Contenttype: contentType, Passthru: passthru}
+			if flusher, ok := w.(http.Flusher); ok {
+				streamWithFlusher(dest, resp.Body, flusher)
+			} else {
+				io.Copy(dest, resp.Body)
+			}
+			gzw.Close()
 		} else {
-			io.Copy(dest, resp.Body)
+			dest := &DataPassThru{Writer: w, Contenttype: contentType, Passthru: passthru}
+			if flusher, ok := w.(http.Flusher); ok {
+				streamWithFlusher(dest, resp.Body, flusher)
+			} else {
+				io.Copy(dest, resp.Body)
+			}
 		}
 
 	case pipelinePeek:
@@ -1001,6 +1051,27 @@ func classifyContentType(ct string) int {
 		return pipelinePeek
 	default:
 		return pipelineStream
+	}
+}
+
+// isCompressibleType returns true for content types that benefit from gzip
+// compression. If the upstream didn't compress the response (some servers
+// don't enable gzip at all), the proxy compresses these types itself as a
+// fallback so clients still get compressed responses.
+func isCompressibleType(ct string) bool {
+	switch {
+	case strings.HasPrefix(ct, "text/"),
+		strings.HasPrefix(ct, "application/javascript"),
+		strings.HasPrefix(ct, "application/x-javascript"),
+		strings.HasPrefix(ct, "application/json"),
+		strings.HasPrefix(ct, "application/xml"),
+		strings.HasPrefix(ct, "application/xhtml+xml"),
+		strings.HasPrefix(ct, "application/rss+xml"),
+		strings.HasPrefix(ct, "application/atom+xml"),
+		strings.HasPrefix(ct, "image/svg+xml"):
+		return true
+	default:
+		return false
 	}
 }
 
