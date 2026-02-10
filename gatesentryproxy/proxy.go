@@ -2,10 +2,12 @@ package gatesentryproxy
 
 import (
 	"bytes"
+	"compress/flate"
 	"compress/gzip"
 	"context"
 	"crypto/tls"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -33,6 +35,18 @@ var AdminPort = "8080"
 // GateSentryDNSPort is the port GateSentry's DNS server listens on.
 // Read from GATESENTRY_DNS_PORT env var at init; defaults to "10053".
 var GateSentryDNSPort = "10053"
+
+// Phase 3: Response pipeline path constants.
+// The proxy classifies each response by Content-Type and routes it through
+// one of three pipelines with different buffering strategies.
+const (
+	pipelineStream = iota // Path A: stream passthrough (JS, CSS, fonts, JSON, binary, downloads)
+	pipelinePeek          // Path B: peek 4KB + stream (images, video, audio)
+	pipelineBuffer        // Path C: buffer & scan (text/html, xhtml, unknown)
+)
+
+// PeekSize is the number of bytes read for filetype detection in Path B.
+const PeekSize = 4096
 
 // errSSRFBlocked is returned when the proxy blocks an outbound connection
 // to a loopback or link-local address (SSRF protection).
@@ -113,6 +127,7 @@ var httpTransport = &http.Transport{
 	DialContext:           safeDialContext,
 	TLSHandshakeTimeout:   10 * time.Second,
 	ExpectContinueTimeout: 1 * time.Second,
+	DisableCompression:    true, // Phase 3: don't auto-decompress; proxy handles it per-path
 }
 
 func NewGSProxyPassthru() *GSProxyPassthru {
@@ -494,8 +509,18 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	gzipOK := strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") && !isLanAddress(client)
-	r.Header.Del("Accept-Encoding")
+	// Phase 3: Preserve Accept-Encoding for upstream but normalize to gzip-only
+	// (the only compression we can decompress for content scanning).
+	// With DisableCompression: true on the transport, the raw Content-Encoding
+	// from upstream passes through for Path A (stream passthrough).
+	clientAcceptsGzip := strings.Contains(r.Header.Get("Accept-Encoding"), "gzip")
+	if r.Header.Get("Accept-Encoding") != "" {
+		if clientAcceptsGzip {
+			r.Header.Set("Accept-Encoding", "gzip")
+		} else {
+			r.Header.Del("Accept-Encoding")
+		}
+	}
 
 	var rt http.RoundTripper
 	if h.rt == nil {
@@ -605,97 +630,186 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var buf bytes.Buffer
-	limitedReader := &io.LimitedReader{R: resp.Body, N: int64(MaxContentScanSize)}
-	teeReader := io.TeeReader(limitedReader, &buf)
-
-	localCopyData, err := io.ReadAll(teeReader)
-
-	if err != nil {
-		log.Printf("error while reading response body (URL: %s): %s", r.URL, err)
+	// Phase 3: Three-path response pipeline.
+	// Classify by Content-Type and route to the appropriate processing path.
+	// HEAD requests always use Path A — no body to scan, pass upstream headers through.
+	pipeline := classifyContentType(contentType)
+	if r.Method == "HEAD" {
+		pipeline = pipelineStream
+	}
+	if DebugLogging {
+		pathNames := [...]string{"Stream", "Peek", "Buffer"}
+		log.Printf("[Phase3] %s → Path %s (%s)", r.URL, pathNames[pipeline], contentType)
 	}
 
-	if limitedReader.N == 0 {
-		log.Println("response body too long to filter:", r.URL)
-
-		if gzipOK {
-			resp.Header.Set("Content-Encoding", "gzip")
-		}
-
-		copyResponseHeader(w, resp)
-
-		// For gzip path, Content-Length cannot be known ahead of time
-		// For non-gzip, set Content-Length from upstream if available
-		if !gzipOK && resp.ContentLength > 0 {
+	switch pipeline {
+	case pipelineStream:
+		// PATH A: Stream Passthrough — JS, CSS, fonts, JSON, binary, downloads.
+		// Zero buffering. Upstream's Content-Encoding (if any) passes through
+		// to the client unchanged, giving true end-to-end compression.
+		// Set Content-Length before copyResponseHeader (which calls WriteHeader).
+		if resp.ContentLength >= 0 {
 			w.Header().Set("Content-Length", strconv.FormatInt(resp.ContentLength, 10))
 		}
-
-		var dest io.Writer = w
-		var gzw *gzip.Writer
-		if gzipOK {
-			gzw = gzip.NewWriter(w)
-			defer gzw.Close()
-			dest = gzw
+		copyResponseHeader(w, resp)
+		dest := &DataPassThru{Writer: w, Contenttype: contentType, Passthru: passthru}
+		if flusher, ok := w.(http.Flusher); ok {
+			streamWithFlusher(dest, resp.Body, flusher)
+		} else {
+			io.Copy(dest, resp.Body)
 		}
 
-		destwithcounter := &DataPassThru{
-			Writer:      dest,
-			Contenttype: contentType,
-			Passthru:    passthru,
+	case pipelinePeek:
+		// PATH B: Peek & Stream — images, video, audio.
+		// Read first 4KB for filetype detection and content filter check,
+		// then stream the remainder without full-body buffering.
+		body, wasDecompressed := decompressResponseBody(resp)
+		if wasDecompressed {
+			resp.Header.Del("Content-Encoding")
+			resp.Header.Del("Content-Length") // size changed after decompression
 		}
 
-		_, err := io.Copy(destwithcounter, resp.Body)
-		if err != nil {
-			log.Printf("error while copying response (URL: %s): %s", r.URL, err)
-			// Note: headers already sent, can't send error page
+		peekBuf := make([]byte, PeekSize)
+		n, peekErr := io.ReadAtLeast(body, peekBuf, 1)
+		peekBuf = peekBuf[:n]
+
+		if n == 0 && peekErr != nil {
+			// Empty or unreadable body — just forward headers
+			copyResponseHeader(w, resp)
 			return
 		}
-		return
-	}
 
-	kind, _ := filetype.Match(localCopyData)
-	if kind != filetype.Unknown {
-		if DebugLogging {
-			log.Printf("File type: %s. MIME: %s\n", kind.Extension, kind.MIME.Value)
+		// Detect actual file type from magic bytes
+		kind, _ := filetype.Match(peekBuf)
+		peekContentType := contentType
+		if kind != filetype.Unknown {
+			if DebugLogging {
+				log.Printf("[Phase3] Peek filetype: %s MIME: %s", kind.Extension, kind.MIME.Value)
+			}
+			peekContentType = kind.MIME.Value
 		}
-		contentType = kind.MIME.Value
-	}
-	responseSentMedia, proxyActionTaken := ScanMedia(localCopyData, contentType, r, w, resp, buf, passthru)
-	if responseSentMedia == true {
-		passthru.ProxyActionToLog = proxyActionTaken
-		// IProxy.RunHandler("log", "", &requestUrlBytes, passthru)
-		IProxy.LogHandler(GSLogData{Url: r.URL.String(), User: user, Action: proxyActionTaken})
-		return
-	}
 
-	responseSentText, proxyActionTaken := ScanText(localCopyData, contentType, r, w, resp, buf, passthru)
-	if responseSentText == true {
-		passthru.ProxyActionToLog = proxyActionTaken
-		// IProxy.RunHandler("log", "", &requestUrlBytes, passthru)
-		IProxy.LogHandler(GSLogData{Url: r.URL.String(), User: user, Action: proxyActionTaken})
-		return
-	}
+		// Run content filter for media types
+		if filetype.IsImage(peekBuf) || filetype.IsVideo(peekBuf) || filetype.IsAudio(peekBuf) ||
+			isImage(peekContentType) || isVideo(peekContentType) {
+			contentFilterData := GSContentFilterData{
+				Url:         r.URL.String(),
+				ContentType: peekContentType,
+				Content:     peekBuf,
+			}
+			IProxy.ContentHandler(&contentFilterData)
+			if contentFilterData.FilterResponseAction == ProxyActionBlockedMediaContent {
+				passthru.ProxyActionToLog = ProxyActionBlockedMediaContent
+				IProxy.LogHandler(GSLogData{Url: r.URL.String(), User: user, Action: ProxyActionBlockedMediaContent})
+				copyResponseHeader(w, resp)
+				dest := &DataPassThru{Writer: w, Contenttype: peekContentType, Passthru: passthru}
+				var reasonForBlockArray []string
+				if err := json.Unmarshal(contentFilterData.FilterResponse, &reasonForBlockArray); err != nil {
+					reasonForBlockArray = []string{"", "Error", err.Error()}
+				} else {
+					reasonForBlockArray = append([]string{"", "Image blocked by Gatesentry", "Reason(s) for blocking"}, reasonForBlockArray...)
+				}
+				emptyImage, _ := createEmptyImage(500, 500, "jpeg", reasonForBlockArray)
+				dest.Write(emptyImage)
+				return
+			}
+		}
 
-	if gzipOK && len(localCopyData) > 1000 {
-		resp.Header.Set("Content-Encoding", "gzip")
+		// Allowed — write headers, peek bytes, then stream the rest
 		copyResponseHeader(w, resp)
-		gzw := gzip.NewWriter(w)
-		var dest io.Writer
-		dest = gzw
-		destwithcounter := &DataPassThru{Writer: dest, Contenttype: contentType, Passthru: passthru}
-		destwithcounter.Write(localCopyData)
-		gzw.Close()
-	} else {
-		// For HEAD responses, preserve upstream's Content-Length since there's no body to measure.
-		// For GET responses, use the actual body length we read.
-		if r.Method == "HEAD" && resp.ContentLength >= 0 {
-			w.Header().Set("Content-Length", strconv.FormatInt(resp.ContentLength, 10))
+		dest := &DataPassThru{Writer: w, Contenttype: peekContentType, Passthru: passthru}
+		dest.Write(peekBuf)
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+			streamWithFlusher(dest, body, flusher)
 		} else {
-			w.Header().Set("Content-Length", strconv.Itoa(len(localCopyData)))
+			io.Copy(dest, body)
 		}
-		copyResponseHeader(w, resp)
-		destwithcounter := &DataPassThru{Writer: w, Contenttype: contentType, Passthru: passthru}
-		destwithcounter.Write(localCopyData)
+
+	case pipelineBuffer:
+		// PATH C: Buffer & Scan — text/html and unknown content types.
+		// Full body buffering (up to MaxContentScanSize) for text scanning.
+		// This preserves the existing scanning behaviour for HTML.
+
+		// Decompress if upstream sent gzip/deflate (since we scan raw text)
+		body, wasDecompressed := decompressResponseBody(resp)
+		if wasDecompressed {
+			resp.Header.Del("Content-Encoding")
+			resp.Header.Del("Content-Length")
+		}
+
+		var buf bytes.Buffer
+		limitedReader := &io.LimitedReader{R: body, N: int64(MaxContentScanSize)}
+		teeReader := io.TeeReader(limitedReader, &buf)
+
+		localCopyData, err := io.ReadAll(teeReader)
+		if err != nil {
+			log.Printf("error while reading response body (URL: %s): %s", r.URL, err)
+		}
+
+		if limitedReader.N == 0 {
+			// Body exceeds MaxContentScanSize — deliver what we have, stream the rest
+			log.Println("response body too long to filter:", r.URL)
+			copyResponseHeader(w, resp)
+			dest := &DataPassThru{Writer: w, Contenttype: contentType, Passthru: passthru}
+			dest.Write(localCopyData)
+			if flusher, ok := w.(http.Flusher); ok {
+				flusher.Flush()
+				streamWithFlusher(dest, body, flusher)
+			} else {
+				_, copyErr := io.Copy(dest, body)
+				if copyErr != nil {
+					log.Printf("error while copying response (URL: %s): %s", r.URL, copyErr)
+				}
+			}
+			return
+		}
+
+		// Detect actual file type from body bytes (catches mislabeled Content-Type)
+		kind, _ := filetype.Match(localCopyData)
+		if kind != filetype.Unknown {
+			if DebugLogging {
+				log.Printf("File type: %s. MIME: %s\n", kind.Extension, kind.MIME.Value)
+			}
+			contentType = kind.MIME.Value
+		}
+
+		// Run media scanner (handles mislabeled Content-Type → actual image)
+		responseSentMedia, proxyActionTaken := ScanMedia(localCopyData, contentType, r, w, resp, buf, passthru)
+		if responseSentMedia {
+			passthru.ProxyActionToLog = proxyActionTaken
+			IProxy.LogHandler(GSLogData{Url: r.URL.String(), User: user, Action: proxyActionTaken})
+			return
+		}
+
+		// Run text/HTML scanner
+		responseSentText, proxyActionTaken := ScanText(localCopyData, contentType, r, w, resp, buf, passthru)
+		if responseSentText {
+			passthru.ProxyActionToLog = proxyActionTaken
+			IProxy.LogHandler(GSLogData{Url: r.URL.String(), User: user, Action: proxyActionTaken})
+			return
+		}
+
+		// Deliver the buffered response
+		if clientAcceptsGzip && !isLanAddress(client) && len(localCopyData) > 1000 {
+			resp.Header.Set("Content-Encoding", "gzip")
+			copyResponseHeader(w, resp)
+			gzw := gzip.NewWriter(w)
+			dest := &DataPassThru{Writer: gzw, Contenttype: contentType, Passthru: passthru}
+			dest.Write(localCopyData)
+			gzw.Close()
+		} else {
+			// For HEAD responses, preserve upstream's Content-Length since there's no body to measure.
+			// For GET responses, use the actual body length we read.
+			if r.Method == "HEAD" && resp.ContentLength >= 0 {
+				w.Header().Set("Content-Length", strconv.FormatInt(resp.ContentLength, 10))
+			} else {
+				w.Header().Set("Content-Length", strconv.Itoa(len(localCopyData)))
+			}
+			copyResponseHeader(w, resp)
+			dest := &DataPassThru{Writer: w, Contenttype: contentType, Passthru: passthru}
+			dest.Write(localCopyData)
+		}
 	}
 }
 
@@ -862,6 +976,69 @@ func sanitizeResponseHeaders(resp *http.Response) string {
 	}
 
 	return "" // headers OK
+}
+
+// classifyContentType determines which response pipeline path to use based
+// on the response Content-Type. This drives the Phase 3 three-path router:
+//   - pipelineBuffer (Path C): text/html and xhtml — needs full-body text scanning
+//   - pipelinePeek (Path B): media types — peek 4KB for filetype + content filter
+//   - pipelineStream (Path A): everything else — zero-copy stream passthrough
+func classifyContentType(ct string) int {
+	switch {
+	case strings.HasPrefix(ct, "text/html"),
+		strings.HasPrefix(ct, "application/xhtml+xml"),
+		ct == "":
+		return pipelineBuffer
+	case strings.HasPrefix(ct, "image/"),
+		strings.HasPrefix(ct, "video/"),
+		strings.HasPrefix(ct, "audio/"):
+		return pipelinePeek
+	default:
+		return pipelineStream
+	}
+}
+
+// streamWithFlusher streams data from src to dst, calling Flush after each
+// read chunk for progressive delivery (SSE, chunked streams, drip endpoints).
+func streamWithFlusher(dst io.Writer, src io.Reader, flusher http.Flusher) error {
+	buf := make([]byte, 32*1024)
+	for {
+		n, err := src.Read(buf)
+		if n > 0 {
+			if _, writeErr := dst.Write(buf[:n]); writeErr != nil {
+				return writeErr
+			}
+			flusher.Flush()
+		}
+		if err != nil {
+			if err == io.EOF {
+				return nil
+			}
+			return err
+		}
+	}
+}
+
+// decompressResponseBody returns a reader that decompresses the response body
+// if Content-Encoding is gzip or deflate. The second return value indicates
+// whether decompression is active (caller should delete Content-Encoding).
+// If the encoding is unsupported or decompression fails, the original body
+// is returned unchanged.
+func decompressResponseBody(resp *http.Response) (io.Reader, bool) {
+	ce := strings.ToLower(strings.TrimSpace(resp.Header.Get("Content-Encoding")))
+	switch ce {
+	case "gzip":
+		gr, err := gzip.NewReader(resp.Body)
+		if err != nil {
+			log.Printf("[Phase3] Failed to create gzip reader: %v", err)
+			return resp.Body, false
+		}
+		return gr, true
+	case "deflate":
+		return flate.NewReader(resp.Body), true
+	default:
+		return resp.Body, false
+	}
 }
 
 // copyResponseHeader writes resp's header and status code to w.
