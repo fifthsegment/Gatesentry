@@ -43,7 +43,7 @@ var unverifiedClientConfig = &tls.Config{
 var insecureHTTPTransport = &http.Transport{
 	TLSClientConfig:       unverifiedClientConfig,
 	Proxy:                 http.ProxyFromEnvironment,
-	Dial:                  dialer.Dial,
+	DialContext:           safeDialContext,
 	TLSHandshakeTimeout:   10 * time.Second,
 	ExpectContinueTimeout: 1 * time.Second,
 }
@@ -155,7 +155,7 @@ func ConnectDirect(conn net.Conn, serverAddr string, extraData []byte, gpt *GSPr
 	// activeConnections.Add(1)
 	// defer activeConnections.Done()
 	log.Println("Running a CONNECTDIRECT TCP to " + serverAddr)
-	serverConn, err := net.Dial("tcp", serverAddr)
+	serverConn, err := safeDialContext(context.Background(), "tcp", serverAddr)
 
 	if err != nil {
 		log.Printf("error with pass-through of SSL connection to %s: %s", serverAddr, err)
