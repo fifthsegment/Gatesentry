@@ -3,13 +3,16 @@ package gatesentryproxy
 import (
 	"bytes"
 	"compress/gzip"
+	"context"
 	"crypto/tls"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"net"
 	"net/http"
+	"os"
 	"reflect"
 	"regexp"
 	"strconv"
@@ -22,14 +25,92 @@ import (
 var IProxy *GSProxy
 var MaxContentScanSize int64 = 1e7 // Reduced from 100MB to 10MB for low-spec hardware
 var DebugLogging = false           // Disable verbose logging for performance
+
+// AdminPort is the GateSentry admin UI port. Proxy requests targeting this port
+// on any loopback/local address are blocked to prevent SSRF to admin endpoints.
+var AdminPort = "8080"
+
+// GateSentryDNSPort is the port GateSentry's DNS server listens on.
+// Read from GATESENTRY_DNS_PORT env var at init; defaults to "10053".
+var GateSentryDNSPort = "10053"
+
+// errSSRFBlocked is returned when the proxy blocks an outbound connection
+// to a loopback or link-local address (SSRF protection).
+var errSSRFBlocked = errors.New("connection to loopback or link-local address blocked (SSRF protection)")
+
+var ip6Loopback = net.ParseIP("::1")
+
 var dialer = &net.Dialer{
 	Timeout:   30 * time.Second,
 	KeepAlive: 30 * time.Second,
 }
-var ip6Loopback = net.ParseIP("::1")
+
+func init() {
+	// Read DNS port from environment (set by run.sh / docker-compose)
+	if port := os.Getenv("GATESENTRY_DNS_PORT"); port != "" {
+		GateSentryDNSPort = port
+	}
+	if port := os.Getenv("GS_ADMIN_PORT"); port != "" {
+		AdminPort = port
+	}
+
+	// Wire the dialer's resolver to GateSentry's own DNS server so that
+	// every hostname the proxy resolves goes through GateSentry filtering.
+	dialer.Resolver = &net.Resolver{
+		PreferGo: true,
+		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+			d := net.Dialer{Timeout: 5 * time.Second}
+			return d.DialContext(ctx, "udp", "127.0.0.1:"+GateSentryDNSPort)
+		},
+	}
+	log.Printf("[Phase2] Proxy DNS resolver wired to 127.0.0.1:%s", GateSentryDNSPort)
+}
+
+// safeDialContext prevents SSRF attacks targeting GateSentry's own admin UI.
+// When a hostname resolves to a loopback or link-local address AND targets
+// the admin port, the connection is blocked. All other connections are allowed
+// because GateSentry's DNS is the resolver — if it resolved a domain, the
+// proxy should trust that resolution.
+//
+// The DNS resolver is wired to GateSentry DNS (init), so all hostname
+// resolution goes through GateSentry filtering before reaching here.
+func safeDialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return nil, err
+	}
+
+	// Block requests to the admin UI port on loopback/link-local addresses.
+	// This catches DNS rebinding attacks where evil.com → 127.0.0.1:8080.
+	if port == AdminPort {
+		// If it's already an IP literal targeting admin port on loopback, block.
+		if ip := net.ParseIP(host); ip != nil {
+			if ip.IsLoopback() || ip.IsLinkLocalUnicast() {
+				log.Printf("[SECURITY] SSRF blocked: connection to admin port %s on %s", port, host)
+				return nil, errSSRFBlocked
+			}
+		} else {
+			// It's a hostname — resolve and check.
+			ips, err := dialer.Resolver.LookupHost(ctx, host)
+			if err == nil {
+				for _, ipStr := range ips {
+					if ip := net.ParseIP(ipStr); ip != nil {
+						if ip.IsLoopback() || ip.IsLinkLocalUnicast() {
+							log.Printf("[SECURITY] SSRF blocked: %q resolved to %s targeting admin port %s", host, ipStr, port)
+							return nil, errSSRFBlocked
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return dialer.DialContext(ctx, network, addr)
+}
+
 var httpTransport = &http.Transport{
 	Proxy:                 http.ProxyFromEnvironment,
-	Dial:                  dialer.Dial,
+	DialContext:           safeDialContext,
 	TLSHandshakeTimeout:   10 * time.Second,
 	ExpectContinueTimeout: 1 * time.Second,
 }
@@ -188,6 +269,17 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	hostaddress := strings.Split(r.URL.Host, ":")[0]
 	isHostLanAddress := isLanAddress(hostaddress)
+
+	// Phase 2: Block proxy requests targeting GateSentry's own admin UI.
+	// The PAC file should route these DIRECT, so any request arriving here
+	// for the admin port is suspicious (potential SSRF).
+	if requestPort := extractPort(r.URL.Host); requestPort == AdminPort {
+		if hostaddress == "" || isLanAddress(hostaddress) || hostaddress == "localhost" {
+			log.Printf("[SECURITY] Blocked proxy request to admin UI: %s from %s", r.URL.Host, client)
+			http.Error(w, "Forbidden — proxy access to admin interface denied", http.StatusForbidden)
+			return
+		}
+	}
 
 	if len(r.URL.String()) > 10000 {
 		http.Error(w, "URL too long", http.StatusRequestURITooLong)

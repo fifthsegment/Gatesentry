@@ -16,6 +16,7 @@ unfixed Squid 0-days.
 
 **Pre-hardening: 75 PASS · 3 FAIL · 17 KNOWN ISSUES · 1 SKIP**
 **After Phase 1: 81 PASS · 2 FAIL · 13 KNOWN ISSUES · 1 SKIP**
+**After Phase 2: 84 PASS · 2 FAIL · 10 KNOWN ISSUES · 1 SKIP**
 
 The good news: the proxy is fundamentally sound — it survived every CVE-inspired
 attack pattern that killed Squid, including chunked-extension stack overflow
@@ -103,14 +104,15 @@ simulates a hostile internet using protocol-level misbehaviour endpoints.
 ### Summary
 
 ```
-  PASS:        81  (includes 3 handled by Go's net/http client)
+  PASS:        84  (includes 3 handled by Go's net/http client)
   FAIL:        2   (§11.2 10MB truncation, §12.3 drip timing)
-  KNOWN ISSUE: 13  (architectural limitations documented below)
+  KNOWN ISSUE: 10  (architectural limitations documented below)
   SKIPPED:     1
   TOTAL:       97
 ```
 
-*Phase 1 improvements: §3.1 Via header, §7.4 loop detection, §3.6 Content-Length — all moved from KNOWN/FAIL → PASS*
+*Phase 1: §3.1 Via header, §7.4 loop detection, §3.6 Content-Length — moved from KNOWN/FAIL → PASS*
+*Phase 2: §8.1 DNS resolution, §7.1 SSRF admin, §7.2 SSRF localhost — moved from KNOWN → PASS*
 
 ### All Results by Section
 
@@ -757,13 +759,13 @@ expiration. Implementation: `sync.Map` or a simple map with `sync.RWMutex`.
 - [x] Verify no regressions in §4 (HTTP methods), §5 (HTTPS), §11 (downloads)
 
 ### Phase 2 — DNS & SSRF Hardening
-- [ ] Wire `dialer.Resolver` to `127.0.0.1:10053`
-- [ ] Make DNS port configurable (environment variable)
-- [ ] Add `isPrivateIP()` check on resolved addresses before connecting
-- [ ] Block proxy requests targeting admin port (8080)
-- [ ] Allow LAN-to-LAN requests (client on same subnet)
-- [ ] Run test suite — verify §8.1, §7.1, §7.2 fixed
-- [ ] Verify HTTPS CONNECT still works (SSRF check must not break tunnels)
+- [x] Wire `dialer.Resolver` to `127.0.0.1:10053` (GateSentry DNS)
+- [x] Make DNS port configurable (`GATESENTRY_DNS_PORT` env var)
+- [x] Add `safeDialContext()` — blocks DNS rebinding to admin port (loopback/link-local)
+- [x] Block proxy requests targeting admin port (8080) in `ServeHTTP()`
+- [x] Allow LAN-to-LAN requests — only admin-port rebinding is blocked
+- [x] Run test suite — 84 PASS, 2 FAIL, 10 KNOWN, 1 SKIP (§8.1, §7.1, §7.2 fixed)
+- [x] Verify HTTPS CONNECT still works — §5.1, §5.2 both PASS
 
 ### Phase 3 — Streaming Response Pipeline
 - [ ] Define content-type classification: scannable vs passthrough
