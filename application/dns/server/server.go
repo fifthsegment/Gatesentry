@@ -90,7 +90,12 @@ var (
 
 // dnsCacheKey builds a cache key from question name and type.
 func dnsCacheKey(qname string, qtype uint16) string {
-	return strings.ToLower(qname) + "/" + dns.TypeToString[qtype]
+	t := dns.TypeToString[qtype]
+	if t == "" {
+		// Fall back to numeric qtype for unknown/unsupported types to avoid key collisions.
+		return strings.ToLower(qname) + "/" + fmt.Sprint(qtype)
+	}
+	return strings.ToLower(qname) + "/" + t
 }
 
 // dnsCacheGet returns a cached response if it exists and hasn't expired.
@@ -164,10 +169,28 @@ func dnsCachePut(qname string, qtype uint16, msg *dns.Msg) {
 	key := dnsCacheKey(qname, qtype)
 
 	dnsCacheMu.Lock()
-	// Simple eviction: if cache is too large, clear it
+	// Incremental eviction: remove expired entries first, then oldest if still over limit
 	if len(dnsCache) >= dnsCacheMax {
-		log.Printf("[DNS Cache] Evicting %d entries (max %d reached)", len(dnsCache), dnsCacheMax)
-		dnsCache = make(map[string]*dnsCacheEntry)
+		now := time.Now()
+		expired := 0
+		for k, e := range dnsCache {
+			if now.After(e.expiresAt) {
+				delete(dnsCache, k)
+				expired++
+			}
+		}
+		// If still over 90% capacity after removing expired, evict 10% oldest
+		if len(dnsCache) >= dnsCacheMax*9/10 {
+			evictCount := dnsCacheMax / 10
+			for k := range dnsCache {
+				delete(dnsCache, k)
+				evictCount--
+				if evictCount <= 0 {
+					break
+				}
+			}
+		}
+		log.Printf("[DNS Cache] Evicted %d expired + trimmed to %d entries (max %d)", expired, len(dnsCache), dnsCacheMax)
 	}
 	dnsCache[key] = &dnsCacheEntry{
 		msg:       msg.Copy(),

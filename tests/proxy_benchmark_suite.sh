@@ -34,13 +34,17 @@
 #   all subsequent results.  We WANT to see every failure.
 set -uo pipefail
 
-# ── Colours ─────────────────────────────────────────────────────────────────
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-CYAN='\033[0;36m'
-BOLD='\033[1m'
-NC='\033[0m' # No Colour
+# ── Colours (respect NO_COLOR — see https://no-color.org/) ─────────────────
+if [[ -n "${NO_COLOR:-}" || "${ASCII_MODE:-}" == "1" ]]; then
+    RED=''; GREEN=''; YELLOW=''; CYAN=''; BOLD=''; NC=''
+else
+    RED='\033[0;31m'
+    GREEN='\033[0;32m'
+    YELLOW='\033[1;33m'
+    CYAN='\033[0;36m'
+    BOLD='\033[1m'
+    NC='\033[0m' # No Colour
+fi
 
 # ── Defaults ────────────────────────────────────────────────────────────────
 DNS_PORT="${DNS_PORT:-10053}"
@@ -63,6 +67,13 @@ TESTBED_HTTPS="https://httpbin.org:9443"    # nginx HTTPS (internal CA cert)
 ECHO_SERVER="http://127.0.0.1:9998"         # Python echo server (direct)
 TESTBED_FILES="${TESTBED_HTTP}/files"        # Static test files (1MB, 10MB, 100MB)
 CA_CERT="${CA_CERT:-$(cd "$(dirname "$0")" && pwd)/fixtures/JVJCA.crt}"  # Internal CA
+
+# Auto-generate test certs if they don't exist
+FIXTURES_DIR="$(cd "$(dirname "$0")" && pwd)/fixtures"
+if [[ ! -f "$CA_CERT" && -f "${FIXTURES_DIR}/gen_test_certs.sh" ]]; then
+    echo "  INFO  Generating ephemeral test certificates..."
+    bash "${FIXTURES_DIR}/gen_test_certs.sh"
+fi
 
 # ── Counters ────────────────────────────────────────────────────────────────
 PASS=0
@@ -91,30 +102,37 @@ log_section() {
     echo -e "${BOLD}── $1 ──${NC}"
 }
 
+# Glyph selection (ASCII fallbacks for CI/non-UTF8 terminals)
+if [[ -n "${NO_COLOR:-}" || "${ASCII_MODE:-}" == "1" ]]; then
+    _G_PASS='[PASS]'; _G_FAIL='[FAIL]'; _G_KNOWN='[KNOWN]'; _G_SKIP='[SKIP]'; _G_ARROW='->'
+else
+    _G_PASS='✓ PASS'; _G_FAIL='✗ FAIL'; _G_KNOWN='⚠ KNOWN'; _G_SKIP='⊘ SKIP'; _G_ARROW='↳'
+fi
+
 pass() {
     ((TOTAL++)) || true
     ((PASS++)) || true
-    echo -e "  ${GREEN}✓ PASS${NC}  $1"
+    echo -e "  ${GREEN}${_G_PASS}${NC}  $1"
 }
 
 fail() {
     ((TOTAL++)) || true
     ((FAIL++)) || true
-    echo -e "  ${RED}✗ FAIL${NC}  $1"
-    [[ -n "${2:-}" ]] && echo -e "         ${RED}↳ $2${NC}"
+    echo -e "  ${RED}${_G_FAIL}${NC}  $1"
+    [[ -n "${2:-}" ]] && echo -e "         ${RED}${_G_ARROW} $2${NC}"
 }
 
 known_issue() {
     ((TOTAL++)) || true
     ((KNOWN++)) || true
-    echo -e "  ${YELLOW}⚠ KNOWN${NC} $1"
-    [[ -n "${2:-}" ]] && echo -e "         ${YELLOW}↳ $2${NC}"
+    echo -e "  ${YELLOW}${_G_KNOWN}${NC} $1"
+    [[ -n "${2:-}" ]] && echo -e "         ${YELLOW}${_G_ARROW} $2${NC}"
 }
 
 skip_test() {
     ((TOTAL++)) || true
     ((SKIP++)) || true
-    echo -e "  ${CYAN}⊘ SKIP${NC}  $1"
+    echo -e "  ${CYAN}${_G_SKIP}${NC}  $1"
 }
 
 verbose() {

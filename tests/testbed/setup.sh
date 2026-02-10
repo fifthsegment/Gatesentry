@@ -32,9 +32,10 @@ NGINX_PORT=9999
 NGINX_SSL_PORT=9443
 CHECKSUMS_FILE="${TESTBED_ROOT}/checksums.md5"
 
-# SSL cert for httpbin.org (signed by internal CA "JVJ 28 Inc.")
+# SSL cert for httpbin.org — generated on-the-fly by gen_test_certs.sh
 SSL_CERT="${FIXTURES_DIR}/httpbin.org.crt"
 SSL_KEY="${FIXTURES_DIR}/httpbin.org.key"
+GEN_CERTS_SCRIPT="${FIXTURES_DIR}/gen_test_certs.sh"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -379,14 +380,28 @@ NGINX_EOF
     sed -i "s|SSL_CERT_PLACEHOLDER|${SSL_CERT}|g" "$NGINX_CONF"
     sed -i "s|SSL_KEY_PLACEHOLDER|${SSL_KEY}|g"   "$NGINX_CONF"
 
+    # ── Generate SSL certs if they don't exist ──
+    if [[ ! -f "$SSL_CERT" || ! -f "$SSL_KEY" ]]; then
+        if [[ -x "$GEN_CERTS_SCRIPT" ]]; then
+            info "Generating ephemeral test certificates..."
+            bash "$GEN_CERTS_SCRIPT"
+        elif [[ -f "$GEN_CERTS_SCRIPT" ]]; then
+            info "Generating ephemeral test certificates..."
+            bash "$GEN_CERTS_SCRIPT"
+        else
+            error "SSL cert/key not found and gen_test_certs.sh missing"
+            error "Run: bash tests/fixtures/gen_test_certs.sh"
+        fi
+    fi
+
     # ── Verify cert files exist ──
     if [[ ! -f "$SSL_CERT" ]]; then
         error "SSL cert not found: ${SSL_CERT}"
-        error "HTTPS server block will fail — place httpbin.org.crt in tests/fixtures/"
+        error "HTTPS server block will fail — run: bash tests/fixtures/gen_test_certs.sh"
     fi
     if [[ ! -f "$SSL_KEY" ]]; then
         error "SSL key not found: ${SSL_KEY}"
-        error "HTTPS server block will fail — place httpbin.org.key in tests/fixtures/"
+        error "HTTPS server block will fail — run: bash tests/fixtures/gen_test_certs.sh"
     fi
 
     # ── /etc/hosts entry for httpbin.org → 127.0.0.1 ──

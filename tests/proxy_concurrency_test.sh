@@ -20,23 +20,29 @@
 set -euo pipefail
 
 # ── Configuration ────────────────────────────────────────────────────────────
-PROXY_HOST="${PROXY_HOST:-192.168.1.105}"
+PROXY_HOST="${PROXY_HOST:-127.0.0.1}"
 PROXY_PORT="${PROXY_PORT:-10413}"
-ECHO_SERVER="${ECHO_SERVER:-http://192.168.1.105:9998}"
-TESTBED_HTTP="${TESTBED_HTTP:-http://192.168.1.105:9999}"
+ECHO_SERVER="${ECHO_SERVER:-http://127.0.0.1:9998}"
+TESTBED_HTTP="${TESTBED_HTTP:-http://127.0.0.1:9999}"
 CURL_TIMEOUT=10
 
-# Colours
-RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
-CYAN='\033[0;36m'; NC='\033[0m'; BOLD='\033[1m'
+# Colours (respect NO_COLOR — see https://no-color.org/)
+if [[ -n "${NO_COLOR:-}" || "${ASCII_MODE:-}" == "1" ]]; then
+    RED=''; GREEN=''; YELLOW=''; CYAN=''; NC=''; BOLD=''
+    _PASS='PASS'; _FAIL='FAIL'; _WARN='WARN'; _ARROW='->';
+else
+    RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
+    CYAN='\033[0;36m'; NC='\033[0m'; BOLD='\033[1m'
+    _PASS='✅ PASS'; _FAIL='❌ FAIL'; _WARN='⚠️  WARN'; _ARROW='↳';
+fi
 
 PASS_COUNT=0; FAIL_COUNT=0; WARN_COUNT=0
 
-pass()  { ((PASS_COUNT++)) || true; echo -e "  ${GREEN}✅ PASS${NC}  $1"; }
-fail()  { ((FAIL_COUNT++)) || true; echo -e "  ${RED}❌ FAIL${NC}  $1"; [[ -n "${2:-}" ]] && echo -e "         ${YELLOW}↳ $2${NC}"; }
-warn()  { ((WARN_COUNT++)) || true; echo -e "  ${YELLOW}⚠️  WARN${NC}  $1"; [[ -n "${2:-}" ]] && echo -e "         ${YELLOW}↳ $2${NC}"; }
-log_header()  { echo -e "\n${BOLD}${CYAN}═══ $1 ═══${NC}"; }
-log_section() { echo -e "\n${BOLD}── $1${NC}"; }
+pass()  { ((PASS_COUNT++)) || true; echo -e "  ${GREEN}${_PASS}${NC}  $1"; }
+fail()  { ((FAIL_COUNT++)) || true; echo -e "  ${RED}${_FAIL}${NC}  $1"; [[ -n "${2:-}" ]] && echo -e "         ${YELLOW}${_ARROW} $2${NC}"; }
+warn()  { ((WARN_COUNT++)) || true; echo -e "  ${YELLOW}${_WARN}${NC}  $1"; [[ -n "${2:-}" ]] && echo -e "         ${YELLOW}${_ARROW} $2${NC}"; }
+log_header()  { echo -e "\n${BOLD}${CYAN}=== $1 ===${NC}"; }
+log_section() { echo -e "\n${BOLD}-- $1${NC}"; }
 
 gscurl() { curl --proxy "http://${PROXY_HOST}:${PROXY_PORT}" --max-time "$CURL_TIMEOUT" "$@"; }
 

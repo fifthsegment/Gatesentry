@@ -63,8 +63,27 @@ func HandleWebsocketConnection(r *http.Request, w http.ResponseWriter) {
 	// Reconstruct the HTTP request line and headers.
 	reqURI := r.URL.RequestURI()
 	fmt.Fprintf(serverConn, "%s %s HTTP/1.1\r\n", r.Method, reqURI)
-	fmt.Fprintf(serverConn, "Host: %s\r\n", r.Host)
+
+	// Use the determined upstream host for the Host header
+	upstreamHost := r.Host
+	if upstreamHost == "" {
+		upstreamHost = host // fallback to the dialed host
+	}
+	fmt.Fprintf(serverConn, "Host: %s\r\n", upstreamHost)
+
 	for key, values := range r.Header {
+		// Filter out hop-by-hop and proxy-only headers (RFC 7230 §6.1)
+		keyLower := strings.ToLower(key)
+		if keyLower == "host" ||
+			keyLower == "connection" ||
+			keyLower == "keep-alive" ||
+			keyLower == "te" ||
+			keyLower == "trailer" ||
+			keyLower == "transfer-encoding" ||
+			keyLower == "proxy-connection" ||
+			strings.HasPrefix(keyLower, "proxy-") {
+			continue
+		}
 		for _, v := range values {
 			fmt.Fprintf(serverConn, "%s: %s\r\n", key, v)
 		}
