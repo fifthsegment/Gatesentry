@@ -87,6 +87,11 @@ var authenticationMiddleware mux.MiddlewareFunc = func(next http.Handler) http.H
 		if strings.HasPrefix(tokenString, "Bearer ") {
 			tokenString = strings.TrimPrefix(tokenString, "Bearer ")
 		}
+		// Fallback: accept token as a query parameter for SSE / EventSource
+		// connections, which cannot set custom headers.
+		if tokenString == "" {
+			tokenString = r.URL.Query().Get("token")
+		}
 		if tokenString == "" {
 			SendError(w, errors.New("Missing token auth"), http.StatusUnauthorized)
 			return

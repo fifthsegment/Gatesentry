@@ -4,9 +4,10 @@
     BreadcrumbItem,
     Column,
     DataTable,
-    Grid,
+    Dropdown,
     Loading,
     Row,
+    Tag,
   } from "carbon-components-svelte";
   import "@carbon/charts/styles.css";
   import { AreaChart } from "@carbon/charts";
@@ -14,107 +15,362 @@
   import { store } from "../../store/apistore";
   import { _ } from "svelte-i18n";
 
+  // ---------- Types ----------
+
+  type HostData = { host: string; count: number };
+  type BucketData = { total: number; hosts: HostData[] };
   type Keys = "blocked" | "all";
-  type HostData = {
-    host: string;
-    count: number;
-  };
-  type ResponseData = {
-    [key in Keys]: {
-      [date: string]: {
-        total: number;
-        hosts: HostData[];
-      };
+  type ResponseData = { [key in Keys]: { [date: string]: BucketData } };
+
+  // ---------- State ----------
+
+  /** Time-scale options for the chart x-axis */
+  const scaleOptions = [
+    { id: "7d", text: "Past 7 days" },
+    { id: "24h", text: "Past 24 hours" },
+    { id: "1h", text: "Past hour" },
+  ];
+  let selectedScale = "7d";
+
+  let chart: any = null;
+  let chartHolder: HTMLElement;
+
+  /** Historical data from /stats/byUrl (fetched once on mount). */
+  let historicalData: ResponseData | null = null;
+
+  /**
+   * Real-time counters accumulated from SSE "request" events.
+   * Outer key = time-bucket label, inner key = domain, value = count.
+   */
+  let realtimeAll: Map<string, Map<string, number>> = new Map();
+  let realtimeBlocked: Map<string, Map<string, number>> = new Map();
+
+  let eventSource: EventSource | null = null;
+  let connected = false;
+  let eventsReceived = 0;
+
+  // ---------- Helpers ----------
+
+  /** Return a bucket key for a given timestamp + scale. */
+  function bucketKey(ts: number, scale: string): string {
+    const d = new Date(ts);
+    if (scale === "1h") {
+      // Truncate to the minute → "HH:MM"
+      return (
+        d.getHours().toString().padStart(2, "0") +
+        ":" +
+        d.getMinutes().toString().padStart(2, "0")
+      );
+    }
+    if (scale === "24h") {
+      // Truncate to the hour → ISO-like "YYYY-MM-DDTHH"
+      return d.toISOString().slice(0, 13);
+    }
+    // 7d → "YYYY-MM-DD" (matches historical API keys)
+    return d.toISOString().slice(0, 10);
+  }
+
+  /** Parse a bucket key back into a Date for the chart axis. */
+  function bucketToDate(key: string, scale: string): Date {
+    if (scale === "1h") {
+      // key is "HH:MM" → use today's date
+      const [h, m] = key.split(":").map(Number);
+      const d = new Date();
+      d.setHours(h, m, 0, 0);
+      return d;
+    }
+    if (scale === "24h") {
+      // key is "YYYY-MM-DDTHH"
+      return new Date(key + ":00:00");
+    }
+    // 7d → "YYYY-MM-DD"
+    return new Date(key + "T12:00:00");
+  }
+
+  /**
+   * Merge historical + real-time data and produce chart data + top-5 tables.
+   */
+  function buildView(
+    hist: ResponseData | null,
+    rtAll: Map<string, Map<string, number>>,
+    rtBlocked: Map<string, Map<string, number>>,
+    scale: string,
+  ) {
+    const seriesAll = new Map<string, number>();
+    const seriesBlocked = new Map<string, number>();
+    const allCounts = new Map<string, number>();
+    const blockedCounts = new Map<string, number>();
+
+    // 1. Historical data (only used in 7-day view — the API returns daily buckets)
+    if (hist && scale === "7d") {
+      if (hist.all) {
+        for (const [dateKey, bucket] of Object.entries(hist.all)) {
+          seriesAll.set(dateKey, (seriesAll.get(dateKey) || 0) + bucket.total);
+          for (const h of bucket.hosts)
+            allCounts.set(h.host, (allCounts.get(h.host) || 0) + h.count);
+        }
+      }
+      if (hist.blocked) {
+        for (const [dateKey, bucket] of Object.entries(hist.blocked)) {
+          seriesBlocked.set(
+            dateKey,
+            (seriesBlocked.get(dateKey) || 0) + bucket.total,
+          );
+          for (const h of bucket.hosts)
+            blockedCounts.set(
+              h.host,
+              (blockedCounts.get(h.host) || 0) + h.count,
+            );
+        }
+      }
+    }
+
+    // 2. Real-time SSE events (all scales)
+    for (const [bucket, domains] of rtAll) {
+      let total = 0;
+      for (const [domain, count] of domains) {
+        total += count;
+        allCounts.set(domain, (allCounts.get(domain) || 0) + count);
+      }
+      seriesAll.set(bucket, (seriesAll.get(bucket) || 0) + total);
+    }
+    for (const [bucket, domains] of rtBlocked) {
+      let total = 0;
+      for (const [domain, count] of domains) {
+        total += count;
+        blockedCounts.set(domain, (blockedCounts.get(domain) || 0) + count);
+      }
+      seriesBlocked.set(bucket, (seriesBlocked.get(bucket) || 0) + total);
+    }
+
+    // 3. Build chart array, sorted by bucket key
+    const allBuckets = new Set([...seriesAll.keys(), ...seriesBlocked.keys()]);
+    const sorted = [...allBuckets].sort();
+    const chartData: { group: string; date: Date; value: number }[] = [];
+
+    for (const b of sorted) {
+      const d = bucketToDate(b, scale);
+      if (seriesAll.has(b))
+        chartData.push({ group: "All Requests", date: d, value: seriesAll.get(b)! });
+      if (seriesBlocked.has(b))
+        chartData.push({ group: "Blocked Requests", date: d, value: seriesBlocked.get(b)! });
+    }
+
+    // 4. Top 5 tables
+    const topAll = [...allCounts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([host, count], i) => ({ id: `all-${i}`, host, count }));
+
+    const topBlocked = [...blockedCounts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([host, count], i) => ({ id: `blocked-${i}`, host, count }));
+
+    return { chartData, topAll, topBlocked };
+  }
+
+  // ---------- Reactive rendering ----------
+
+  let chartData: { group: string; date: Date; value: number }[] = [];
+  let topAllRows: { id: string; host: string; count: number }[] = [];
+  let topBlockedRows: { id: string; host: string; count: number }[] = [];
+
+  function refresh() {
+    const result = buildView(
+      historicalData,
+      realtimeAll,
+      realtimeBlocked,
+      selectedScale,
+    );
+    chartData = result.chartData;
+    topAllRows = result.topAll;
+    topBlockedRows = result.topBlocked;
+    if (chart) chart.model.setData(chartData);
+  }
+
+  // Throttle to ≤ 2 UI updates/second even at high QPS
+  let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+  function scheduleRefresh() {
+    if (refreshTimer) return;
+    refreshTimer = setTimeout(() => {
+      refreshTimer = null;
+      refresh();
+    }, 500);
+  }
+
+  // ---------- SSE ----------
+
+  function connectSSE() {
+    const jwt = localStorage.getItem("jwt") || "";
+    const basePath = (window as any).__GS_BASE_PATH__ || "";
+    const base = basePath === "/" ? "" : basePath;
+    const url = `${base}/api/dns/events?token=${encodeURIComponent(jwt)}`;
+
+    eventSource = new EventSource(url);
+
+    eventSource.onopen = () => {
+      connected = true;
     };
-  };
-  let interval = null;
-  const options = {
-    title: "Requests served",
-    axes: {
-      bottom: {
-        title: "DNS + Proxy Requests in the past week",
-        mapsTo: "date",
-        scaleType: "time",
-      },
-      left: {
-        mapsTo: "value",
-        scaleType: "linear",
-      },
-    },
-    height: "400px",
-    toolbar: {
-      enabled: false,
-    },
-  };
 
-  let chart;
-  let chartHolder;
-  let data = [];
-  let responseData: ResponseData = null;
+    eventSource.onerror = () => {
+      connected = false;
+      // EventSource auto-reconnects on its own.
+    };
 
-  const updateChartData = async () => {
+    eventSource.onmessage = (msg) => {
+      try {
+        const evt = JSON.parse(msg.data);
+        if (evt.type !== "request") return;
+
+        eventsReceived++;
+
+        const bucket = bucketKey(evt.ts, selectedScale);
+        const domain: string = evt.domain || "unknown";
+
+        // All requests
+        if (!realtimeAll.has(bucket)) realtimeAll.set(bucket, new Map());
+        const ab = realtimeAll.get(bucket)!;
+        ab.set(domain, (ab.get(domain) || 0) + 1);
+
+        // Blocked requests
+        if (evt.blocked) {
+          if (!realtimeBlocked.has(bucket))
+            realtimeBlocked.set(bucket, new Map());
+          const bb = realtimeBlocked.get(bucket)!;
+          bb.set(domain, (bb.get(domain) || 0) + 1);
+        }
+
+        scheduleRefresh();
+      } catch (e) {
+        console.warn("[SSE] parse error:", e);
+      }
+    };
+  }
+
+  function disconnectSSE() {
+    if (eventSource) {
+      eventSource.close();
+      eventSource = null;
+      connected = false;
+    }
+  }
+
+  // ---------- Chart options (locale-aware) ----------
+
+  function makeChartOptions(scale: string) {
+    const locale = navigator.language || "en-US";
+
+    return {
+      title: "DNS requests",
+      axes: {
+        bottom: {
+          title:
+            scale === "7d"
+              ? "Past 7 days"
+              : scale === "24h"
+                ? "Past 24 hours"
+                : "Past hour",
+          mapsTo: "date",
+          scaleType: "time",
+          ticks: {
+            formatter: (d: Date) => {
+              if (!(d instanceof Date) || isNaN(d.getTime())) return "";
+              if (scale === "1h") {
+                return d.toLocaleTimeString(locale, {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                });
+              }
+              if (scale === "24h") {
+                return d.toLocaleTimeString(locale, {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                });
+              }
+              return d.toLocaleDateString(locale, {
+                weekday: "short",
+                month: "short",
+                day: "numeric",
+              });
+            },
+          },
+        },
+        left: {
+          title: "Requests",
+          mapsTo: "value",
+          scaleType: "linear",
+        },
+      },
+      height: "400px",
+      toolbar: { enabled: false },
+      color: {
+        scale: {
+          "All Requests": "#4589ff",
+          "Blocked Requests": "#da1e28",
+        },
+      },
+      legend: { alignment: "center" },
+      points: { radius: 3 },
+      curve: "curveMonotoneX",
+    };
+  }
+
+  // When the scale dropdown changes, reset real-time buckets & rebuild
+  function onScaleChange(e: CustomEvent) {
+    selectedScale = e.detail.selectedId;
+    realtimeAll = new Map();
+    realtimeBlocked = new Map();
+    eventsReceived = 0;
+
+    if (chart) {
+      chart.destroy();
+      chart = null;
+    }
+    if (chartHolder) {
+      // @ts-ignore
+      chart = new AreaChart(chartHolder, {
+        data: [],
+        // @ts-ignore
+        options: makeChartOptions(selectedScale),
+      });
+    }
+    refresh();
+  }
+
+  // ---------- Lifecycle ----------
+
+  onMount(async () => {
+    chartHolder = document.getElementById("statschart") as HTMLElement;
+    if (!chartHolder) throw new Error("Could not find chart holder element");
+
+    // Create chart immediately (empty)
+    // @ts-ignore
+    chart = new AreaChart(chartHolder, {
+      data: [],
+      // @ts-ignore
+      options: makeChartOptions(selectedScale),
+    });
+
+    // 1. One-shot fetch of historical 7-day data (no more polling)
     try {
       const json = (await $store.api.doCall("/stats/byUrl")) as ResponseData;
-      if (!json) return;
-      responseData = json;
-      data =
-        json.blocked && json.all
-          ? [
-              ...Object.entries(json["blocked"]).map(([key, item]) => {
-                return {
-                  group: "Blocked Requests",
-                  date: new Date(key).toISOString(), // You can adjust this as needed
-                  value: item.total,
-                };
-              }),
-              ...Object.entries(json["all"]).map(([key, item]) => {
-                return {
-                  group: "All Requests",
-                  date: new Date(key).toISOString(), // You can adjust this as needed
-                  value: item.total,
-                };
-              }),
-            ]
-          : [];
-      // Process the JSON data and update the chart
-      // const data = json.items.map((key, value) => ({
-      //     group: "URL Counts",
-      //     date: new Date(key).toISOString(), // You can adjust this as needed
-      //     value: value.count,
-      // }));
-      if (!chart) {
-        // @ts-ignore
-        chart = new AreaChart(chartHolder, {
-          data: data,
-          // @ts-ignore
-          options,
-        });
-        return;
-      } else {
-        // @ts-ignore
-        chart.model.setData(data);
+      if (json) {
+        historicalData = json;
+        refresh();
       }
-    } catch (error) {
-      console.error("Error fetching data:", error);
+    } catch (err) {
+      console.error("Error fetching historical stats:", err);
     }
-  };
 
-  onMount(() => {
-    chartHolder = document.getElementById("statschart");
-    if (!chartHolder) throw new Error("Could not find chart holder element");
-    // @ts-ignore
-
-    // Call updateChartData every 30 seconds
-    interval = setInterval(updateChartData, 5000);
-
-    // Initial data fetch
-    updateChartData();
+    // 2. Open SSE stream for real-time events
+    connectSSE();
   });
 
-  // on unmount, destroy the chart
   onDestroy(() => {
-    if (interval) clearInterval(interval);
-    chart.destroy();
+    disconnectSSE();
+    if (refreshTimer) clearTimeout(refreshTimer);
+    if (chart) chart.destroy();
   });
 </script>
 
@@ -124,10 +380,37 @@
       <BreadcrumbItem href="/">Dashboard</BreadcrumbItem>
       <BreadcrumbItem>Stats</BreadcrumbItem>
     </Breadcrumb>
-    <h2>Stats</h2>
+
+    <div
+      style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem;"
+    >
+      <div style="display: flex; align-items: center; gap: 0.75rem;">
+        <h2 style="margin: 0;">Stats</h2>
+        {#if connected}
+          <Tag type="green" size="sm">Live</Tag>
+        {:else}
+          <Tag type="warm-gray" size="sm">Connecting…</Tag>
+        {/if}
+        {#if eventsReceived > 0}
+          <span style="font-size: 0.75rem; color: var(--cds-text-02);">
+            {eventsReceived.toLocaleString()} events
+          </span>
+        {/if}
+      </div>
+
+      <Dropdown
+        size="sm"
+        style="width: 180px;"
+        items={scaleOptions}
+        selectedId={selectedScale}
+        on:select={onScaleChange}
+      />
+    </div>
+
     <div id="statschart"></div>
   </Column>
 </Row>
+
 {#if chart}
   <Row>
     <Column>
@@ -135,26 +418,15 @@
         <br />
         <h4>{$_("Top 5 Blocked Requests")}</h4>
         <br />
-        {#if responseData && responseData["blocked"]}
+        {#if topBlockedRows.length > 0}
           <DataTable
             headers={[
               { key: "host", value: "Host" },
               { key: "count", value: "Times requested" },
             ]}
-            rows={Object.entries(responseData["blocked"])
-              .flatMap(([key, item]) => {
-                return item.hosts.map((host) => {
-                  return {
-                    id: host.host,
-                    host: host.host,
-                    count: host.count,
-                  };
-                });
-              })
-              .slice(0, 5)}
+            rows={topBlockedRows}
           />
-        {/if}
-        {#if responseData && !responseData["blocked"]}
+        {:else}
           <p>
             <i>{$_("Nothing found. Please make some requests.")}</i>
           </p>
@@ -166,31 +438,15 @@
         <br />
         <h4>{$_("Top 5 Requests")}</h4>
         <br />
-        {#if responseData && responseData["all"]}
+        {#if topAllRows.length > 0}
           <DataTable
             headers={[
               { key: "host", value: "Host" },
               { key: "count", value: "Times requested" },
             ]}
-            rows={Object.entries(responseData["all"])
-              .flatMap(([key, item]) => {
-                return item.hosts.map((host, index) => {
-                  return {
-                    id: host.host + "all" + index,
-                    host: host.host,
-                    count: host.count,
-                  };
-                });
-              })
-              .filter(
-                (item, index, self) =>
-                  index === self.findIndex((t) => t.id === item.id),
-              )
-              .sort((a, b) => b.count - a.count)
-              .slice(0, 5)}
+            rows={topAllRows}
           />
-        {/if}
-        {#if responseData && !responseData["all"]}
+        {:else}
           <p>
             <i>{$_("Nothing found. Please make some requests.")}</i>
           </p>
@@ -199,6 +455,7 @@
     </Column>
   </Row>
 {/if}
+
 {#if !chart}
   <Row>
     <Column>
