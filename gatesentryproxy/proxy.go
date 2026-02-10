@@ -25,7 +25,7 @@ import (
 )
 
 var IProxy *GSProxy
-var MaxContentScanSize int64 = 1e7 // Reduced from 100MB to 10MB for low-spec hardware
+var MaxContentScanSize int64 = 2e6 // Path C (HTML-only) scan buffer; tunable via GS_MAX_SCAN_SIZE_MB
 var DebugLogging = false           // Disable verbose logging for performance
 
 // AdminPort is the GateSentry admin UI port. Proxy requests targeting this port
@@ -66,6 +66,12 @@ func init() {
 	}
 	if port := os.Getenv("GS_ADMIN_PORT"); port != "" {
 		AdminPort = port
+	}
+	if sizeMB := os.Getenv("GS_MAX_SCAN_SIZE_MB"); sizeMB != "" {
+		if mb, err := strconv.ParseInt(sizeMB, 10, 64); err == nil && mb > 0 {
+			MaxContentScanSize = mb * 1024 * 1024
+			log.Printf("[Phase3] MaxContentScanSize set to %dMB via GS_MAX_SCAN_SIZE_MB", mb)
+		}
 	}
 
 	// Wire the dialer's resolver to GateSentry's own DNS server so that

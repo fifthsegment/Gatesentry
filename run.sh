@@ -14,6 +14,7 @@ export GATESENTRY_DNS_RESOLVER="${GATESENTRY_DNS_RESOLVER:-192.168.1.1:53}"
 
 # Admin UI port — default 80 requires root; use 8080 for local dev
 export GS_ADMIN_PORT="${GS_ADMIN_PORT:-8080}"
+export GS_MAX_SCAN_SIZE_MB="${GS_MAX_SCAN_SIZE_MB:-2}"
 
 # Kill any existing gatesentry processes so the new binary can bind ports
 pkill -f gatesentryb 2>/dev/null
