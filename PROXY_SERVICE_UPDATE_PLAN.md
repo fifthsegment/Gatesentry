@@ -18,6 +18,7 @@ unfixed Squid 0-days.
 **After Phase 1: 81 PASS · 2 FAIL · 13 KNOWN ISSUES · 1 SKIP**
 **After Phase 2: 84 PASS · 2 FAIL · 10 KNOWN ISSUES · 1 SKIP**
 **After Phase 3: 86 PASS · 0 FAIL · 9 KNOWN ISSUES · 1 SKIP**
+**After Phase 4: 90 PASS · 0 FAIL · 5 KNOWN ISSUES · 1 SKIP**
 
 The good news: the proxy is fundamentally sound — it survived every CVE-inspired
 attack pattern that killed Squid, including chunked-extension stack overflow
@@ -783,13 +784,14 @@ expiration. Implementation: `sync.Map` or a simple map with `sync.RWMutex`.
 - [ ] Load test: 100 concurrent downloads, measure peak RSS (deferred)
 
 ### Phase 4 — WebSocket & Protocol Support
-- [ ] Implement WebSocket tunnel in `websocket.go`
-- [ ] Detect upgrade headers
-- [ ] Forward upgrade request, read 101 response
-- [ ] Bidirectional `io.Copy`
-- [ ] Add DNS response cache with TTL expiration
-- [ ] Fix NXDOMAIN rcode preservation
-- [ ] Run test suite — verify §6.1, §2.1, §1.5 fixed
+- [x] Implement WebSocket tunnel in `websocket.go`
+- [x] Detect upgrade headers (existing check at proxy.go line 496)
+- [x] Forward upgrade request, read 101 response
+- [x] Bidirectional `io.Copy` with graceful half-close (TCPConn.CloseWrite)
+- [x] Add DNS response cache with TTL expiration (dnsCacheGet/dnsCachePut, max 10k entries)
+- [x] Fix NXDOMAIN rcode preservation (m.Rcode = resp.Rcode + copy Ns section)
+- [x] Tune MaxContentScanSize: 10MB → 2MB + GS_MAX_SCAN_SIZE_MB env var
+- [x] Run test suite — 90 PASS, 0 FAIL, 5 KNOWN, 1 SKIP (§6.1, §2.1, §1.5, §14.1 fixed)
 - [ ] Test WebSocket with a real application (e.g., simple chat)
 
 ### Phase 5 — Content Scanning Hardening

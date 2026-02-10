@@ -75,6 +75,107 @@ var (
 	logger           *gatesentryLogger.Log
 )
 
+// Phase 4: DNS response cache — keyed by (qname, qtype), TTL-aware.
+// Reduces upstream queries from ~20ms per lookup to <1ms for cached entries.
+type dnsCacheEntry struct {
+	msg       *dns.Msg  // cached response (deep-copied on insert)
+	expiresAt time.Time // absolute expiry based on minimum TTL
+}
+
+var (
+	dnsCache    = make(map[string]*dnsCacheEntry)
+	dnsCacheMu  sync.RWMutex
+	dnsCacheMax = 10000 // max entries before eviction
+)
+
+// dnsCacheKey builds a cache key from question name and type.
+func dnsCacheKey(qname string, qtype uint16) string {
+	return strings.ToLower(qname) + "/" + dns.TypeToString[qtype]
+}
+
+// dnsCacheGet returns a cached response if it exists and hasn't expired.
+// The returned message has TTLs decremented to reflect elapsed time.
+func dnsCacheGet(qname string, qtype uint16) *dns.Msg {
+	key := dnsCacheKey(qname, qtype)
+	dnsCacheMu.RLock()
+	entry, ok := dnsCache[key]
+	dnsCacheMu.RUnlock()
+	if !ok {
+		return nil
+	}
+
+	remaining := time.Until(entry.expiresAt)
+	if remaining <= 0 {
+		// Expired — remove lazily
+		dnsCacheMu.Lock()
+		delete(dnsCache, key)
+		dnsCacheMu.Unlock()
+		return nil
+	}
+
+	// Deep-copy the cached message and adjust TTLs
+	msg := entry.msg.Copy()
+	ttlSec := uint32(remaining.Seconds())
+	for _, rr := range msg.Answer {
+		rr.Header().Ttl = ttlSec
+	}
+	for _, rr := range msg.Ns {
+		rr.Header().Ttl = ttlSec
+	}
+	for _, rr := range msg.Extra {
+		if rr.Header().Rrtype != dns.TypeOPT {
+			rr.Header().Ttl = ttlSec
+		}
+	}
+	return msg
+}
+
+// dnsCachePut stores a DNS response in the cache. TTL is taken from the
+// minimum TTL across all answer/authority records (minimum 5s, maximum 1h).
+func dnsCachePut(qname string, qtype uint16, msg *dns.Msg) {
+	if msg == nil {
+		return
+	}
+
+	// Find minimum TTL across all records
+	var minTTL uint32 = 3600 // 1 hour cap
+	found := false
+	for _, rr := range msg.Answer {
+		if rr.Header().Ttl < minTTL {
+			minTTL = rr.Header().Ttl
+			found = true
+		}
+	}
+	for _, rr := range msg.Ns {
+		if rr.Header().Ttl < minTTL {
+			minTTL = rr.Header().Ttl
+			found = true
+		}
+	}
+	if !found {
+		// No records with TTL — cache for 60s (negative responses, etc.)
+		minTTL = 60
+	}
+	// Enforce minimum cache time of 5 seconds
+	if minTTL < 5 {
+		minTTL = 5
+	}
+
+	key := dnsCacheKey(qname, qtype)
+
+	dnsCacheMu.Lock()
+	// Simple eviction: if cache is too large, clear it
+	if len(dnsCache) >= dnsCacheMax {
+		log.Printf("[DNS Cache] Evicting %d entries (max %d reached)", len(dnsCache), dnsCacheMax)
+		dnsCache = make(map[string]*dnsCacheEntry)
+	}
+	dnsCache[key] = &dnsCacheEntry{
+		msg:       msg.Copy(),
+		expiresAt: time.Now().Add(time.Duration(minTTL) * time.Second),
+	}
+	dnsCacheMu.Unlock()
+}
+
 func init() {
 	// Load configuration from environment variables
 	if envAddr := os.Getenv(ENV_DNS_LISTEN_ADDR); envAddr != "" {
@@ -428,7 +529,16 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 			logger.LogDNS(domain, "dns", "forward")
 		}
 
-		// --- 3. Forward to external resolver ---
+		// --- 3. Forward to external resolver (with cache) ---
+		// Check cache first — avoids upstream round-trip for repeated queries.
+		if cached := dnsCacheGet(q.Name, q.Qtype); cached != nil {
+			cached.SetReply(r)
+			cached.Authoritative = false
+			w.WriteMsg(cached)
+			return
+		}
+
+		// Cache miss — forward to external resolver.
 		// Forward request WITHOUT holding the mutex - this is the key fix!
 		// External DNS queries can take time and should not block other requests
 		// Detect if client connected via TCP and preserve that for forwarding
@@ -443,8 +553,17 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 			return
 		}
 
+		// Cache the upstream response for future queries.
+		dnsCachePut(q.Name, q.Qtype, resp)
+
+		// Phase 4: Propagate the upstream rcode (NXDOMAIN, NOERROR, etc.)
+		// and copy answers + authority section (contains SOA for negative responses).
+		m.Rcode = resp.Rcode
 		for _, answer := range resp.Answer {
 			m.Answer = append(m.Answer, answer)
+		}
+		for _, ns := range resp.Ns {
+			m.Ns = append(m.Ns, ns)
 		}
 	}
 	w.WriteMsg(m)
