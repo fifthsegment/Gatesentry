@@ -14,7 +14,7 @@ evaluate the GateSentry proxy against real-world HTTP semantics, RFC compliance,
 and adversarial attack patterns inspired by 55 published Squid CVEs and 35
 unfixed Squid 0-days.
 
-**KNONW ISSUES**:  17 KNOWN ISSUES come from scanning and analyzing version 1.20.6 frm the master/release branch `release_1206`
+**KNOWN ISSUES**: 17 KNOWN ISSUES come from scanning and analyzing version 1.20.6 from the master/release branch `release_1206`
 
 **Pre-hardening: 75 PASS · 3 FAIL · 17 KNOWN ISSUES · 1 SKIP**
 **After Phase 1: 81 PASS · 2 FAIL · 13 KNOWN ISSUES · 1 SKIP**
@@ -104,7 +104,9 @@ simulates a hostile internet using protocol-level misbehaviour endpoints.
 
 ## 2. Full Test Results
 
-*Run date: February 10, 2026 — GateSentry commit `3224cff`*
+*Run date: February 10, 2026 — GateSentry commit `3224cff` (pre-hardening baseline)*
+
+*For final post-hardening results see the Executive Summary and Phase checklists above.*
 
 ### Summary
 
