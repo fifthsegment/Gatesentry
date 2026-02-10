@@ -2,6 +2,7 @@ package cache
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -853,4 +854,71 @@ func TestStopIdempotent(t *testing.T) {
 	c := New(fastConfig())
 	c.Stop()
 	c.Stop() // should not panic
+}
+
+// ---------- Request event ----------
+
+func TestRequestEvent(t *testing.T) {
+	ev := RequestEvent("ads.example.com", "A", "blocked", true)
+	if ev.Type != EventRequest {
+		t.Errorf("expected type %q, got %q", EventRequest, ev.Type)
+	}
+	if ev.Domain != "ads.example.com" {
+		t.Errorf("expected domain ads.example.com, got %s", ev.Domain)
+	}
+	if ev.QType != "A" {
+		t.Errorf("expected qtype A, got %s", ev.QType)
+	}
+	if ev.ResponseType != "blocked" {
+		t.Errorf("expected response_type blocked, got %s", ev.ResponseType)
+	}
+	if !ev.Blocked {
+		t.Error("expected blocked=true")
+	}
+	if ev.Timestamp <= 0 {
+		t.Error("expected positive timestamp")
+	}
+}
+
+func TestRequestEventJSON(t *testing.T) {
+	ev := RequestEvent("google.com", "AAAA", "forwarded", false)
+	s := string(ev.JSON())
+
+	for _, want := range []string{
+		`"type":"request"`,
+		`"domain":"google.com"`,
+		`"qtype":"AAAA"`,
+		`"response_type":"forwarded"`,
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("expected JSON to contain %s, got: %s", want, s)
+		}
+	}
+	// blocked=false should be omitted (omitempty)
+	if strings.Contains(s, `"blocked"`) {
+		t.Errorf("blocked=false should be omitted, got: %s", s)
+	}
+}
+
+func TestRequestEventViaEventBus(t *testing.T) {
+	bus := NewEventBus()
+	ch := bus.Subscribe()
+	defer bus.Unsubscribe(ch)
+
+	bus.Emit(RequestEvent("tracker.io", "A", "blocked", true))
+
+	select {
+	case ev := <-ch:
+		if ev.Type != EventRequest {
+			t.Errorf("expected request event, got %s", ev.Type)
+		}
+		if ev.ResponseType != "blocked" {
+			t.Errorf("expected response_type blocked, got %s", ev.ResponseType)
+		}
+		if !ev.Blocked {
+			t.Error("expected blocked=true")
+		}
+	default:
+		t.Fatal("expected event on channel")
+	}
 }

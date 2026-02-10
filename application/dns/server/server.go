@@ -87,6 +87,14 @@ func GetDNSCache() *dnscache.DNSCache {
 	return dnsResponseCache
 }
 
+// emitRequestEvent sends a high-level DNS request event to any SSE subscribers.
+// Safe to call when the cache or event bus is nil (no-op).
+func emitRequestEvent(domain, qtype, responseType string, blocked bool) {
+	if dnsResponseCache != nil && dnsResponseCache.Events != nil {
+		dnsResponseCache.Events.Emit(dnscache.RequestEvent(domain, qtype, responseType, blocked))
+	}
+}
+
 func init() {
 	// Load configuration from environment variables
 	if envAddr := os.Getenv(ENV_DNS_LISTEN_ADDR); envAddr != "" {
@@ -413,6 +421,7 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 					}
 				}
 				logger.LogDNS(domain, "dns", "device")
+				emitRequestEvent(domain, dns.TypeToString[q.Qtype], "device", false)
 				w.WriteMsg(response)
 				return
 			}
@@ -433,6 +442,7 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 		if isException {
 			log.Println("Domain is exception : ", domain)
 			logger.LogDNS(domain, "dns", "exception")
+			emitRequestEvent(domain, dns.TypeToString[q.Qtype], "exception", false)
 
 		} else if isInternal {
 			log.Println("Domain is internal : ", domain, " - ", internalIP)
@@ -443,6 +453,7 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 				A:   net.ParseIP(internalIP),
 			})
 			logger.LogDNS(domain, "dns", "internal")
+			emitRequestEvent(domain, dns.TypeToString[q.Qtype], "internal", false)
 			w.WriteMsg(response)
 			return
 		} else if isBlocked {
@@ -454,6 +465,7 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 				Target: "blocked.local.",
 			})
 			logger.LogDNS(domain, "dns", "blocked")
+			emitRequestEvent(domain, dns.TypeToString[q.Qtype], "blocked", true)
 			w.WriteMsg(response)
 			return
 		} else {
@@ -466,6 +478,7 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 			if cached := dnsResponseCache.Get(q.Name, q.Qtype); cached != nil {
 				cached.SetReply(r)
 				cached.Authoritative = false
+				emitRequestEvent(domain, dns.TypeToString[q.Qtype], "cached", false)
 				w.WriteMsg(cached)
 				return
 			}
@@ -482,6 +495,7 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 			// Send SERVFAIL response instead of silently dropping the request.
 			errMsg := new(dns.Msg)
 			errMsg.SetRcode(r, dns.RcodeServerFailure)
+			emitRequestEvent(domain, dns.TypeToString[q.Qtype], "error", false)
 			w.WriteMsg(errMsg)
 			return
 		}
@@ -490,6 +504,7 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 		if dnsResponseCache != nil {
 			dnsResponseCache.Put(q.Name, q.Qtype, resp)
 		}
+		emitRequestEvent(domain, dns.TypeToString[q.Qtype], "forwarded", false)
 
 		// Phase 4: Propagate the upstream rcode (NXDOMAIN, NOERROR, etc.)
 		// and copy answers + authority section (contains SOA for negative responses).

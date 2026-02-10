@@ -10,26 +10,29 @@ import (
 type EventType string
 
 const (
-	EventQuery  EventType = "query"  // DNS query received (cache hit or miss)
-	EventInsert EventType = "insert" // new entry cached
-	EventEvict  EventType = "evict"  // entry evicted (capacity pressure)
-	EventExpire EventType = "expire" // entry removed (TTL expired)
-	EventFlush  EventType = "flush"  // entire cache flushed
-	EventReaper EventType = "reaper" // background reaper sweep completed
+	EventQuery   EventType = "query"   // DNS query received (cache hit or miss)
+	EventInsert  EventType = "insert"  // new entry cached
+	EventEvict   EventType = "evict"   // entry evicted (capacity pressure)
+	EventExpire  EventType = "expire"  // entry removed (TTL expired)
+	EventFlush   EventType = "flush"   // entire cache flushed
+	EventReaper  EventType = "reaper"  // background reaper sweep completed
+	EventRequest EventType = "request" // DNS request resolved (all paths: blocked, cached, forwarded, etc.)
 )
 
 // Event is a single DNS cache event emitted to SSE subscribers.
 // Designed for JSON serialisation over Server-Sent Events.
 type Event struct {
-	Type      EventType `json:"type"`
-	Timestamp int64     `json:"ts"` // Unix milliseconds
-	Domain    string    `json:"domain,omitempty"`
-	QType     string    `json:"qtype,omitempty"`
-	Hit       bool      `json:"hit,omitempty"`        // for EventQuery
-	TTL       int       `json:"ttl,omitempty"`        // remaining TTL in seconds
-	Reason    string    `json:"reason,omitempty"`     // for EventEvict: "capacity" or "expired"
-	Count     int       `json:"count,omitempty"`      // for EventReaper/EventFlush: entries affected
-	CacheSize int64     `json:"cache_size,omitempty"` // current entry count after event
+	Type         EventType `json:"type"`
+	Timestamp    int64     `json:"ts"` // Unix milliseconds
+	Domain       string    `json:"domain,omitempty"`
+	QType        string    `json:"qtype,omitempty"`
+	Hit          bool      `json:"hit,omitempty"`           // for EventQuery
+	TTL          int       `json:"ttl,omitempty"`           // remaining TTL in seconds
+	Reason       string    `json:"reason,omitempty"`        // for EventEvict: "capacity" or "expired"
+	Count        int       `json:"count,omitempty"`         // for EventReaper/EventFlush: entries affected
+	CacheSize    int64     `json:"cache_size,omitempty"`    // current entry count after event
+	ResponseType string    `json:"response_type,omitempty"` // for EventRequest: blocked, cached, forwarded, device, exception, internal, error
+	Blocked      bool      `json:"blocked,omitempty"`       // for EventRequest: true if domain was blocked
 }
 
 // JSON returns the event as a JSON byte slice for SSE data lines.
@@ -228,5 +231,22 @@ func FlushEvent(count int) *Event {
 		Timestamp: now(),
 		Count:     count,
 		CacheSize: 0,
+	}
+}
+
+// RequestEvent creates an event for a completed DNS request.
+// responseType is one of: "blocked", "cached", "forwarded", "device",
+// "exception", "internal", "error".
+// This is the high-level event that SSE consumers use to build real-time
+// stats (top domains, blocked counts, request rates) — replacing the
+// 5-second polling loop on the /stats page.
+func RequestEvent(domain, qtype, responseType string, blocked bool) *Event {
+	return &Event{
+		Type:         EventRequest,
+		Timestamp:    now(),
+		Domain:       domain,
+		QType:        qtype,
+		ResponseType: responseType,
+		Blocked:      blocked,
 	}
 }
