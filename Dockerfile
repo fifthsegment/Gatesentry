@@ -23,9 +23,9 @@ COPY bin/gatesentrybin ./gatesentry-bin
 RUN mkdir -p /usr/local/gatesentry/gatesentry
 
 # Ports:
-#   53     - DNS server (UDP + TCP)
-#   80     - Web admin UI
+#   10053  - DNS server (UDP + TCP)
+#   8080   - Web admin UI
 #   10413  - HTTP(S) filtering proxy
-EXPOSE 53/udp 53/tcp 80 10413
+EXPOSE 10053/udp 10053/tcp 8080/tcp 10413/tcp 10414/tcp 5353/udp
 
 ENTRYPOINT ["./gatesentry-bin"]
