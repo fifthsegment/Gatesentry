@@ -28,6 +28,9 @@ func NewGsWeb(basePath string) *GsWeb {
 		})
 	}
 
+	// Apply CORS middleware globally to all API routes
+	sub.Use(corsMiddleware)
+
 	return &GsWeb{
 		router:   root,
 		sub:      sub,

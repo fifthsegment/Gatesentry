@@ -5,6 +5,7 @@
     Column,
     DataTable,
     Grid,
+    InlineNotification,
     Row,
     Search,
     Tag,
@@ -39,7 +40,10 @@
     ip: item.ip,
     time: format(item.time * 1000),
     url: _.truncate(item.url, { length: 50 }),
-    proxyResponseType: item.proxyResponseType,
+    proxyResponseType:
+      item.type === "dns"
+        ? item.dnsResponseType || "dns"
+        : item.proxyResponseType || "",
   });
 
   const clearSearch = () => {
@@ -105,13 +109,13 @@
     <div style="margin: 20px 0px;">
       Shows the past few requests to GateSentry.
     </div>
-    <div style="margin-bottom: 15px;">
-      <Tag>
-        IMPORTANT: If you are using GateSentry on a Raspberry Pi please make
-        sure to change GateSentry's log file location to RAM. You can do that by
-        going to Settings and changing the log file location to "/tmp/log.db".
-      </Tag>
-    </div>
+    <InlineNotification
+      kind="info"
+      lowContrast
+      title="Raspberry Pi / SD Card users:"
+      subtitle="To reduce SD card wear, change the log file location to RAM by going to Settings and setting the log location to &quot;/tmp/log.db&quot;. Logs in RAM will not survive a reboot."
+      hideCloseButton
+    />
     <div>
       <Search bind:value={search} on:clear={clearSearch} />
       <br />
@@ -138,7 +142,23 @@
           },
         ]}
         rows={logsToRender}
-      ></DataTable>
+      >
+        <svelte:fragment slot="cell" let:cell>
+          {#if cell.key === "proxyResponseType" && cell.value}
+            {#if cell.value === "blocked"}
+              <Tag type="red" size="sm">{cell.value}</Tag>
+            {:else if cell.value === "cached"}
+              <Tag type="teal" size="sm">{cell.value}</Tag>
+            {:else if cell.value === "forward"}
+              <Tag type="blue" size="sm">{cell.value}</Tag>
+            {:else}
+              <Tag type="gray" size="sm">{cell.value}</Tag>
+            {/if}
+          {:else}
+            {cell.value}
+          {/if}
+        </svelte:fragment>
+      </DataTable>
     </div>
   </Column>
 </Row>

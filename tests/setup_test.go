@@ -17,7 +17,7 @@ var (
 )
 
 const (
-	gatesentryCertificateCommonName = "GateSentryFilter"
+	gatesentryCertificateCommonName = "GateSentry CA"
 	blockedURLsFilter               = "Blocked URLs"
 	httpsExceptionSite              = "https://www.github.com"
 	httpsBumpSite                   = "https://www.google.com"

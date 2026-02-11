@@ -21,7 +21,7 @@ var (
 )
 
 const (
-	gatesentryCertificateCommonName = "GateSentryFilter"
+	gatesentryCertificateCommonName = "GateSentry CA"
 	blockedURLsFilter               = "Blocked URLs"
 	httpsExceptionSite              = "https://www.github.com"
 	httpsBumpSite                   = "https://www.google.com"
@@ -41,7 +41,7 @@ func TestMain(m *testing.M) {
 
 	// Start proxy server in background
 	go main()
-	
+
 	// Initialize test variables
 	proxyURL = "http://localhost:" + GSPROXYPORT
 	// GS_ADMIN_PORT override for tests
@@ -412,7 +412,7 @@ func TestProxyServer(t *testing.T) {
 		t.Logf("Response body after post = %s", string(body))
 		t.Log("Waiting for the server to reload")
 
-		// time.Sleep(4 * time.Second)
+		time.Sleep(2 * time.Second)
 
 		for _, filter := range R.Filters {
 			t.Logf("Filter name = %s", filter.FilterName)
