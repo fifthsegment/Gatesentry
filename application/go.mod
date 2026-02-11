@@ -5,7 +5,6 @@ go 1.24.0
 toolchain go1.24.10
 
 require (
-	github.com/abourget/goproxy v0.0.0-20170220221050-fcf497103e7b
 	github.com/antonholmquist/jason v1.0.0
 	github.com/badoux/checkmail v1.2.1
 	github.com/golang-jwt/jwt/v5 v5.3.0
@@ -17,7 +16,6 @@ require (
 	github.com/rogpeppe/go-charset v0.0.0-20190617161244-0dc95cdf6f31
 	github.com/tidwall/buntdb v1.2.6
 	golang.org/x/image v0.33.0
-	gopkg.in/elazarl/goproxy.v1 v1.0.0-20180725130230-947c36da3153
 )
 
 require (
@@ -29,8 +27,6 @@ require (
 	github.com/aymerick/douceur v0.2.0 // indirect
 	github.com/aymerick/raymond v2.0.3-0.20180322193309-b565731e1464+incompatible // indirect
 	github.com/eknkc/amber v0.0.0-20171010120322-cdade1c07385 // indirect
-	github.com/elazarl/goproxy v0.0.0-20210801061803-8e322dfb79c4 // indirect
-	github.com/elazarl/goproxy/ext v0.0.0-20190711103511-473e67f1d7d2 // indirect
 	github.com/fatih/structs v1.1.0 // indirect
 	github.com/flosch/pongo2/v4 v4.0.2 // indirect
 	github.com/goccy/go-json v0.9.4 // indirect
@@ -38,7 +34,6 @@ require (
 	github.com/google/uuid v1.3.0 // indirect
 	github.com/gorilla/css v1.0.0 // indirect
 	github.com/hashicorp/go-rootcerts v1.0.2 // indirect
-	github.com/inconshreveable/go-vhost v0.0.0-20160627193104-06d84117953b // indirect
 	github.com/iris-contrib/jade v1.1.4 // indirect
 	github.com/iris-contrib/schema v0.0.6 // indirect
 	github.com/josharian/intern v1.0.0 // indirect

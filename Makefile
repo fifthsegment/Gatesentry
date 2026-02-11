@@ -15,10 +15,10 @@ run: build
 # Run integration tests with server
 test: clean-test build
 	@echo "Starting Gatesentry server in background..."
-	@cd /tmp && ./gatesentry-bin > /dev/null 2>&1 & echo $$! > /tmp/gatesentry.pid
+	@cd /tmp && GS_ADMIN_PORT=8080 ./gatesentry-bin > /tmp/gatesentry.log 2>&1 & echo $$! > /tmp/gatesentry.pid
 	@echo "Waiting for server to be ready..."
 	@for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do \
-		if curl -s http://localhost:10786/api/health > /dev/null 2>&1 || curl -s http://localhost:10786 > /dev/null 2>&1; then \
+		if curl -s http://localhost:8080/gatesentry/api/about > /dev/null 2>&1; then \
 			echo "Server is ready!"; \
 			break; \
 		fi; \
@@ -33,7 +33,7 @@ test: clean-test build
 		sleep 2; \
 	done
 	@echo "Running tests..."
-	@GODEBUG=gotestcache=off go test -v -timeout 5m ./tests/... -coverprofile=coverage.txt -covermode=atomic || (kill `cat /tmp/gatesentry.pid` 2>/dev/null; rm -f /tmp/gatesentry.pid; exit 1)
+	@GS_ADMIN_PORT=8080 GODEBUG=gotestcache=off go test -v -timeout 5m ./tests/... -coverprofile=coverage.txt -covermode=atomic || (kill `cat /tmp/gatesentry.pid` 2>/dev/null; rm -f /tmp/gatesentry.pid; exit 1)
 	@echo "Stopping server..."
 	@kill `cat /tmp/gatesentry.pid` 2>/dev/null || true
 	@rm -f /tmp/gatesentry.pid

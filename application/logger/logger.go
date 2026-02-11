@@ -198,7 +198,17 @@ func (L *Log) GetLogSearch(search string) string {
 	return strings.Join(outputs, ",")
 }
 
-func (L *Log) GetLastXSecondsDNSLogs(fromSeconds int64, groupByDate bool) (interface{}, error) {
+// GetLastXSecondsDNSLogs retrieves DNS/proxy log entries from the last N seconds.
+//
+// groupByFormat controls how entries are bucketed:
+//   - ""                   → no grouping, returns []LogEntry
+//   - "2006-01-02"         → group by day   (local time)
+//   - "2006-01-02T15"      → group by hour  (local time)
+//   - "2006-01-02T15:04"   → group by minute (local time)
+//
+// When a groupByFormat is provided the return type is map[string][]LogEntry
+// where the key is the formatted local-time bucket string.
+func (L *Log) GetLastXSecondsDNSLogs(fromSeconds int64, groupByFormat string) (interface{}, error) {
 	var logs interface{} // The return type can be either []LogEntry or map[string][]LogEntry
 
 	now := time.Now()
@@ -226,17 +236,14 @@ func (L *Log) GetLastXSecondsDNSLogs(fromSeconds int64, groupByDate bool) (inter
 				if logEntry.Type == "proxy" {
 					logEntry.URL = strings.Replace(logEntry.URL, "http://", "", -1)
 					logEntry.URL = strings.Replace(logEntry.URL, ":443", "", -1)
-					// log.Println( logEntry );
-					log.Println("[LogViewer] Proxy log entry : " + logEntry.URL)
-
 				}
-				if groupByDate {
-					// Group entries by date
+				if groupByFormat != "" {
+					// Group entries by the requested time bucket (local time)
 					if logs == nil {
 						logs = make(map[string][]LogEntry)
 					}
-					date := time.Unix(logEntry.Time, 0).Format("2006-01-02")
-					logs.(map[string][]LogEntry)[date] = append(logs.(map[string][]LogEntry)[date], logEntry)
+					bucket := time.Unix(logEntry.Time, 0).Local().Format(groupByFormat)
+					logs.(map[string][]LogEntry)[bucket] = append(logs.(map[string][]LogEntry)[bucket], logEntry)
 				} else {
 					// No grouping, add directly to the slice
 					if logs == nil {
