@@ -101,14 +101,15 @@ type Stats struct {
 
 // Snapshot returns a point-in-time copy of the stats for serialisation.
 type StatsSnapshot struct {
-	Hits      int64   `json:"hits"`
-	Misses    int64   `json:"misses"`
-	Inserts   int64   `json:"inserts"`
-	Evictions int64   `json:"evictions"`
-	Expired   int64   `json:"expired"`
-	Entries   int64   `json:"entries"`
-	SizeBytes int64   `json:"size_bytes"`
-	HitRate   float64 `json:"hit_rate_pct"` // hits / (hits + misses) * 100
+	Hits       int64   `json:"hits"`
+	Misses     int64   `json:"misses"`
+	Inserts    int64   `json:"inserts"`
+	Evictions  int64   `json:"evictions"`
+	Expired    int64   `json:"expired"`
+	Entries    int64   `json:"entries"`
+	MaxEntries int     `json:"max_entries"`
+	SizeBytes  int64   `json:"size_bytes"`
+	HitRate    float64 `json:"hit_rate_pct"` // hits / (hits + misses) * 100
 }
 
 // DNSCache is a sharded, TTL-aware DNS response cache.
@@ -314,14 +315,46 @@ func (c *DNSCache) Snapshot() StatsSnapshot {
 		hitRate = float64(hits) / float64(total) * 100.0
 	}
 	return StatsSnapshot{
-		Hits:      hits,
-		Misses:    misses,
-		Inserts:   c.stats.Inserts.Load(),
-		Evictions: c.stats.Evictions.Load(),
-		Expired:   c.stats.Expired.Load(),
-		Entries:   c.stats.Entries.Load(),
-		SizeBytes: c.stats.SizeBytes.Load(),
-		HitRate:   hitRate,
+		Hits:       hits,
+		Misses:     misses,
+		Inserts:    c.stats.Inserts.Load(),
+		Evictions:  c.stats.Evictions.Load(),
+		Expired:    c.stats.Expired.Load(),
+		Entries:    c.stats.Entries.Load(),
+		MaxEntries: c.config.MaxEntries,
+		SizeBytes:  c.stats.SizeBytes.Load(),
+		HitRate:    hitRate,
+	}
+}
+
+// SnapshotAndReset atomically reads all event counters and resets them to 0.
+// Gauge-like fields (Entries, MaxEntries, SizeBytes) are NOT reset — they
+// represent current state rather than accumulated events.
+//
+// The recorder calls this once per minute so each BuntDB snapshot stores
+// the per-minute delta, not a running total.
+func (c *DNSCache) SnapshotAndReset() StatsSnapshot {
+	hits := c.stats.Hits.Swap(0)
+	misses := c.stats.Misses.Swap(0)
+	inserts := c.stats.Inserts.Swap(0)
+	evictions := c.stats.Evictions.Swap(0)
+	expired := c.stats.Expired.Swap(0)
+
+	total := hits + misses
+	var hitRate float64
+	if total > 0 {
+		hitRate = float64(hits) / float64(total) * 100.0
+	}
+	return StatsSnapshot{
+		Hits:       hits,
+		Misses:     misses,
+		Inserts:    inserts,
+		Evictions:  evictions,
+		Expired:    expired,
+		Entries:    c.stats.Entries.Load(),
+		MaxEntries: c.config.MaxEntries,
+		SizeBytes:  c.stats.SizeBytes.Load(),
+		HitRate:    hitRate,
 	}
 }
 

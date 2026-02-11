@@ -20,8 +20,8 @@ fi
 if [ ! -d "bin" ]; then
     mkdir bin
 else
-    echo "Cleaning existing bin directory..."
-    rm -rf bin/*
+    echo "Cleaning old binaries (preserving data)..."
+    find bin -maxdepth 1 -type f -delete
 fi
 echo "Building GateSentry..."
 CGO_ENABLED=0 go build -ldflags="-s -w" -o bin/ ./...

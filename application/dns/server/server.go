@@ -76,15 +76,49 @@ var (
 	logger           *gatesentryLogger.Log
 )
 
+// wpadEnabled controls whether the DNS server intercepts wpad.* queries
+// and returns GateSentry's own IP. Enabled by default.
+// Toggled via SetWPADEnabled() from the settings API.
+var wpadEnabled atomic.Bool
+
+func init() {
+	// WPAD DNS interception is enabled by default
+	wpadEnabled.Store(true)
+}
+
+// SetWPADEnabled enables or disables WPAD DNS interception.
+func SetWPADEnabled(enabled bool) {
+	wpadEnabled.Store(enabled)
+	if enabled {
+		log.Printf("[DNS] WPAD interception enabled (local IP: %s)", localIp)
+	} else {
+		log.Println("[DNS] WPAD interception disabled")
+	}
+}
+
+// IsWPADEnabled returns true if WPAD DNS interception is active.
+func IsWPADEnabled() bool {
+	return wpadEnabled.Load()
+}
+
 // dnsResponseCache is the sharded, TTL-aware DNS response cache.
 // Initialised in StartDNSServer() with environment-driven configuration.
 // Accessible via GetDNSCache() for the SSE endpoint and admin API.
 var dnsResponseCache *dnscache.DNSCache
 
+// cacheRecorder periodically snapshots cache counters into BuntDB.
+// Initialised in StartDNSServer() alongside the cache itself.
+var cacheRecorder *dnscache.Recorder
+
 // GetDNSCache returns the DNS response cache instance.
 // Returns nil before StartDNSServer() is called.
 func GetDNSCache() *dnscache.DNSCache {
 	return dnsResponseCache
+}
+
+// GetCacheRecorder returns the cache stats recorder, or nil if not started.
+func GetCacheRecorder() *dnscache.Recorder {
+	return cacheRecorder
 }
 
 // emitRequestEvent sends a high-level DNS request event to any SSE subscribers.
@@ -218,6 +252,13 @@ func StartDNSServer(basePath string, ilogger *gatesentryLogger.Log, blockedLists
 	dnsResponseCache = dnscache.New(cacheCfg)
 	log.Printf("[DNS Cache] Initialised: max=%d, minTTL=%s, maxTTL=%s, negativeTTL=%s, reap=%s",
 		cacheCfg.MaxEntries, cacheCfg.MinTTL, cacheCfg.MaxTTL, cacheCfg.NegativeTTL, cacheCfg.ReapInterval)
+
+	// Start the periodic cache stats recorder (1 write/min → BuntDB, 24h TTL).
+	// Uses the existing logger's DB so snapshots survive binary restarts.
+	if logger != nil && logger.Database != nil {
+		cacheRecorder = dnscache.NewRecorder(dnsResponseCache, logger.Database, time.Minute)
+		cacheRecorder.Start()
+	}
 
 	// Start mDNS/Bonjour browser for automatic device discovery (Phase 3).
 	// Browses common service types (_airplay._tcp, _googlecast._tcp, _printer._tcp, etc.)
@@ -427,6 +468,31 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 			}
 		}
 
+		// --- WPAD DNS interception ---
+		// If the queried domain starts with "wpad." or is exactly "wpad",
+		// return our own IP so the client fetches the PAC file from us.
+		// This enables automatic proxy configuration for all network clients
+		// without requiring DHCP option 252.
+		if wpadEnabled.Load() && q.Qtype == dns.TypeA {
+			lowerDomain := strings.ToLower(domain)
+			if lowerDomain == "wpad" || strings.HasPrefix(lowerDomain, "wpad.") {
+				if localIp != "" {
+					log.Printf("[DNS] WPAD intercept: %s → %s", domain, localIp)
+					response := new(dns.Msg)
+					response.SetRcode(r, dns.RcodeSuccess)
+					response.Authoritative = true
+					response.Answer = append(response.Answer, &dns.A{
+						Hdr: dns.RR_Header{Name: q.Name, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 60},
+						A:   net.ParseIP(localIp),
+					})
+					logger.LogDNS(domain, "dns", "wpad")
+					emitRequestEvent(domain, dns.TypeToString[q.Qtype], "wpad", false)
+					w.WriteMsg(response)
+					return
+				}
+			}
+		}
+
 		// --- 2. Legacy path: exception / internal / blocked ---
 		// Use read lock — allows concurrent DNS queries while blocking filter updates
 		mutex.RLock()
@@ -469,7 +535,7 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 			w.WriteMsg(response)
 			return
 		} else {
-			logger.LogDNS(domain, "dns", "forward")
+			// Will be logged as "forward" or "cached" below after the cache check
 		}
 
 		// --- 3. Forward to external resolver (with cache) ---
@@ -478,11 +544,14 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 			if cached := dnsResponseCache.Get(q.Name, q.Qtype); cached != nil {
 				cached.SetReply(r)
 				cached.Authoritative = false
+				logger.LogDNS(domain, "dns", "cached")
 				emitRequestEvent(domain, dns.TypeToString[q.Qtype], "cached", false)
 				w.WriteMsg(cached)
 				return
 			}
 		}
+
+		logger.LogDNS(domain, "dns", "forward")
 
 		// Cache miss — forward to external resolver.
 		// Forward request WITHOUT holding the mutex - this is the key fix!

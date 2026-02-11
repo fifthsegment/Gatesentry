@@ -12,10 +12,14 @@
 
   let modalOpenComputer = false;
   let modalOpenPhone = false;
-  let server_url = "";
+  let dns_address = "";
+  let dns_port = "";
+  let proxy_port = "";
   $store.api.doCall("/status").then((json) => {
     if (json) {
-      server_url = json.server_url;
+      dns_address = json.dns_address || "";
+      dns_port = json.dns_port || "53";
+      proxy_port = json.proxy_port || "10413";
     }
   });
 </script>
@@ -29,7 +33,12 @@
 <Row
   ><Column>
     <div class="simple-border">
-      Gatesentry is running on <strong>{server_url}</strong>
+      {#if dns_address}
+        Host: <strong>{dns_address}</strong> &mdash; DNS port
+        <strong>{dns_port}</strong>, Proxy port <strong>{proxy_port}</strong>
+      {:else}
+        Gatesentry is starting…
+      {/if}
     </div>
     <Row>
       <Column>

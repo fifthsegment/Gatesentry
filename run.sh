@@ -22,8 +22,6 @@ sleep 1
 
 if [ "$1" == "--build" ]; then
     echo "Building GateSentry binary..."
-    rm -rf bin
-    mkdir bin
     bash build.sh
     if [ $? -ne 0 ]; then
         echo "Build failed. Exiting."

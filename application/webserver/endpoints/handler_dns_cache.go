@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 
 	dnscache "bitbucket.org/abdullah_irfan/gatesentryf/dns/cache"
 	gatesentryDnsServer "bitbucket.org/abdullah_irfan/gatesentryf/dns/server"
@@ -46,6 +47,30 @@ func GSApiDNSCacheFlush(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.Write([]byte(`{"status":"flushed"}`))
+}
+
+// GSApiDNSCacheHistory returns recent per-minute cache stat snapshots.
+// GET /api/dns/cache/stats/history?minutes=60
+//
+// Each snapshot contains cumulative counters.  The frontend computes deltas
+// between consecutive entries to derive per-minute hit/miss rates.
+func GSApiDNSCacheHistory(w http.ResponseWriter, r *http.Request) {
+	rec := gatesentryDnsServer.GetCacheRecorder()
+	if rec == nil {
+		http.Error(w, `{"error":"Cache recorder not available"}`, http.StatusServiceUnavailable)
+		return
+	}
+
+	minutes := 60 // default to last hour
+	if m := r.URL.Query().Get("minutes"); m != "" {
+		if v, err := strconv.Atoi(m); err == nil && v > 0 {
+			minutes = v
+		}
+	}
+
+	history := rec.GetHistory(minutes)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(history)
 }
 
 // GSApiDNSEvents streams real-time DNS cache events via Server-Sent Events (SSE).

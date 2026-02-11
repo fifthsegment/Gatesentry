@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -23,6 +24,28 @@ import (
 )
 
 var hmacSampleSecret = []byte("I7JE72S9XJ48ANXMI78ASDNMQ839")
+
+// corsMiddleware adds CORS headers to all API responses.
+// Echoes back the Origin header to allow cross-origin requests from any hostname,
+// which is necessary when accessing GateSentry from different device hostnames
+// (e.g., monster-jj, monster-jj.local, monster-jj.jvj28.com, localhost, IP addresses).
+var corsMiddleware mux.MiddlewareFunc = func(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if origin := r.Header.Get("Origin"); origin != "" {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
+		}
+
+		// Handle preflight requests
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
 
 type User struct {
 	Username string `json:"username"`
@@ -177,6 +200,22 @@ func RegisterEndpointsStartServer(
 
 			return
 		}
+
+		// On successful login, capture the host the admin used to reach us.
+		// If wpad_proxy_host hasn't been configured yet, seed it — the admin
+		// just proved this address works by logging in with it.
+		if internalSettings.Get("wpad_proxy_host") == "" {
+			host := r.Host
+			if h, _, err := net.SplitHostPort(host); err == nil {
+				host = h
+			}
+			// Only seed if it's not localhost — that wouldn't help other devices
+			if host != "" && host != "localhost" && host != "127.0.0.1" && host != "::1" {
+				internalSettings.Update("wpad_proxy_host", host)
+				log.Printf("[WPAD] Auto-detected proxy host from admin login: %s", host)
+			}
+		}
+
 		ctx := context.WithValue(r.Context(), "username", data.Username)
 		tokenCreationHandler(w, r.WithContext(ctx))
 	}))
@@ -323,6 +362,9 @@ func RegisterEndpointsStartServer(
 	internalServer.Get("/api/dns/cache/stats", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
 		gatesentryWebserverEndpoints.GSApiDNSCacheStats(w, r)
 	})
+	internalServer.Get("/api/dns/cache/stats/history", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiDNSCacheHistory(w, r)
+	})
 	internalServer.Post("/api/dns/cache/flush", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
 		gatesentryWebserverEndpoints.GSApiDNSCacheFlush(w, r)
 	})
@@ -338,12 +380,13 @@ func RegisterEndpointsStartServer(
 	})
 
 	internalServer.Get("/api/status", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
-		output := gatesentryWebserverEndpoints.ApiGetStatus(logger, boundAddress)
+		output := gatesentryWebserverEndpoints.ApiGetStatus(logger, boundAddress, internalSettings)
 		SendJSON(w, output)
 	})
 
 	internalServer.Get("/api/stats/byUrl", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
-		output := gatesentryWebserverEndpoints.ApiGetStatsByURL(logger)
+		seconds, group := gatesentryWebserverEndpoints.ParseStatsQuery(r)
+		output := gatesentryWebserverEndpoints.ApiGetStatsByURL(logger, seconds, group)
 		SendJSON(w, output)
 	})
 
@@ -359,10 +402,15 @@ func RegisterEndpointsStartServer(
 		SendJSON(w, output)
 	})
 
+	internalServer.Post("/api/certificate/generate", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		output := gatesentryWebserverEndpoints.GSApiCertificateGenerate(internalSettings)
+		SendJSON(w, output)
+	})
+
 	internalServer.Get("/api/files/certificate", HttpHandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		output := gatesentryWebserverEndpoints.GetCertificateBytes(internalSettings)
-		w.Header().Set("Content-Disposition", "attachment; filename=certificate.pem")
-		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("Content-Disposition", "attachment; filename=gatesentry-ca.crt")
+		w.Header().Set("Content-Type", "application/x-x509-ca-cert")
 		w.Write(output)
 	}))
 
@@ -417,6 +465,21 @@ func RegisterEndpointsStartServer(
 		gatesentryWebserverEndpoints.GSApiDeviceDelete(w, r)
 	})
 	log.Println("Device API endpoints registered")
+
+	// --- WPAD / PAC file endpoint ---
+	// Registered on the ROOT router (not the basePath subrouter) because:
+	// 1. WPAD auto-discovery always fetches http://wpad.<domain>/wpad.dat (root path)
+	// 2. No authentication — all network clients must be able to fetch the PAC file
+	// 3. Must work regardless of GS_BASE_PATH configuration
+	log.Println("Registering WPAD/PAC endpoints...")
+	wpadHandler := gatesentryWebserverEndpoints.GSApiWPADHandler(internalSettings)
+	internalServer.router.HandleFunc("/wpad.dat", wpadHandler).Methods("GET")
+	internalServer.router.HandleFunc("/proxy.pac", wpadHandler).Methods("GET")
+	log.Println("WPAD/PAC endpoints registered: /wpad.dat, /proxy.pac")
+
+	// Authenticated WPAD info endpoint (for admin UI)
+	internalServer.Get("/api/wpad/info", authenticationMiddleware,
+		HttpHandlerFunc(gatesentryWebserverEndpoints.GSApiWPADInfoHandler(internalSettings, port)))
 
 	// Serve static assets from the embedded files/fs/ directory.
 	// GetFSHandler() returns fs.Sub(build, "files"), so files live at fs/bundle.js etc.
