@@ -254,8 +254,20 @@ func TestHandleDNS_BlockedDomain(t *testing.T) {
 	if w.msg == nil {
 		t.Fatal("Expected response message")
 	}
-	if w.msg.Rcode != dns.RcodeNameError {
-		t.Errorf("Expected NXDOMAIN, got %d", w.msg.Rcode)
+	// Blocked domains return an A record pointing to GateSentry's local IP
+	// so the browser connects to us and we can serve a block page
+	if w.msg.Rcode != dns.RcodeSuccess {
+		t.Errorf("Expected RcodeSuccess (block page redirect), got %d", w.msg.Rcode)
+	}
+	if len(w.msg.Answer) != 1 {
+		t.Fatalf("Expected 1 answer (A record with local IP), got %d", len(w.msg.Answer))
+	}
+	a, ok := w.msg.Answer[0].(*dns.A)
+	if !ok {
+		t.Fatalf("Expected A record, got %T", w.msg.Answer[0])
+	}
+	if a.A == nil {
+		t.Fatal("Expected A record with local IP, got nil")
 	}
 }
 
