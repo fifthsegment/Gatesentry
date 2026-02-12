@@ -24,19 +24,44 @@ import (
 func GeneratePACFile(proxyHost, proxyPort string) string {
 	return fmt.Sprintf(`function FindProxyForURL(url, host) {
     // --- Direct connections (bypass proxy) ---
+    // These correspond to the NO_PROXY / no_proxy environment variable.
 
-    // Localhost
+    // Plain hostnames (no dots — e.g. "myserver") and localhost variants
     if (isPlainHostName(host) ||
         shExpMatch(host, "localhost") ||
+        shExpMatch(host, "localhost.*") ||
         shExpMatch(host, "127.*") ||
         shExpMatch(host, "::1")) {
         return "DIRECT";
     }
 
-    // Private networks (RFC 1918) — local LAN devices, printers, NAS, etc.
-    if (isInNet(dnsResolve(host), "10.0.0.0", "255.0.0.0") ||
-        isInNet(dnsResolve(host), "172.16.0.0", "255.240.0.0") ||
-        isInNet(dnsResolve(host), "192.168.0.0", "255.255.0.0")) {
+    // Private IP literals — only bypass when the USER typed a private IP
+    // in the address bar (e.g. http://192.168.1.1, http://10.0.0.1).
+    //
+    // IMPORTANT: We do NOT use dnsResolve() here.  dnsResolve() would
+    // cause DNS-blocked domains (which resolve to GateSentry's private IP)
+    // to bypass the proxy, preventing the proxy from showing its block
+    // page and performing HTTPS MITM interception.
+    if (shExpMatch(host, "10.*") ||
+        shExpMatch(host, "172.16.*") || shExpMatch(host, "172.17.*") ||
+        shExpMatch(host, "172.18.*") || shExpMatch(host, "172.19.*") ||
+        shExpMatch(host, "172.20.*") || shExpMatch(host, "172.21.*") ||
+        shExpMatch(host, "172.22.*") || shExpMatch(host, "172.23.*") ||
+        shExpMatch(host, "172.24.*") || shExpMatch(host, "172.25.*") ||
+        shExpMatch(host, "172.26.*") || shExpMatch(host, "172.27.*") ||
+        shExpMatch(host, "172.28.*") || shExpMatch(host, "172.29.*") ||
+        shExpMatch(host, "172.30.*") || shExpMatch(host, "172.31.*") ||
+        shExpMatch(host, "192.168.*")) {
+        return "DIRECT";
+    }
+
+    // Link-local addresses (RFC 3927)
+    if (shExpMatch(host, "169.254.*")) {
+        return "DIRECT";
+    }
+
+    // mDNS / Bonjour / local service discovery
+    if (shExpMatch(host, "*.local")) {
         return "DIRECT";
     }
 
@@ -46,9 +71,11 @@ func GeneratePACFile(proxyHost, proxyPort string) string {
     }
 
     // --- Everything else goes through GateSentry proxy ---
-    return "PROXY %s:%s; DIRECT";
+    // PROXY = HTTP proxying;  HTTPS = HTTPS proxying (CONNECT tunnelling)
+    // Both are needed so clients set both HTTP_PROXY and HTTPS_PROXY.
+    return "PROXY %s:%s; HTTPS %s:%s; DIRECT";
 }
-`, proxyHost, proxyHost, proxyPort)
+`, proxyHost, proxyHost, proxyPort, proxyHost, proxyPort)
 }
 
 // GSApiWPADHandler serves the WPAD/PAC file.

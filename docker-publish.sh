@@ -45,7 +45,9 @@ set -euo pipefail
 IMAGE_NAME="gatesentry"
 DOCKERHUB_REPO="jbarwick/gatesentry"
 DOCKERHUB_README="DOCKERHUB_README.md"
-NEXUS_REGISTRY="monster-jj.jvj28.com:9092"
+# Strip any scheme (https://, http://) — Docker refs are just host:port
+NEXUS_REGISTRY="${NEXUS_SERVER#https://}"
+NEXUS_REGISTRY="${NEXUS_REGISTRY#http://}"
 NEXUS_REPO="${NEXUS_REGISTRY}/${IMAGE_NAME}"
 
 # ── Defaults ─────────────────────────────────────────────────────────────────

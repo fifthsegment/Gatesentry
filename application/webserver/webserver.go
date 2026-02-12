@@ -7,6 +7,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -51,6 +52,69 @@ type User struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
 	Pass     string `json:"pass"`
+}
+
+// blockedDomainMiddleware returns a middleware that intercepts requests from
+// DNS-blocked domains. When the DNS server resolves a blocked domain to
+// GateSentry's own IP, the browser sends the request here with the blocked
+// domain as the Host header. This middleware detects that the Host doesn't
+// belong to GateSentry and serves a block page instead of the admin UI.
+func blockedDomainMiddleware(settings *gatesentry2storage.MapStore, port string) mux.MiddlewareFunc {
+	// Build a set of hostnames that belong to GateSentry itself.
+	// Any request with a Host header NOT in this set is assumed to be
+	// from a DNS-blocked domain and gets the block page.
+	knownHosts := map[string]bool{
+		"localhost": true,
+		"127.0.0.1": true,
+		"::1":       true,
+	}
+
+	// Add the machine's hostname
+	if hostname, err := os.Hostname(); err == nil {
+		knownHosts[strings.ToLower(hostname)] = true
+		// Also add hostname.local for mDNS
+		knownHosts[strings.ToLower(hostname)+".local"] = true
+	}
+
+	// Add any local network IPs
+	if addrs, err := net.InterfaceAddrs(); err == nil {
+		for _, addr := range addrs {
+			if ipnet, ok := addr.(*net.IPNet); ok {
+				knownHosts[ipnet.IP.String()] = true
+			}
+		}
+	}
+
+	blockedHandler := gatesentryWebserverEndpoints.GSBlockedPageHandler()
+
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			host := r.Host
+			// Strip port from Host header
+			if h, _, err := net.SplitHostPort(host); err == nil {
+				host = h
+			}
+			host = strings.ToLower(host)
+
+			// Also check the dynamic wpad_proxy_host setting
+			if proxyHost := settings.Get("wpad_proxy_host"); proxyHost != "" {
+				if strings.ToLower(proxyHost) == host {
+					next.ServeHTTP(w, r)
+					return
+				}
+			}
+
+			if knownHosts[host] {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			// Host doesn't match any known GateSentry hostname —
+			// this is a DNS-blocked domain, serve the block page
+			log.Printf("[WEB] Serving block page for DNS-blocked domain: %s", r.Host)
+			blockedHandler.ServeHTTP(w, r)
+		})
+	}
 }
 
 type ErrorResponse struct {
@@ -184,6 +248,13 @@ func RegisterEndpointsStartServer(
 	// newRouter := mux.NewRouter()
 
 	internalServer := NewGsWeb(basePath)
+
+	// Apply blocked-domain middleware to the root router.
+	// This intercepts requests from DNS-blocked domains (where the DNS server
+	// resolved the blocked domain to GateSentry's IP) and serves a block page
+	// instead of the admin UI. Must be on the root router so it runs before
+	// any subrouter matching.
+	internalServer.router.Use(blockedDomainMiddleware(internalSettings, port))
 
 	internalServer.Post("/api/auth/token", HttpHandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var data User
@@ -493,6 +564,14 @@ func RegisterEndpointsStartServer(
 	} else {
 		internalServer.sub.PathPrefix("/fs/").Handler(fsHandler)
 	}
+
+	// --- Root-level static files (favicon, logo, etc.) ---
+	// These must be registered before the SPA catch-all routes so they
+	// are matched first. No authentication required.
+	internalServer.sub.HandleFunc("/gatesentry.svg",
+		gatesentryWebserverFrontend.RootFileHandler("gatesentry.svg")).Methods("GET")
+	internalServer.sub.HandleFunc("/favicon.ico",
+		gatesentryWebserverFrontend.RootFileHandler("favicon.ico")).Methods("GET")
 
 	baseIndexHandler := makeIndexHandler(basePath)
 	internalServer.Get("/", baseIndexHandler)

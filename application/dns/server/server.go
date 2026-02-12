@@ -81,9 +81,18 @@ var (
 // Toggled via SetWPADEnabled() from the settings API.
 var wpadEnabled atomic.Bool
 
+// dnsFilteringEnabled controls whether the DNS server blocks domains on
+// the blocklist. When disabled, the DNS server stays running and continues
+// to resolve all queries (logging stats, populating charts, caching, etc.)
+// but blocked domains are forwarded to the upstream resolver instead of
+// returning GateSentry's IP.  Enabled by default.
+var dnsFilteringEnabled atomic.Bool
+
 func init() {
 	// WPAD DNS interception is enabled by default
 	wpadEnabled.Store(true)
+	// DNS domain filtering is enabled by default
+	dnsFilteringEnabled.Store(true)
 }
 
 // SetWPADEnabled enables or disables WPAD DNS interception.
@@ -99,6 +108,24 @@ func SetWPADEnabled(enabled bool) {
 // IsWPADEnabled returns true if WPAD DNS interception is active.
 func IsWPADEnabled() bool {
 	return wpadEnabled.Load()
+}
+
+// SetDNSFilteringEnabled enables or disables DNS domain blocking.
+// When disabled the DNS server still runs, resolves all queries, and
+// records stats — but blocked domains are forwarded to the upstream
+// resolver instead of being intercepted.
+func SetDNSFilteringEnabled(enabled bool) {
+	dnsFilteringEnabled.Store(enabled)
+	if enabled {
+		log.Println("[DNS] Domain filtering enabled")
+	} else {
+		log.Println("[DNS] Domain filtering disabled — blocked domains will resolve normally")
+	}
+}
+
+// IsDNSFilteringEnabled returns true if DNS domain blocking is active.
+func IsDNSFilteringEnabled() bool {
+	return dnsFilteringEnabled.Load()
 }
 
 // dnsResponseCache is the sharded, TTL-aware DNS response cache.
@@ -522,13 +549,15 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 			emitRequestEvent(domain, dns.TypeToString[q.Qtype], "internal", false)
 			w.WriteMsg(response)
 			return
-		} else if isBlocked {
+		} else if isBlocked && dnsFilteringEnabled.Load() {
 			log.Println("[DNS] Domain is blocked : ", domain)
 			response := new(dns.Msg)
-			response.SetRcode(r, dns.RcodeNameError)
-			response.Answer = append(response.Answer, &dns.CNAME{
-				Hdr:    dns.RR_Header{Name: domain + ".", Rrtype: dns.TypeCNAME, Class: dns.ClassINET, Ttl: 3600},
-				Target: "blocked.local.",
+			response.SetRcode(r, dns.RcodeSuccess)
+			// Return GateSentry's own IP so the browser connects to us
+			// and we can serve a "blocked" page instead of a connection error
+			response.Answer = append(response.Answer, &dns.A{
+				Hdr: dns.RR_Header{Name: domain + ".", Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 60},
+				A:   net.ParseIP(localIp),
 			})
 			logger.LogDNS(domain, "dns", "blocked")
 			emitRequestEvent(domain, dns.TypeToString[q.Qtype], "blocked", true)

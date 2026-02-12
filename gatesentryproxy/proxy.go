@@ -76,6 +76,13 @@ func init() {
 
 	// Wire the dialer's resolver to GateSentry's own DNS server so that
 	// every hostname the proxy resolves goes through GateSentry filtering.
+	setGateSentryResolver()
+	log.Printf("[Phase2] Proxy DNS resolver wired to 127.0.0.1:%s", GateSentryDNSPort)
+}
+
+// setGateSentryResolver configures the dialer to resolve DNS through
+// GateSentry's own DNS server at 127.0.0.1:GateSentryDNSPort.
+func setGateSentryResolver() {
 	dialer.Resolver = &net.Resolver{
 		PreferGo: true,
 		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
@@ -83,7 +90,32 @@ func init() {
 			return d.DialContext(ctx, "udp", "127.0.0.1:"+GateSentryDNSPort)
 		},
 	}
-	log.Printf("[Phase2] Proxy DNS resolver wired to 127.0.0.1:%s", GateSentryDNSPort)
+}
+
+// SetDNSResolver switches the proxy's DNS resolution strategy.
+// When the GateSentry DNS server is running, the proxy should use it so that
+// blocked-domain filtering applies to proxied requests. When the DNS server is
+// stopped, the proxy falls back to the configured upstream resolver so that
+// proxied requests can still resolve hostnames.
+func SetDNSResolver(useGateSentryDNS bool, upstreamResolver string) {
+	if useGateSentryDNS {
+		setGateSentryResolver()
+		log.Printf("[Proxy] DNS resolver switched to GateSentry DNS (127.0.0.1:%s)", GateSentryDNSPort)
+	} else {
+		// Normalize upstream resolver — ensure it has a port
+		if _, _, err := net.SplitHostPort(upstreamResolver); err != nil {
+			upstreamResolver = net.JoinHostPort(upstreamResolver, "53")
+		}
+		resolver := upstreamResolver // capture for closure
+		dialer.Resolver = &net.Resolver{
+			PreferGo: true,
+			Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+				d := net.Dialer{Timeout: 5 * time.Second}
+				return d.DialContext(ctx, "udp", resolver)
+			},
+		}
+		log.Printf("[Proxy] DNS resolver switched to upstream (%s) — GateSentry DNS is disabled", resolver)
+	}
 }
 
 // safeDialContext prevents SSRF attacks targeting GateSentry's own admin UI.

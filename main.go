@@ -29,7 +29,7 @@ var GSPROXYPORT = "10413"
 var GSWEBADMINPORT = "80"
 var GSBASEDIR = ""
 var Baseendpointv2 = "https://www.gatesentryfilter.com/api/"
-var GATESENTRY_VERSION = "1.20.6.2"
+var GATESENTRY_VERSION = "2.0.0-alpha.1"
 var GS_BOUND_ADDRESS = ":"
 var R *application.GSRuntime
 
@@ -253,6 +253,19 @@ func RunGateSentry() {
 	}
 	R = application.Start(webadminport)
 	R.BoundAddress = &GS_BOUND_ADDRESS
+
+	// Wire the proxy DNS resolver switch: when the DNS server is toggled
+	// on/off via the UI (which triggers Init/Reload), the proxy's resolver
+	// must switch between GateSentry DNS and the upstream resolver.
+	R.OnDNSServerStateChanged = func(enabled bool, upstreamResolver string) {
+		gatesentryproxy.SetDNSResolver(enabled, upstreamResolver)
+	}
+
+	// Apply the persisted DNS server state to the proxy resolver on boot.
+	// Start() already called Init() before the callback was wired, so we
+	// need to sync the proxy resolver with the saved setting now.
+	bootDNSEnabled := R.GSSettings.Get("enable_dns_server") == "true"
+	gatesentryproxy.SetDNSResolver(bootDNSEnabled, R.GSSettings.Get("dns_resolver"))
 
 	application.StartBonjour()
 	gatesentryproxy.InitProxy()

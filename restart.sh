@@ -17,7 +17,7 @@ if [ "$P" == "" ]; then
   exit 0
 fi
 
-echo "Stopping $P..."
+echo "Stopping PID:$P..."
 
 kill $P
 
@@ -29,4 +29,9 @@ echo -n "Starting new server..."
 
 cd bin && ./gatesentrybin > ../log.txt 2>&1 &
 
+while [ "$P" == "" ]; do
+  P=$(pgrep gatesentry)
+done
+
+echo "PID:$P"...
 echo "Done."

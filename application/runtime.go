@@ -84,6 +84,11 @@ type GSRuntime struct {
 	DNSServerChannel            chan int
 	BoundAddress                *string
 	DnsServerInfo               *GatesentryTypes.DnsServerInfo
+
+	// OnDNSServerStateChanged is called when the DNS server enabled state
+	// changes during Init/Reload. Parameters: (enabled bool, upstreamResolver string).
+	// main.go sets this to switch the proxy's DNS resolver.
+	OnDNSServerStateChanged func(enabled bool, upstreamResolver string)
 }
 
 func SetBaseDir(a string) {
@@ -207,6 +212,7 @@ func (R *GSRuntime) Init() {
 	R.GSSettings.SetDefault("timezone", "Europe/Oslo")
 	R.GSSettings.SetDefault("enable_https_filtering", "false")
 	R.GSSettings.SetDefault("enable_dns_server", "true")
+	R.GSSettings.SetDefault("enable_dns_filtering", "true")
 	// Use environment variable for DNS resolver if set, otherwise use default
 	// Environment variable takes precedence over stored settings to allow
 	// containerized/deployment-time configuration
@@ -304,10 +310,20 @@ func (R *GSRuntime) Init() {
 	// Sync WPAD DNS interception with the persisted setting
 	gatesentryDnsServer.SetWPADEnabled(R.GSSettings.Get("wpad_enabled") != "false")
 
+	// Sync DNS domain filtering with the persisted setting
+	gatesentryDnsServer.SetDNSFilteringEnabled(R.GSSettings.Get("enable_dns_filtering") != "false")
+
+	// Notify the proxy of DNS server state so it can switch resolvers.
+	// This must happen before the channel send (which may block) so the
+	// proxy resolver is updated immediately.
+	dnsEnabled := R.GSSettings.Get("enable_dns_server") == "true"
+	if R.OnDNSServerStateChanged != nil {
+		R.OnDNSServerStateChanged(dnsEnabled, R.GSSettings.Get("dns_resolver"))
+	}
+
 	go func() {
-		dnsEnabled := R.GSSettings.Get("enable_dns_server")
-		log.Println("DNS server setting = " + dnsEnabled)
-		if dnsEnabled == "true" {
+		log.Printf("DNS server setting = %v", dnsEnabled)
+		if dnsEnabled {
 			R.DNSServerChannel <- 1
 		} else {
 			R.DNSServerChannel <- 2

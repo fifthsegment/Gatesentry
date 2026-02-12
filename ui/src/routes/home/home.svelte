@@ -3,7 +3,8 @@
   import { store } from "../../store/apistore";
   import { _ } from "svelte-i18n";
   import imageBin from "../../assets/front.jpg?inline";
-  import { Laptop, Mobile } from "carbon-icons-svelte";
+  import LaptopIcon from "../../components/icons/LaptopIcon.svelte";
+  import MobileIcon from "../../components/icons/MobileIcon.svelte";
   import Modal from "../../components/modal.svelte";
   import Instructionsphone from "./instructionsphone.svelte";
   import Instructionscomputer from "./instructionscomputer.svelte";
@@ -44,9 +45,12 @@
       <Column>
         <div
           class="text-center m-10-top clickable"
+          role="button"
+          tabindex="0"
           on:click={() => (modalOpenComputer = true)}
+          on:keypress={() => (modalOpenComputer = true)}
         >
-          <Laptop size={64} />
+          <LaptopIcon size={128} />
           <div>{$_("Setup Gatesentry on your computer.")}</div>
         </div>
         <Modal
@@ -59,9 +63,12 @@
       <Column>
         <div
           class="text-center m-10-top clickable"
+          role="button"
+          tabindex="0"
           on:click={() => (modalOpenPhone = true)}
+          on:keypress={() => (modalOpenPhone = true)}
         >
-          <Mobile size={64} />
+          <MobileIcon size={128} />
           <div>{$_("Setup Gatesentry on your phone.")}</div>
         </div>
         <Modal

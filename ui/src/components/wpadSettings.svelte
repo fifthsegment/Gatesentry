@@ -25,6 +25,28 @@
   let saving = false;
   let pacPreview = "";
 
+  // Clipboard fallback for non-HTTPS contexts (navigator.clipboard
+  // requires a secure context). Falls back to the legacy
+  // document.execCommand("copy") approach.
+  function copyToClipboard(text: string) {
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(text).catch(() => fallbackCopy(text));
+    } else {
+      fallbackCopy(text);
+    }
+  }
+
+  function fallbackCopy(text: string) {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand("copy");
+    document.body.removeChild(ta);
+  }
+
   // The admin port comes from the backend — it knows what port it's
   // listening on.  We never use window.location.port because that may
   // be the Vite dev-server or a reverse-proxy frontend.
@@ -194,14 +216,18 @@
             <span class="wpad-info-label"
               >{$_("PAC File URL (give this to clients)")}</span
             >
-            <CodeSnippet type="single" code={pacUrl} />
+            <CodeSnippet type="single" code={pacUrl} copy={copyToClipboard} />
           </div>
         </div>
 
         {#if pacPreview}
           <div class="wpad-pac-preview">
             <span class="wpad-info-label">{$_("PAC File Preview")}</span>
-            <CodeSnippet type="multi" code={pacPreview} />
+            <CodeSnippet
+              type="multi"
+              code={pacPreview}
+              copy={copyToClipboard}
+            />
           </div>
         {/if}
       </Tile>
