@@ -10,14 +10,7 @@
     createNotificationSuccess,
   } from "../lib/utils";
   import { onMount } from "svelte";
-  import {
-    Edit,
-    Renew,
-    Download,
-    Certificate,
-    WarningAlt,
-    Checkmark,
-  } from "carbon-icons-svelte";
+  import { Edit, Renew, Download } from "carbon-icons-svelte";
   import {
     Button,
     Tile,
@@ -105,56 +98,50 @@
   }
 </script>
 
-<br />
 <div class="cert-section">
-  <div class="cert-header">
-    <Certificate size={20} style="position:relative; top:4px;" />
-    <label class="bx--label cert-title"
-      >{$_("MITM Filtering Certificate")}</label
-    >
-  </div>
-
-  {#if info !== null}
-    {#if info.error}
-      <InlineNotification
-        kind="error"
-        title={$_("Certificate Error")}
-        subtitle={info.error}
-        hideCloseButton
-      />
-    {:else}
-      <Tile class="cert-info-tile">
-        <div class="cert-info-grid">
-          <div class="cert-info-item">
-            <span class="cert-info-label">{$_("Issuer (CN)")}</span>
-            <span class="cert-info-value">{info.name}</span>
-          </div>
-          <div class="cert-info-item">
-            <span class="cert-info-label">{$_("Expires")}</span>
-            <span class="cert-info-value">
-              {info.expiry}
-              {#if isExpired(info.expiry)}
-                <Tag type="red" size="sm">{$_("Expired")}</Tag>
-              {:else if isExpiringSoon(info.expiry)}
-                <Tag type="magenta" size="sm"
-                  ><WarningAlt
-                    size={12}
-                    style="position:relative;top:2px;margin-right:2px;"
-                  />{$_("Expiring Soon")}</Tag
-                >
-              {:else}
-                <Tag type="green" size="sm"
-                  ><Checkmark
-                    size={12}
-                    style="position:relative;top:2px;margin-right:2px;"
-                  />{$_("Valid")}</Tag
-                >
-              {/if}
-            </span>
-          </div>
+  {#if info === null}
+    <!-- Skeleton placeholder while loading -->
+    <Tile class="cert-info-tile">
+      <div class="cert-info-grid">
+        <div class="cert-info-item">
+          <span class="cert-info-label">{$_("Issuer (CN)")}</span>
+          <span class="cert-skeleton-line" style="width:60%">&nbsp;</span>
         </div>
-      </Tile>
-    {/if}
+        <div class="cert-info-item">
+          <span class="cert-info-label">{$_("Expires")}</span>
+          <span class="cert-skeleton-line" style="width:45%">&nbsp;</span>
+        </div>
+      </div>
+    </Tile>
+  {:else if info.error}
+    <InlineNotification
+      kind="error"
+      title={$_("Certificate Error")}
+      subtitle={info.error}
+      hideCloseButton
+    />
+  {:else}
+    <Tile class="cert-info-tile">
+      <div class="cert-info-grid">
+        <div class="cert-info-item">
+          <span class="cert-info-label">{$_("Issuer (CN)")}</span>
+          <span class="cert-info-value">{info.name}</span>
+        </div>
+        <div class="cert-info-item">
+          <span class="cert-info-label">{$_("Expires")}</span>
+          <span class="cert-info-value">
+            {info.expiry}
+            {#if isExpired(info.expiry)}
+              <Tag type="red" size="sm">{$_("Expired")}</Tag>
+            {:else if isExpiringSoon(info.expiry)}
+              <Tag type="magenta" size="sm">{$_("Expiring Soon")}</Tag>
+            {:else}
+              <Tag type="green" size="sm">{$_("Valid")}</Tag>
+            {/if}
+          </span>
+        </div>
+      </div>
+    </Tile>
   {/if}
 
   <div class="cert-actions">
@@ -265,18 +252,7 @@
 
 <style>
   .cert-section {
-    margin-top: 0.5rem;
-  }
-  .cert-header {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    margin-bottom: 0.75rem;
-  }
-  .cert-title {
-    font-size: 0.95rem;
-    font-weight: 600;
-    margin: 0;
+    margin-top: 1rem;
   }
   :global(.cert-info-tile) {
     margin-bottom: 1rem;
@@ -299,6 +275,7 @@
     font-size: 0.875rem;
     font-weight: 500;
   }
+
   .cert-actions {
     display: flex;
     align-items: center;
@@ -314,5 +291,41 @@
     padding: 1rem;
     border: 1px solid #e0e0e0;
     background: #f4f4f4;
+  }
+
+  .cert-skeleton-line {
+    display: block;
+    height: 1.125rem;
+    border-radius: 3px;
+    background: linear-gradient(90deg, #e0e0e0 25%, #ececec 50%, #e0e0e0 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s ease-in-out infinite;
+  }
+
+  @keyframes shimmer {
+    0% {
+      background-position: 200% 0;
+    }
+    100% {
+      background-position: -200% 0;
+    }
+  }
+
+  @media (max-width: 671px) {
+    .cert-info-grid {
+      grid-template-columns: 1fr;
+    }
+    .cert-actions {
+      flex-direction: column;
+      align-items: stretch;
+    }
+    .cert-actions :global(.bx--btn) {
+      max-width: 100%;
+      width: 100%;
+      justify-content: center;
+    }
+    .download-btn {
+      display: block;
+    }
   }
 </style>

@@ -1,22 +1,23 @@
 <script lang="ts">
-  import {
-    Breadcrumb,
-    BreadcrumbItem,
-    Column,
-    Row,
-  } from "carbon-components-svelte";
   import DeviceList from "./devicelist.svelte";
+  import { Devices as DevicesIcon } from "carbon-icons-svelte";
 </script>
 
-<Breadcrumb style="margin-bottom: 10px;">
-  <BreadcrumbItem href="/">Dashboard</BreadcrumbItem>
-  <BreadcrumbItem>Devices</BreadcrumbItem>
-</Breadcrumb>
-<h2>Network Devices</h2>
-<br />
+<div class="gs-page-title">
+  <DevicesIcon size={24} />
+  <h2>Network Devices</h2>
+</div>
 
-<Row>
-  <Column>
-    <DeviceList />
-  </Column>
-</Row>
+<p class="dev-desc">
+  Devices discovered on your network via DNS queries, mDNS, and DDNS updates.
+</p>
+
+<DeviceList />
+
+<style>
+  .dev-desc {
+    font-size: 0.875rem;
+    color: #525252;
+    margin: 0 0 0.75rem 0;
+  }
+</style>

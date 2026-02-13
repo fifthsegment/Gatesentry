@@ -8,19 +8,27 @@ import (
 	"strings"
 	"time"
 
-	GatesentryTypes "bitbucket.org/abdullah_irfan/gatesentryf/types"
+	gatesentryDomainList "bitbucket.org/abdullah_irfan/gatesentryf/domainlist"
 	gatesentry2storage "bitbucket.org/abdullah_irfan/gatesentryf/storage"
+	GatesentryTypes "bitbucket.org/abdullah_irfan/gatesentryf/types"
 	gatesentryUtils "bitbucket.org/abdullah_irfan/gatesentryf/utils"
 )
 
 // RuleManager handles rule storage and matching
 type RuleManager struct {
-	storage *gatesentry2storage.MapStore
+	storage       *gatesentry2storage.MapStore
+	domainListMgr *gatesentryDomainList.DomainListManager
 }
 
 // NewRuleManager creates a new rule manager
 func NewRuleManager(storage *gatesentry2storage.MapStore) *RuleManager {
 	return &RuleManager{storage: storage}
+}
+
+// SetDomainListManager sets the shared DomainListManager for domain list lookups.
+// This is called after both the RuleManager and DomainListManager are created.
+func (rm *RuleManager) SetDomainListManager(dlm *gatesentryDomainList.DomainListManager) {
+	rm.domainListMgr = dlm
 }
 
 // GetRules retrieves all rules from storage
@@ -151,13 +159,78 @@ func matchDomain(pattern, domain string) bool {
 	pattern = strings.ToLower(pattern)
 	domain = strings.ToLower(domain)
 
+	// Universal wildcard — matches every domain
+	if pattern == "*" {
+		return true
+	}
+
 	if pattern == domain {
 		return true
 	}
 
-	if strings.HasPrefix(pattern, "*.") {
+	// Wildcard matching: * matches zero or more characters (including dots)
+	// Supports patterns like *.example.com, ad*, *tracker*, etc.
+	if strings.Contains(pattern, "*") {
+		return globMatch(pattern, domain)
+	}
+
+	return false
+}
+
+// globMatch performs simple glob-style matching where * matches any sequence
+// of characters (including dots/subdomains). Supports multiple * in pattern.
+func globMatch(pattern, str string) bool {
+	// Fast path for common *.suffix pattern
+	if strings.HasPrefix(pattern, "*.") && !strings.Contains(pattern[2:], "*") {
 		suffix := pattern[2:]
-		return strings.HasSuffix(domain, "."+suffix) || domain == suffix
+		return strings.HasSuffix(str, "."+suffix) || str == suffix
+	}
+
+	// General glob: split on * and check that parts appear in order
+	parts := strings.Split(pattern, "*")
+
+	// First part must be a prefix
+	if !strings.HasPrefix(str, parts[0]) {
+		return false
+	}
+	str = str[len(parts[0]):]
+
+	// Middle parts must appear in order
+	for i := 1; i < len(parts)-1; i++ {
+		idx := strings.Index(str, parts[i])
+		if idx < 0 {
+			return false
+		}
+		str = str[idx+len(parts[i]):]
+	}
+
+	// Last part must be a suffix
+	return strings.HasSuffix(str, parts[len(parts)-1])
+}
+
+// matchRuleDomain checks whether a domain matches any of a rule's domain
+// criteria. A rule matches if ANY of the following are true:
+//  1. rule.Domain is set and matchDomain(rule.Domain, domain) (legacy, backward compat)
+//  2. Any pattern in rule.DomainPatterns matches (wildcard matching)
+//  3. The domain appears in ANY domain list referenced by rule.DomainLists (O(1) index lookup)
+func (rm *RuleManager) matchRuleDomain(rule *GatesentryTypes.Rule, domain string) bool {
+	// 1. Legacy single-domain pattern
+	if rule.Domain != "" && matchDomain(rule.Domain, domain) {
+		return true
+	}
+
+	// 2. Multiple domain patterns (wildcards)
+	for _, pattern := range rule.DomainPatterns {
+		if matchDomain(pattern, domain) {
+			return true
+		}
+	}
+
+	// 3. Domain list membership (O(1) lookup via shared index)
+	if len(rule.DomainLists) > 0 && rm.domainListMgr != nil && rm.domainListMgr.Index != nil {
+		if rm.domainListMgr.Index.IsDomainInAnyList(strings.ToLower(domain), rule.DomainLists) {
+			return true
+		}
 	}
 
 	return false
@@ -192,7 +265,7 @@ func (rm *RuleManager) MatchRule(domain, user string) GatesentryTypes.RuleMatch 
 			continue
 		}
 
-		if !matchDomain(rule.Domain, domain) {
+		if !rm.matchRuleDomain(&rule, domain) {
 			continue
 		}
 
@@ -220,15 +293,21 @@ func (rm *RuleManager) MatchRule(domain, user string) GatesentryTypes.RuleMatch 
 
 		match.ShouldMITM = rule.MITMAction == GatesentryTypes.MITMActionEnable
 		match.ShouldBlock = rule.Action == GatesentryTypes.RuleActionBlock
-		
+
 		if match.ShouldMITM {
-			if rule.BlockType == GatesentryTypes.BlockTypeContentType || 
-			   rule.BlockType == GatesentryTypes.BlockTypeBoth {
+			if rule.BlockType == GatesentryTypes.BlockTypeContentType ||
+				rule.BlockType == GatesentryTypes.BlockTypeBoth ||
+				rule.BlockType == GatesentryTypes.BlockTypeAll {
 				match.BlockContentTypes = rule.BlockedContentTypes
 			}
-			if rule.BlockType == GatesentryTypes.BlockTypeURLRegex || 
-			   rule.BlockType == GatesentryTypes.BlockTypeBoth {
+			if rule.BlockType == GatesentryTypes.BlockTypeURLRegex ||
+				rule.BlockType == GatesentryTypes.BlockTypeBoth ||
+				rule.BlockType == GatesentryTypes.BlockTypeAll {
 				match.BlockURLRegexes = rule.URLRegexPatterns
+			}
+			if rule.BlockType == GatesentryTypes.BlockTypeDomainList ||
+				rule.BlockType == GatesentryTypes.BlockTypeAll {
+				match.BlockContentDomainLists = rule.ContentDomainLists
 			}
 		}
 
@@ -241,14 +320,14 @@ func (rm *RuleManager) MatchRule(domain, user string) GatesentryTypes.RuleMatch 
 // CheckContentTypeBlocked checks if a content type should be blocked based on rule
 func CheckContentTypeBlocked(contentType string, blockedTypes []string) bool {
 	contentType = strings.ToLower(strings.TrimSpace(contentType))
-	
+
 	for _, blocked := range blockedTypes {
 		blocked = strings.ToLower(strings.TrimSpace(blocked))
 		if strings.Contains(contentType, blocked) {
 			return true
 		}
 	}
-	
+
 	return false
 }
 
@@ -264,8 +343,18 @@ func CheckURLPathBlocked(urlPath string, patterns []string) bool {
 			return true
 		}
 	}
-	
+
 	return false
+}
+
+// CheckContentDomainBlocked checks if a sub-request domain is in any of the
+// given domain lists. Used during MITM content filtering to block embedded
+// resources (images, scripts, etc.) whose domain appears in a blocklist.
+func (rm *RuleManager) CheckContentDomainBlocked(domain string, domainListIDs []string) bool {
+	if len(domainListIDs) == 0 || rm.domainListMgr == nil || rm.domainListMgr.Index == nil {
+		return false
+	}
+	return rm.domainListMgr.Index.IsDomainInAnyList(strings.ToLower(domain), domainListIDs)
 }
 
 func generateRuleID() string {

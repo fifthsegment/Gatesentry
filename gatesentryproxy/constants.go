@@ -30,7 +30,6 @@ var BLOCKED_ERROR_HIJACK_BYTES = []byte("[SSL Bump] - Error hijacking request")
 var PROXY_ERROR_UNABLE_TO_READ_DATA = []byte("Error: Unable to read data")
 var PROXY_ERROR_UNABLE_TO_MARSHALL_DATA_FOR_SCANNING = []byte("Error: Unable to marshall data for scanning")
 var PROXY_ERROR_UNABLE_TO_COPY_DATA = []byte("Error: Unable to copy data")
-var BLOCKED_CONTENT_TYPE = []byte("This content type is blocked by your administrator")
 var BLOCKED_CONTENT_TEXT = []byte("This content is blocked by your administrator")
 
 var ACTION_BLOCK_REQUEST = "block"

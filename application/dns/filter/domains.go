@@ -1,158 +1,27 @@
 package gatesentryDnsFilter
 
 import (
-	"bufio"
-	"encoding/json"
+	"fmt"
 	"log"
-	"net/http"
-	"strings"
 	"sync"
-	"time"
 
 	gatesentry2storage "bitbucket.org/abdullah_irfan/gatesentryf/storage"
-	gatesentryTypes "bitbucket.org/abdullah_irfan/gatesentryf/types"
 )
 
-func InitializeFilters(blockedDomains *map[string]bool, blockedLists *[]string, internalRecords *map[string]string, exceptionDomains *map[string]bool, mutex *sync.RWMutex, settings *gatesentry2storage.MapStore, dnsinfo *gatesentryTypes.DnsServerInfo) {
-	// Hold write lock while replacing the maps to prevent race with readers
+// InitializeFilters initializes internal records and exception domains.
+// Blocklist downloads are now handled by DomainListManager.LoadAllLists(),
+// called separately by the scheduler.
+func InitializeFilters(internalRecords *map[string]string, exceptionDomains *map[string]bool, mutex *sync.RWMutex, settings *gatesentry2storage.MapStore) {
+	// Reset internal records and exception domains under write lock
 	mutex.Lock()
-	*blockedDomains = make(map[string]bool)
-	*blockedLists = []string{}
 	*internalRecords = make(map[string]string)
 	*exceptionDomains = make(map[string]bool)
 	mutex.Unlock()
 
-	dnsinfo.NumberDomainsBlocked = 0
-	custom_entries := settings.Get("dns_custom_entries")
-	log.Println("[DNS.SERVER] Custom entries found")
-	// unmarshall json array string to array
-	custom_entries_array := []string{}
-	//convert string to byte array
-	err := json.Unmarshal([]byte(custom_entries), &custom_entries_array)
-	if err != nil {
-		log.Println("[DNS.SERVER] Error unmarshalling custom entries:", err)
-	} else {
-		// check if blocklists already contains custom entries
-		entriesAdded := 0
-		for _, custom_entry := range custom_entries_array {
-			found := false
-			for _, blocklist := range *blockedLists {
-				if blocklist == custom_entry {
-					found = true
-					break
-				}
-			}
-			if !found {
-				*blockedLists = append(*blockedLists, custom_entry)
-				entriesAdded++
-			}
-		}
-		log.Println("[DNS.SERVER] Custom entries added to blocklists count:", entriesAdded)
-	}
 	InitializeInternalRecords(internalRecords, mutex, settings)
-	InitializeBlockedDomains(blockedDomains, blockedLists, mutex, dnsinfo)
 	InitializeExceptionDomains(exceptionDomains, mutex)
-}
 
-func InitializeBlockedDomains(blockedDomains *map[string]bool, blocklists *[]string, mutex *sync.RWMutex, dnsinfo *gatesentryTypes.DnsServerInfo) {
-	var wg sync.WaitGroup
-	log.Println("[DNS] Downloading blocklists...")
-
-	// Use a channel to collect domains from all goroutines
-	// This avoids holding the lock during HTTP downloads
-	domainsChan := make(chan []string, len(*blocklists))
-
-	for _, blocklistURL := range *blocklists {
-		wg.Add(1)
-		go func(url string) {
-			defer wg.Done()
-			domains, err := fetchDomainsFromBlocklist(url)
-			if err != nil {
-				log.Println("[DNS] [Error] Failed to fetch blocklist:", err)
-				domainsChan <- nil
-				return
-			}
-			domainsChan <- domains
-		}(blocklistURL)
-	}
-
-	// Wait for all downloads to complete in a goroutine, then close the channel
-	go func() {
-		wg.Wait()
-		close(domainsChan)
-	}()
-
-	// Collect all domains first (no lock held during downloads)
-	var allDomains []string
-	for domains := range domainsChan {
-		if domains != nil {
-			allDomains = append(allDomains, domains...)
-		}
-	}
-
-	// Now apply all domains with a single write lock
-	// This minimizes the time the lock is held
-	mutex.Lock()
-	for _, domain := range allDomains {
-		(*blockedDomains)[domain] = true
-		dnsinfo.NumberDomainsBlocked++
-	}
-	mutex.Unlock()
-
-	log.Println("[DNS] Added", len(allDomains), "domains to blocked map")
-	log.Println("[DNS] Total domains in blocked map:", len(*blockedDomains))
-
-	dnsinfo.LastUpdated = int(time.Now().Unix())
-	log.Println("[DNS] Blocklists downloaded and processed.")
-}
-
-func fetchDomainsFromBlocklist(url string) ([]string, error) {
-	log.Println("[DNS] Downloading blocklist from:", url)
-	resp, err := http.Get(url)
-	if err != nil {
-		log.Println("[DNS] [Error] downloading blocklist:", err)
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	var domains []string
-	scanner := bufio.NewScanner(resp.Body)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if strings.HasPrefix(line, "#") || line == "" {
-			// Skip comments and empty lines
-			continue
-		}
-		parts := strings.Fields(line)
-		if len(parts) >= 2 {
-			ip := parts[0]
-			domain := parts[1]
-			if ip == "0.0.0.0" || ip == "::1" {
-				domains = append(domains, domain)
-			}
-		} else {
-			domain := parts[0]
-			domains = append(domains, domain)
-		}
-	}
-
-	if err := scanner.Err(); err != nil {
-		log.Println("[DNS] [Error] Reading blocklist:", err)
-		return nil, err
-	}
-
-	return domains, nil
-}
-
-func addDomainsToBlockedMap(blockedDomains *map[string]bool, newDomains []string, mutex *sync.RWMutex, dnsinfo *gatesentryTypes.DnsServerInfo) {
-	mutex.Lock()
-	defer mutex.Unlock()
-
-	for _, domain := range newDomains {
-		(*blockedDomains)[domain] = true
-		dnsinfo.NumberDomainsBlocked++
-	}
-
-	log.Println("[DNS] Added", len(newDomains), "domains to blocked map")
-	log.Println("[DNS] Total domains in blocked map:", len(*blockedDomains))
+	fmt.Println("[DNS Filter] Internal records and exception domains initialized")
+	log.Printf("[DNS Filter] Internal records: %d, Exception domains: %d",
+		len(*internalRecords), len(*exceptionDomains))
 }

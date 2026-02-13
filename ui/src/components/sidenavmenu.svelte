@@ -19,6 +19,12 @@
       menuItemsToRender = [];
     }
   });
+
+  function navigateTo(href) {
+    gsNavigate(href);
+    // App.svelte decides whether to close (mobile only)
+    document.dispatchEvent(new CustomEvent("closesidenav"));
+  }
 </script>
 
 <SideNavItems>
@@ -28,9 +34,7 @@
         icon={item.icon}
         text={item.text}
         isSelected={item.isSelected}
-        on:click={() => {
-          gsNavigate(item.href);
-        }}
+        on:click={() => navigateTo(item.href)}
       />
     {:else if item.type === "menu"}
       <SideNavMenu icon={item.icon} text={item.text}>
@@ -38,9 +42,7 @@
           <SideNavLink
             icon={child.icon}
             text={child.text}
-            on:click={() => {
-              gsNavigate(child.href);
-            }}
+            on:click={() => navigateTo(child.href)}
           />
         {/each}
       </SideNavMenu>

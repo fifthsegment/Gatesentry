@@ -5,7 +5,9 @@ import (
 	"testing"
 
 	"bitbucket.org/abdullah_irfan/gatesentryf/dns/discovery"
+	gatesentryDomainList "bitbucket.org/abdullah_irfan/gatesentryf/domainlist"
 	gatesentryLogger "bitbucket.org/abdullah_irfan/gatesentryf/logger"
+	gatesentry2storage "bitbucket.org/abdullah_irfan/gatesentryf/storage"
 	"github.com/miekg/dns"
 )
 
@@ -54,6 +56,8 @@ func setupTestServer(t *testing.T) func() {
 	origRunning := serverRunning.Load()
 	origDDNSEnabled := ddnsEnabled
 	origDDNSTSIGRequired := ddnsTSIGRequired
+	origDomainListMgr := domainListMgr
+	origDnsSettings := dnsSettings
 
 	// Initialize test state
 	deviceStore = discovery.NewDeviceStore("local")
@@ -63,6 +67,9 @@ func setupTestServer(t *testing.T) func() {
 	serverRunning.Store(true)
 	ddnsEnabled = true
 	ddnsTSIGRequired = false
+	// Leave domainListMgr nil so tests use legacy blockedDomains map by default
+	domainListMgr = nil
+	dnsSettings = nil
 
 	// Create a temp logger
 	logger = gatesentryLogger.NewLogger(t.TempDir() + "/test.db")
@@ -77,6 +84,8 @@ func setupTestServer(t *testing.T) func() {
 		serverRunning.Store(origRunning)
 		ddnsEnabled = origDDNSEnabled
 		ddnsTSIGRequired = origDDNSTSIGRequired
+		domainListMgr = origDomainListMgr
+		dnsSettings = origDnsSettings
 	}
 }
 
@@ -397,5 +406,99 @@ func TestHandleDNS_BareHostname(t *testing.T) {
 	}
 	if a.A.String() != "192.168.1.55" {
 		t.Errorf("Expected 192.168.1.55, got %s", a.A.String())
+	}
+}
+
+// --- DomainListManager-based blocking tests ---
+
+func TestHandleDNS_BlockedViaDomainListManager(t *testing.T) {
+	cleanup := setupTestServer(t)
+	defer cleanup()
+
+	// Set storage base dir for MapStore creation
+	tmpDir := t.TempDir()
+	gatesentry2storage.SetBaseDir(tmpDir + "/")
+
+	// Set up a DomainListManager with an in-memory index
+	dlm := gatesentryDomainList.NewDomainListManager(
+		gatesentry2storage.NewMapStore("test_blocking", false),
+	)
+
+	// Add a domain to the index under a list ID
+	dlm.Index.AddDomains("list-1", []string{"badsite.example.com"})
+
+	// Wire up the DNS server to use this manager
+	domainListMgr = dlm
+	dnsSettings = gatesentry2storage.NewMapStore("test_settings", false)
+	dnsSettings.Update("dns_domain_lists", `["list-1"]`)
+
+	req := new(dns.Msg)
+	req.SetQuestion("badsite.example.com.", dns.TypeA)
+
+	w := newMockResponseWriter("192.168.1.50")
+	handleDNSRequest(w, req)
+
+	if w.msg == nil {
+		t.Fatal("Expected response message")
+	}
+	if w.msg.Rcode != dns.RcodeSuccess {
+		t.Errorf("Expected RcodeSuccess (block page redirect), got %d", w.msg.Rcode)
+	}
+	if len(w.msg.Answer) != 1 {
+		t.Fatalf("Expected 1 answer (A record with local IP), got %d", len(w.msg.Answer))
+	}
+	a, ok := w.msg.Answer[0].(*dns.A)
+	if !ok {
+		t.Fatalf("Expected A record, got %T", w.msg.Answer[0])
+	}
+	if a.A == nil {
+		t.Fatal("Expected A record with local IP, got nil")
+	}
+}
+
+func TestHandleDNS_WhitelistOverridesBlocklist(t *testing.T) {
+	cleanup := setupTestServer(t)
+	defer cleanup()
+
+	tmpDir := t.TempDir()
+	gatesentry2storage.SetBaseDir(tmpDir + "/")
+
+	dlm := gatesentryDomainList.NewDomainListManager(
+		gatesentry2storage.NewMapStore("test_whitelist", false),
+	)
+
+	// Domain is in both blocklist and whitelist
+	dlm.Index.AddDomains("blocklist-1", []string{"safe.example.com"})
+	dlm.Index.AddDomains("whitelist-1", []string{"safe.example.com"})
+
+	domainListMgr = dlm
+	dnsSettings = gatesentry2storage.NewMapStore("test_settings_wl", false)
+	dnsSettings.Update("dns_domain_lists", `["blocklist-1"]`)
+	dnsSettings.Update("dns_whitelist_domain_lists", `["whitelist-1"]`)
+
+	// The domain should NOT be blocked because whitelist overrides
+	if isDomainBlocked("safe.example.com") {
+		t.Error("Expected safe.example.com to NOT be blocked (whitelist should override)")
+	}
+
+	// A domain only in the blocklist should still be blocked
+	dlm.Index.AddDomains("blocklist-1", []string{"evil.example.com"})
+	if !isDomainBlocked("evil.example.com") {
+		t.Error("Expected evil.example.com to be blocked")
+	}
+}
+
+func TestHandleDNS_NoDomainListsFallsBackToLegacy(t *testing.T) {
+	cleanup := setupTestServer(t)
+	defer cleanup()
+
+	// domainListMgr is nil (set in setupTestServer) — should use legacy map
+	blockedDomains["legacy-blocked.com"] = true
+
+	if !isDomainBlocked("legacy-blocked.com") {
+		t.Error("Expected legacy-blocked.com to be blocked via legacy map")
+	}
+	if isDomainBlocked("not-blocked.com") {
+		t.Error("Expected not-blocked.com to NOT be blocked")
 	}
 }

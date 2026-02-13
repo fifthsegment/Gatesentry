@@ -11,7 +11,7 @@
     Button,
     Tag,
   } from "carbon-components-svelte";
-  import { Network_3, Save, WarningAlt } from "carbon-icons-svelte";
+  import { Save, WarningAlt } from "carbon-icons-svelte";
   import { notificationstore } from "../store/notifications";
   import {
     createNotificationSuccess,
@@ -142,15 +142,7 @@
   onMount(loadSettings);
 </script>
 
-<br />
 <div class="wpad-section">
-  <div class="wpad-header">
-    <Network_3 size={20} style="position:relative; top:4px;" />
-    <label class="bx--label wpad-title"
-      >{$_("Automatic Proxy Discovery (WPAD)")}</label
-    >
-  </div>
-
   <Toggle
     settingName="wpad_enabled"
     label={$_("WPAD DNS Auto-Discovery")}
@@ -165,7 +157,7 @@
         <strong>{$_("Proxy Address")}</strong>
         {#if !configured}
           <Tag type="red" size="sm">
-            <WarningAlt size={12} style="margin-right:4px;" />
+            <WarningAlt size={16} style="margin-right:4px;" />
             {$_("Not Configured")}
           </Tag>
         {:else}
@@ -287,18 +279,7 @@
 
 <style>
   .wpad-section {
-    margin-top: 1rem;
-  }
-  .wpad-header {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    margin-bottom: 0.75rem;
-  }
-  .wpad-title {
-    font-size: 0.95rem;
-    font-weight: 600;
-    margin: 0;
+    margin-top: 0;
   }
   :global(.wpad-config-tile) {
     margin-bottom: 1rem;
@@ -360,5 +341,18 @@
   }
   .wpad-instructions li {
     margin-bottom: 0.5rem;
+  }
+
+  @media (max-width: 671px) {
+    .wpad-input-row {
+      flex-direction: column;
+      align-items: stretch;
+    }
+    .wpad-input-port {
+      max-width: none;
+    }
+    .wpad-input-save {
+      padding-bottom: 0;
+    }
   }
 </style>

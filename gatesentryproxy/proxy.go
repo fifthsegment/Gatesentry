@@ -437,31 +437,6 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	fileExt := getFileExtensionFromUrl(r.URL.String())
-	fileMime := getMimeByExtension(fileExt)
-	contentTypeScan := &GSContentTypeFilterData{Url: r.URL.String(), ContentType: fileMime}
-	IProxy.ContentTypeHandler(contentTypeScan)
-
-	if DebugLogging {
-		log.Println("Url File extension = ", fileExt, " mime ", fileMime)
-	}
-
-	if contentTypeScan.FilterResponseAction == ProxyActionBlockedFileType {
-		passthru.ProxyActionToLog = ProxyActionBlockedUrl
-		IProxy.LogHandler(GSLogData{Url: r.URL.String(), User: user, Action: ProxyActionBlockedUrl})
-		// sendBlockMessageBytes(w, r, nil, urlFilterData.FilterResponse, nil)
-		r.URL.Host = "blocked.gatesentryguard.com"
-		r.URL.Scheme = "https"
-		r.URL.Path = "/file/gatesentryguard/blocked.svg"
-		// query := r.URL.Query()
-		// query.Add("text", "Blocked")
-		// r.URL.RawQuery = query.Encode()
-		w.Header().Set("Location", r.URL.String())
-		w.WriteHeader(http.StatusMovedPermanently)
-		log.Println("Modified url = ", r.URL.String())
-		// return
-	}
-
 	if r.Method == "CONNECT" {
 		action = ACTION_SSL_BUMP
 	}
@@ -656,6 +631,27 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 			}
+
+			// Check BlockContentDomainLists — block sub-requests whose domain
+			// appears in any of the referenced domain lists.
+			domainListsField := matchVal.FieldByName("BlockContentDomainLists")
+			if domainListsField.IsValid() && domainListsField.Kind() == reflect.Slice && domainListsField.Len() > 0 {
+				blockAction := actionField.IsValid() && actionField.Kind() == reflect.Bool && actionField.Bool()
+				if blockAction && IProxy.ContentDomainBlockHandler != nil {
+					requestHost := r.URL.Hostname()
+					listIDs := make([]string, domainListsField.Len())
+					for i := 0; i < domainListsField.Len(); i++ {
+						listIDs[i] = domainListsField.Index(i).String()
+					}
+					if IProxy.ContentDomainBlockHandler(requestHost, listIDs) {
+						requestURL := r.URL.String()
+						passthru.ProxyActionToLog = ProxyActionBlockedUrl
+						IProxy.LogHandler(GSLogData{Url: requestURL, User: user, Action: ProxyActionBlockedUrl})
+						sendBlockMessageBytes(w, r, nil, []byte("Domain blocked by content filtering rule"), nil)
+						return
+					}
+				}
+			}
 		}
 	}
 
@@ -668,20 +664,6 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if DebugLogging {
 		log.Println("Content type is = ", contentType, " for ", r.URL.String())
-	}
-	// contentTypeBytes := []byte(contentType)
-
-	// contentTypeStatusBlocked, _ := IProxy.RunHandler("contenttypeblocked", "", &contentTypeBytes, passthru)
-	contentTypeData := GSContentTypeFilterData{Url: r.URL.String(), ContentType: contentType}
-	IProxy.ContentTypeHandler(&contentTypeData)
-
-	if contentTypeData.FilterResponseAction == ProxyActionBlockedFileType {
-		// requestUrlBytes_log := []byte(r.URL.String())
-		passthru.ProxyActionToLog = ProxyActionBlockedFileType
-		// IProxy.RunHandler("log", "", &requestUrlBytes_log, passthru)
-		IProxy.LogHandler(GSLogData{Url: r.URL.String(), User: user, Action: ProxyActionBlockedFileType})
-		sendBlockMessageBytes(w, r, nil, BLOCKED_CONTENT_TYPE, &contentType)
-		return
 	}
 
 	// Phase 3: Three-path response pipeline.
@@ -994,14 +976,19 @@ func CheckProxyRules(host string, user string) (bool, interface{}, bool) {
 
 	shouldBlockField := matchVal.FieldByName("ShouldBlock")
 	urlRegexField := matchVal.FieldByName("BlockURLRegexes")
+	domainListsField := matchVal.FieldByName("BlockContentDomainLists")
 	mitmField := matchVal.FieldByName("ShouldMITM")
 
 	shouldBlock := false
 	shouldMITM := false
 
 	if shouldBlockField.IsValid() && shouldBlockField.Kind() == reflect.Bool && shouldBlockField.Bool() {
-		// Only block if no URL regexes specified (domain-level block)
-		if !urlRegexField.IsValid() || urlRegexField.Len() == 0 {
+		// Only block at connection level if no per-resource filters are specified.
+		// If URL regexes or content domain lists are present, defer to the MITM
+		// response handler which checks each sub-request individually.
+		hasURLRegexes := urlRegexField.IsValid() && urlRegexField.Kind() == reflect.Slice && urlRegexField.Len() > 0
+		hasDomainLists := domainListsField.IsValid() && domainListsField.Kind() == reflect.Slice && domainListsField.Len() > 0
+		if !hasURLRegexes && !hasDomainLists {
 			shouldBlock = true
 		}
 	}

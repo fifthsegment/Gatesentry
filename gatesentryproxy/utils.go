@@ -1,7 +1,6 @@
 package gatesentryproxy
 
 import (
-	"mime"
 	"net"
 	"strings"
 )
@@ -89,21 +88,6 @@ func isImage(contentType string) bool {
 	// 	log.Println("Not filtering, sending directly to client")
 
 	// }
-}
-
-func getFileExtensionFromUrl(urlString string) string {
-	if strings.Contains(urlString, "?") {
-		urlString = strings.Split(urlString, "?")[0]
-	}
-	return urlString[strings.LastIndex(urlString, ".")+1:]
-}
-
-func getMimeByExtension(extension string) string {
-	mimeType := mime.TypeByExtension("." + extension)
-	if strings.Contains(mimeType, ";") {
-		mimeType = strings.Split(mimeType, ";")[0]
-	}
-	return mimeType
 }
 
 func isUrlContainingImage(urlString string) bool {

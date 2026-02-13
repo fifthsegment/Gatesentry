@@ -1,15 +1,10 @@
 <script lang="ts">
   import {
-    Breadcrumb,
-    BreadcrumbItem,
     Column,
     DataTable,
     Dropdown,
-    Loading,
+    InlineLoading,
     Row,
-    Tab,
-    TabContent,
-    Tabs,
     Tag,
     Tile,
   } from "carbon-components-svelte";
@@ -18,6 +13,7 @@
   import { onDestroy, onMount } from "svelte";
   import { store } from "../../store/apistore";
   import { _ } from "svelte-i18n";
+  import { GraphicalDataFlow } from "carbon-icons-svelte";
 
   // ---------- Types ----------
 
@@ -272,8 +268,8 @@
   let cacheChart: any = null;
   let cacheChartHolder: HTMLElement;
 
-  /** Active tab index: 0 = Traffic, 1 = DNS Cache */
-  let activeTab = 0;
+  /** Active tab: "traffic" | "cache" */
+  let activeTab = "traffic";
 
   // ---------- Cache helpers ----------
 
@@ -737,8 +733,8 @@
     // Compute the rolling 1-hour totals for the metric tiles.
     computeHourlyTotals();
 
-    // Now init the cache chart (the #cachechart div is always in the DOM
-    // because Carbon TabContent renders all tabs, it just hides inactive ones).
+    // Now init the cache chart (both tab panels stay in the DOM,
+    // hidden via CSS, so the chart container is always available).
     cacheChartHolder = document.getElementById("cachechart") as HTMLElement;
     if (cacheChartHolder) {
       // @ts-ignore
@@ -774,15 +770,11 @@
 
 <Row>
   <Column>
-    <Breadcrumb style="margin-bottom: 10px;">
-      <BreadcrumbItem href="/">Dashboard</BreadcrumbItem>
-      <BreadcrumbItem>Stats</BreadcrumbItem>
-    </Breadcrumb>
-
     <div
       style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem;"
     >
       <div style="display: flex; align-items: center; gap: 0.75rem;">
+        <GraphicalDataFlow size={24} />
         <h2 style="margin: 0;">Stats</h2>
         {#if connected}
           <Tag type="green" size="sm">Live</Tag>
@@ -797,179 +789,187 @@
       </div>
     </div>
 
-    <Tabs bind:selected={activeTab}>
-      <Tab label="Traffic" />
-      <Tab label="DNS Cache" />
-      <svelte:fragment slot="content">
-        <!-- ==================== TAB 0: TRAFFIC ==================== -->
-        <TabContent>
-          <div
-            style="display: flex; justify-content: flex-end; margin-bottom: 1rem;"
-          >
-            <Dropdown
-              size="sm"
-              style="width: 180px;"
-              items={scaleOptions}
-              selectedId={selectedScale}
-              on:select={onScaleChange}
-            />
+    <!-- Tab bar -->
+    <div class="gs-tabs">
+      <button
+        class="gs-tab"
+        class:gs-tab--active={activeTab === "traffic"}
+        on:click={() => (activeTab = "traffic")}>Traffic</button
+      >
+      <button
+        class="gs-tab"
+        class:gs-tab--active={activeTab === "cache"}
+        on:click={() => (activeTab = "cache")}>DNS Cache</button
+      >
+    </div>
+
+    <!-- ==================== TAB: TRAFFIC ==================== -->
+    <div class:gs-tab-hidden={activeTab !== "traffic"}>
+      <div
+        style="display: flex; justify-content: flex-end; margin-bottom: 1rem;"
+      >
+        <Dropdown
+          size="sm"
+          style="width: 180px;"
+          items={scaleOptions}
+          selectedId={selectedScale}
+          on:select={onScaleChange}
+        />
+      </div>
+
+      <div id="statschart"></div>
+
+      {#if chart}
+        <Row style="margin-top: 1.5rem;">
+          <Column sm={4} md={4} lg={8}>
+            <h4>{$_("Top 5 Blocked Requests")}</h4>
+            <br />
+            {#if topBlockedRows.length > 0}
+              <DataTable
+                headers={[
+                  { key: "host", value: "Host" },
+                  { key: "count", value: "Times requested" },
+                ]}
+                rows={topBlockedRows}
+              />
+            {:else}
+              <p>
+                <i>{$_("Nothing found. Please make some requests.")}</i>
+              </p>
+            {/if}
+          </Column>
+          <Column sm={4} md={4} lg={8}>
+            <h4>{$_("Top 5 Requests")}</h4>
+            <br />
+            {#if topAllRows.length > 0}
+              <DataTable
+                headers={[
+                  { key: "host", value: "Host" },
+                  { key: "count", value: "Times requested" },
+                ]}
+                rows={topAllRows}
+              />
+            {:else}
+              <p>
+                <i>{$_("Nothing found. Please make some requests.")}</i>
+              </p>
+            {/if}
+          </Column>
+        </Row>
+      {/if}
+
+      {#if !chart}
+        <InlineLoading description="Loading chart..." />
+      {/if}
+    </div>
+
+    <!-- ==================== TAB: DNS CACHE ==================== -->
+    <div class:gs-tab-hidden={activeTab !== "cache"}>
+      <!-- Stat tiles row -->
+      <div class="cache-tiles">
+        <Tile class="cache-tile">
+          <div class="tile-label">Hit Rate (1h)</div>
+          <div class="tile-value">{hourlyTotals.hitRate.toFixed(1)}%</div>
+          <div class="tile-sub">
+            {(hourlyTotals.hits + hourlyTotals.misses).toLocaleString()} queries
+            in the last hour
           </div>
+        </Tile>
 
-          <div id="statschart"></div>
-
-          {#if chart}
-            <Row style="margin-top: 1.5rem;">
-              <Column>
-                <h4>{$_("Top 5 Blocked Requests")}</h4>
-                <br />
-                {#if topBlockedRows.length > 0}
-                  <DataTable
-                    headers={[
-                      { key: "host", value: "Host" },
-                      { key: "count", value: "Times requested" },
-                    ]}
-                    rows={topBlockedRows}
-                  />
-                {:else}
-                  <p>
-                    <i>{$_("Nothing found. Please make some requests.")}</i>
-                  </p>
-                {/if}
-              </Column>
-              <Column>
-                <h4>{$_("Top 5 Requests")}</h4>
-                <br />
-                {#if topAllRows.length > 0}
-                  <DataTable
-                    headers={[
-                      { key: "host", value: "Host" },
-                      { key: "count", value: "Times requested" },
-                    ]}
-                    rows={topAllRows}
-                  />
-                {:else}
-                  <p>
-                    <i>{$_("Nothing found. Please make some requests.")}</i>
-                  </p>
-                {/if}
-              </Column>
-            </Row>
-          {/if}
-
-          {#if !chart}
-            <Loading />
-          {/if}
-        </TabContent>
-
-        <!-- ==================== TAB 1: DNS CACHE ==================== -->
-        <TabContent>
-          <!-- Stat tiles row -->
-          <div class="cache-tiles">
-            <Tile class="cache-tile">
-              <div class="tile-label">Hit Rate (1h)</div>
-              <div class="tile-value">{hourlyTotals.hitRate.toFixed(1)}%</div>
-              <div class="tile-sub">
-                {(hourlyTotals.hits + hourlyTotals.misses).toLocaleString()} queries
-                in the last hour
-              </div>
-            </Tile>
-
-            <Tile class="cache-tile">
-              <div class="tile-label">Cache Entries</div>
-              <div class="tile-value">
-                {cacheSnap.entries.toLocaleString()}
-                <span class="tile-max"
-                  >/ {cacheSnap.max_entries.toLocaleString()}</span
-                >
-              </div>
-              <div class="tile-sub">{formatBytes(cacheSnap.size_bytes)}</div>
-            </Tile>
-
-            <Tile class="cache-tile">
-              <div class="tile-label">Hits (1h)</div>
-              <div class="tile-value tile-green">
-                {hourlyTotals.hits.toLocaleString()}
-              </div>
-              <div class="tile-sub">served from cache</div>
-            </Tile>
-
-            <Tile class="cache-tile">
-              <div class="tile-label">Misses (1h)</div>
-              <div class="tile-value tile-red">
-                {hourlyTotals.misses.toLocaleString()}
-              </div>
-              <div class="tile-sub">forwarded to upstream</div>
-            </Tile>
+        <Tile class="cache-tile">
+          <div class="tile-label">Cache Entries</div>
+          <div class="tile-value">
+            {cacheSnap.entries.toLocaleString()}
+            <span class="tile-max"
+              >/ {cacheSnap.max_entries.toLocaleString()}</span
+            >
           </div>
+          <div class="tile-sub">{formatBytes(cacheSnap.size_bytes)}</div>
+        </Tile>
 
-          <!-- Eviction / expiry summary row -->
-          <div class="cache-tiles" style="margin-bottom: 1rem;">
-            <Tile class="cache-tile">
-              <div class="tile-label">Evictions (1h)</div>
-              <div class="tile-value tile-amber">
-                {hourlyTotals.evictions.toLocaleString()}
-              </div>
-              <div class="tile-sub">
-                {#if hourlyTotals.evictions > 0 && cacheSnap.entries >= cacheSnap.max_entries * 0.9}
-                  <Tag type="red" size="sm"
-                    >Cache full — consider increasing max entries</Tag
-                  >
-                {:else if hourlyTotals.evictions > 0}
-                  capacity pressure detected
-                {:else}
-                  no eviction pressure
-                {/if}
-              </div>
-            </Tile>
-
-            <Tile class="cache-tile">
-              <div class="tile-label">Expired (1h)</div>
-              <div class="tile-value">
-                {hourlyTotals.expired.toLocaleString()}
-              </div>
-              <div class="tile-sub">entries removed by TTL expiry</div>
-            </Tile>
-
-            <Tile class="cache-tile">
-              <div class="tile-label">Inserts (1h)</div>
-              <div class="tile-value">
-                {hourlyTotals.inserts.toLocaleString()}
-              </div>
-              <div class="tile-sub">entries added to cache</div>
-            </Tile>
-
-            <Tile class="cache-tile">
-              <div class="tile-label">Efficiency (1h)</div>
-              <div class="tile-value">
-                {#if hourlyTotals.hits + hourlyTotals.misses > 0}
-                  {(
-                    (hourlyTotals.hits /
-                      (hourlyTotals.hits + hourlyTotals.misses)) *
-                    100
-                  ).toFixed(1)}%
-                {:else}
-                  —
-                {/if}
-              </div>
-              <div class="tile-sub">
-                {#if hourlyTotals.hitRate >= 70}
-                  <Tag type="green" size="sm">Healthy</Tag>
-                {:else if hourlyTotals.hitRate >= 40}
-                  <Tag type="blue" size="sm">Warming up</Tag>
-                {:else if hourlyTotals.hits + hourlyTotals.misses > 100}
-                  <Tag type="red" size="sm">Low — check cache config</Tag>
-                {:else}
-                  <Tag type="warm-gray" size="sm">Insufficient data</Tag>
-                {/if}
-              </div>
-            </Tile>
+        <Tile class="cache-tile">
+          <div class="tile-label">Hits (1h)</div>
+          <div class="tile-value tile-green">
+            {hourlyTotals.hits.toLocaleString()}
           </div>
+          <div class="tile-sub">served from cache</div>
+        </Tile>
 
-          <!-- Stacked area chart: hits vs misses over time -->
-          <div id="cachechart"></div>
-        </TabContent>
-      </svelte:fragment>
-    </Tabs>
+        <Tile class="cache-tile">
+          <div class="tile-label">Misses (1h)</div>
+          <div class="tile-value tile-red">
+            {hourlyTotals.misses.toLocaleString()}
+          </div>
+          <div class="tile-sub">forwarded to upstream</div>
+        </Tile>
+      </div>
+
+      <!-- Eviction / expiry summary row -->
+      <div class="cache-tiles" style="margin-bottom: 1rem;">
+        <Tile class="cache-tile">
+          <div class="tile-label">Evictions (1h)</div>
+          <div class="tile-value tile-amber">
+            {hourlyTotals.evictions.toLocaleString()}
+          </div>
+          <div class="tile-sub">
+            {#if hourlyTotals.evictions > 0 && cacheSnap.entries >= cacheSnap.max_entries * 0.9}
+              <Tag type="red" size="sm"
+                >Cache full — consider increasing max entries</Tag
+              >
+            {:else if hourlyTotals.evictions > 0}
+              capacity pressure detected
+            {:else}
+              no eviction pressure
+            {/if}
+          </div>
+        </Tile>
+
+        <Tile class="cache-tile">
+          <div class="tile-label">Expired (1h)</div>
+          <div class="tile-value">
+            {hourlyTotals.expired.toLocaleString()}
+          </div>
+          <div class="tile-sub">entries removed by TTL expiry</div>
+        </Tile>
+
+        <Tile class="cache-tile">
+          <div class="tile-label">Inserts (1h)</div>
+          <div class="tile-value">
+            {hourlyTotals.inserts.toLocaleString()}
+          </div>
+          <div class="tile-sub">entries added to cache</div>
+        </Tile>
+
+        <Tile class="cache-tile">
+          <div class="tile-label">Efficiency (1h)</div>
+          <div class="tile-value">
+            {#if hourlyTotals.hits + hourlyTotals.misses > 0}
+              {(
+                (hourlyTotals.hits /
+                  (hourlyTotals.hits + hourlyTotals.misses)) *
+                100
+              ).toFixed(1)}%
+            {:else}
+              —
+            {/if}
+          </div>
+          <div class="tile-sub">
+            {#if hourlyTotals.hitRate >= 70}
+              <Tag type="green" size="sm">Healthy</Tag>
+            {:else if hourlyTotals.hitRate >= 40}
+              <Tag type="blue" size="sm">Warming up</Tag>
+            {:else if hourlyTotals.hits + hourlyTotals.misses > 100}
+              <Tag type="red" size="sm">Low — check cache config</Tag>
+            {:else}
+              <Tag type="warm-gray" size="sm">Insufficient data</Tag>
+            {/if}
+          </div>
+        </Tile>
+      </div>
+
+      <!-- Stacked area chart: hits vs misses over time -->
+      <div id="cachechart"></div>
+    </div>
   </Column>
 </Row>
 

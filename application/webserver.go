@@ -50,7 +50,12 @@ func GSwebserverStart(port int) {
 	}
 	runtime := gatesentryWebserverTypes.NewTemporaryRuntime(runtimeArgs)
 
-	// gatesentryWebserver.RegisterEndpoints(app, settings, &R.Filters, R.Logger, runtime, R.BoundAddress)
+	// Use the shared domain list manager from R (created in Start())
+	dlManager := R.DomainListManager
+
+	// Create the rule manager and wire in the domain list manager for DomainLists lookups
+	ruleMgr := NewRuleManager(R.GSSettings)
+	ruleMgr.SetDomainListManager(dlManager)
 
 	gatesentryWebserver.RegisterEndpointsStartServer(
 		&R.Filters,
@@ -60,7 +65,8 @@ func GSwebserverStart(port int) {
 		R.BoundAddress,
 		strconv.Itoa(GSWebServerPort),
 		R.GSSettings,
-		NewRuleManager(R.GSSettings),
+		ruleMgr,
+		dlManager,
 		basePath,
 	)
 

@@ -1,6 +1,7 @@
 package gatesentryDnsServer
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"net"
@@ -14,6 +15,7 @@ import (
 	"bitbucket.org/abdullah_irfan/gatesentryf/dns/discovery"
 	gatesentryDnsScheduler "bitbucket.org/abdullah_irfan/gatesentryf/dns/scheduler"
 	gatesentryDnsUtils "bitbucket.org/abdullah_irfan/gatesentryf/dns/utils"
+	gatesentryDomainList "bitbucket.org/abdullah_irfan/gatesentryf/domainlist"
 	gatesentryLogger "bitbucket.org/abdullah_irfan/gatesentryf/logger"
 	gatesentry2storage "bitbucket.org/abdullah_irfan/gatesentryf/storage"
 	gatesentryTypes "bitbucket.org/abdullah_irfan/gatesentryf/types"
@@ -87,6 +89,14 @@ var wpadEnabled atomic.Bool
 // but blocked domains are forwarded to the upstream resolver instead of
 // returning GateSentry's IP.  Enabled by default.
 var dnsFilteringEnabled atomic.Bool
+
+// domainListMgr is the shared DomainListManager, set during StartDNSServer.
+// Used for O(1) domain blocklist/whitelist lookups via the shared index.
+var domainListMgr *gatesentryDomainList.DomainListManager
+
+// settings is the shared settings store, set during StartDNSServer.
+// Used to read dns_domain_lists and dns_whitelist_domain_lists.
+var dnsSettings *gatesentry2storage.MapStore
 
 func init() {
 	// WPAD DNS interception is enabled by default
@@ -229,7 +239,7 @@ func GetMDNSBrowser() *discovery.MDNSBrowser {
 
 const BLOCKLIST_HOURLY_UPDATE_INTERVAL = 10
 
-func StartDNSServer(basePath string, ilogger *gatesentryLogger.Log, blockedLists []string, settings *gatesentry2storage.MapStore, dnsinfo *gatesentryTypes.DnsServerInfo) {
+func StartDNSServer(basePath string, ilogger *gatesentryLogger.Log, blockedLists []string, settings *gatesentry2storage.MapStore, dnsinfo *gatesentryTypes.DnsServerInfo, dlManager *gatesentryDomainList.DomainListManager) {
 
 	if server != nil || serverRunning.Load() {
 		fmt.Println("DNS server is already running")
@@ -240,6 +250,10 @@ func StartDNSServer(basePath string, ilogger *gatesentryLogger.Log, blockedLists
 	logger = ilogger
 	logsPath = basePath + logsPath
 	SetExternalResolver(settings.Get("dns_resolver"))
+
+	// Store shared references for use in handleDNSRequest
+	domainListMgr = dlManager
+	dnsSettings = settings
 	// InitializeLogs()
 	// go gatesentryDnsFilter.InitializeBlockedDomains(&blockedDomains, &blockedLists)
 
@@ -346,6 +360,7 @@ func StartDNSServer(basePath string, ilogger *gatesentryLogger.Log, blockedLists
 		dnsinfo,
 		BLOCKLIST_HOURLY_UPDATE_INTERVAL,
 		restartDnsSchedulerChan,
+		dlManager,
 	)
 	restartDnsSchedulerChan <- true
 
@@ -427,6 +442,58 @@ func StopDNSServer() {
 	}
 
 	serverRunning.Store(false)
+}
+
+// getDomainListIDs reads a JSON array of domain list IDs from the given
+// settings key. Returns nil if the key is empty or invalid.
+func getDomainListIDs(key string) []string {
+	if dnsSettings == nil {
+		return nil
+	}
+	raw := dnsSettings.Get(key)
+	if raw == "" {
+		return nil
+	}
+	var ids []string
+	if err := json.Unmarshal([]byte(raw), &ids); err != nil {
+		log.Printf("[DNS] Error parsing %s: %v", key, err)
+		return nil
+	}
+	return ids
+}
+
+// isDomainBlocked checks whether a domain should be blocked by DNS filtering.
+// A domain is blocked when:
+//  1. It appears in ANY domain list referenced by dns_domain_lists, AND
+//  2. It does NOT appear in ANY domain list referenced by dns_whitelist_domain_lists.
+//
+// Uses the shared DomainListIndex for O(1) lookups. Falls back to the legacy
+// blockedDomains map if no DomainListManager is available (graceful degradation).
+func isDomainBlocked(domain string) bool {
+	if domainListMgr == nil || domainListMgr.Index == nil {
+		// Fallback to legacy map for backwards compatibility
+		mutex.RLock()
+		blocked := blockedDomains[domain]
+		mutex.RUnlock()
+		return blocked
+	}
+
+	// Check blocklists
+	blockListIDs := getDomainListIDs("dns_domain_lists")
+	if len(blockListIDs) == 0 {
+		return false
+	}
+	if !domainListMgr.Index.IsDomainInAnyList(domain, blockListIDs) {
+		return false
+	}
+
+	// Check whitelists — if the domain is whitelisted, it's not blocked
+	whitelistIDs := getDomainListIDs("dns_whitelist_domain_lists")
+	if len(whitelistIDs) > 0 && domainListMgr.Index.IsDomainInAnyList(domain, whitelistIDs) {
+		return false
+	}
+
+	return true
 }
 
 func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
@@ -520,14 +587,18 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 			}
 		}
 
-		// --- 2. Legacy path: exception / internal / blocked ---
-		// Use read lock — allows concurrent DNS queries while blocking filter updates
+		// --- 2. Exception / internal / blocked ---
+		// Internal records and exception domains still use the legacy maps
+		// protected by the shared mutex.
 		mutex.RLock()
 		internalRecordsLen := len(internalRecords)
 		isException := exceptionDomains[domain]
 		internalIP, isInternal := internalRecords[domain]
-		isBlocked := blockedDomains[domain]
 		mutex.RUnlock()
+
+		// Blocked-domain check now uses the shared DomainListIndex (O(1) lookup).
+		// The index has its own RWMutex — no need to hold the legacy mutex.
+		isBlocked := isDomainBlocked(domain)
 
 		log.Println("[DNS] Domain requested:", domain, " Length of internal records = ", internalRecordsLen)
 

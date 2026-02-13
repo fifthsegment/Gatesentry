@@ -2,6 +2,7 @@ package gatesentryWebserver
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -11,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	gatesentryDomainList "bitbucket.org/abdullah_irfan/gatesentryf/domainlist"
 	gatesentryFilters "bitbucket.org/abdullah_irfan/gatesentryf/filters"
 	gatesentry2logger "bitbucket.org/abdullah_irfan/gatesentryf/logger"
 	gatesentry2storage "bitbucket.org/abdullah_irfan/gatesentryf/storage"
@@ -242,6 +244,7 @@ func RegisterEndpointsStartServer(
 	port string,
 	internalSettings *gatesentry2storage.MapStore,
 	ruleManager gatesentryWebserverEndpoints.RuleManagerInterface,
+	domainListManager *gatesentryDomainList.DomainListManager,
 	basePath string,
 ) {
 
@@ -392,6 +395,48 @@ func RegisterEndpointsStartServer(
 		SendJSON(w, output)
 	})
 
+	// SSE streaming endpoint for live log entries
+	// Must be registered before /api/logs/{id} so the wildcard doesn't match "stream"
+	internalServer.Get("/api/logs/stream", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			http.Error(w, "Streaming not supported", http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		// Allow CORS for SSE (Origin already handled by corsMiddleware,
+		// but we need to ensure the middleware ran for the preflight).
+
+		// Subscribe to new log entries
+		ch := logger.Subscribe()
+		defer logger.Unsubscribe(ch)
+
+		// Send initial keepalive so the client knows the connection is open
+		fmt.Fprintf(w, ": connected\n\n")
+		flusher.Flush()
+
+		ctx := r.Context()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case entry, ok := <-ch:
+				if !ok {
+					return
+				}
+				data, err := json.Marshal(entry)
+				if err != nil {
+					continue
+				}
+				fmt.Fprintf(w, "data: %s\n\n", data)
+				flusher.Flush()
+			}
+		}
+	})
+
 	internalServer.Get("/api/logs/{id}", HttpHandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		queryParams := r.URL.Query()
 		searchValue := queryParams.Get("search")
@@ -521,6 +566,44 @@ func RegisterEndpointsStartServer(
 	})
 	log.Println("All rule endpoints registered successfully")
 
+	// Domain List endpoints
+	log.Println("Initializing domain list manager...")
+	gatesentryWebserverEndpoints.InitDomainListManager(domainListManager)
+	log.Println("Domain list manager initialized")
+
+	log.Println("Registering domain list API endpoints...")
+	internalServer.Get("/api/domainlists", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiDomainListsGetAll(w, r)
+	})
+	internalServer.Post("/api/domainlists", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiDomainListCreate(w, r)
+	})
+	internalServer.Get("/api/domainlists/{id}", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiDomainListGet(w, r)
+	})
+	internalServer.Put("/api/domainlists/{id}", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiDomainListUpdate(w, r)
+	})
+	internalServer.Delete("/api/domainlists/{id}", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiDomainListDelete(w, r)
+	})
+	internalServer.Post("/api/domainlists/{id}/refresh", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiDomainListRefresh(w, r)
+	})
+	internalServer.Get("/api/domainlists/{id}/domains", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiDomainListDomainsGet(w, r)
+	})
+	internalServer.Post("/api/domainlists/{id}/domains", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiDomainListDomainsAdd(w, r)
+	})
+	internalServer.Delete("/api/domainlists/{id}/domains/{domain}", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiDomainListDomainRemove(w, r)
+	})
+	internalServer.Get("/api/domainlists/{id}/check/{domain}", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiDomainListCheck(w, r)
+	})
+	log.Println("Domain list API endpoints registered")
+
 	// Device inventory endpoints
 	log.Println("Registering device API endpoints...")
 	internalServer.Get("/api/devices", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
@@ -583,11 +666,9 @@ func RegisterEndpointsStartServer(
 	internalServer.Get("/rules", baseIndexHandler)
 	internalServer.Get("/logs", baseIndexHandler)
 	internalServer.Get("/blockedkeywords", baseIndexHandler)
-	internalServer.Get("/blockedfiletypes", baseIndexHandler)
-	internalServer.Get("/excludeurls", baseIndexHandler)
 	internalServer.Get("/blockedurls", baseIndexHandler)
+	internalServer.Get("/domainlists", baseIndexHandler)
 	internalServer.Get("/excludehosts", baseIndexHandler)
-	internalServer.Get("/services", baseIndexHandler)
 	internalServer.Get("/devices", baseIndexHandler)
 	internalServer.Get("/ai", baseIndexHandler)
 

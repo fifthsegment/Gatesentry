@@ -1,9 +1,10 @@
 <script lang="ts">
-  import { Loading, Toggle } from "carbon-components-svelte";
+  import { InlineLoading, Toggle } from "carbon-components-svelte";
   export let settingName = "enable_https_filtering";
   export let label = "Label";
   export let labelA = "On";
   export let labelB = "Off";
+  export let size = "default";
   import { _ } from "svelte-i18n";
   import { store } from "../store/apistore";
   import { onMount } from "svelte";
@@ -57,10 +58,11 @@
 </script>
 
 <span>
-  {#if hide == true}{:else if settingValue == ""}
-    <Loading />
-  {:else}
+  {#if hide !== true && settingValue == ""}
+    <InlineLoading description="Loading..." />
+  {:else if hide !== true}
     <Toggle
+      {size}
       labelText={label}
       {labelA}
       {labelB}

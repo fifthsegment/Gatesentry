@@ -1,15 +1,22 @@
 <script lang="ts">
   import {
     Button,
-    Column,
+    ComboBox,
     Dropdown,
-    Row,
+    InlineLoading,
+    InlineNotification,
+    MultiSelect,
     Tag,
     TextArea,
     TextInput,
     Toggle,
   } from "carbon-components-svelte";
-  import { _ } from "svelte-i18n";
+  import { ArrowLeft, TrashCan, Save } from "carbon-icons-svelte";
+  import { onMount, createEventDispatcher } from "svelte";
+  import { getBasePath } from "../../lib/navigate";
+  import { MIME_TYPE_ITEMS } from "../../lib/mimetypes";
+  import { notificationstore } from "../../store/notifications";
+
   export let rule = {
     id: "",
     name: "",
@@ -21,50 +28,137 @@
     block_type: "none",
     blocked_content_types: [],
     url_regex_patterns: [],
-    time_restriction: null,
+    domain_patterns: [],
+    domain_lists: [],
+    content_domain_lists: [],
+    time_restriction: { from: "00:00", to: "23:59" },
     users: [],
     description: "",
   };
 
-  export let index;
-  export let expanded = false;
-  
-  import { createEventDispatcher } from "svelte";
-  import Timepicker from "../../components/timepicker.svelte";
-  import { ChevronDown, ChevronUp, RowDelete } from "carbon-icons-svelte";
+  export let isNew = false;
+
   const dispatch = createEventDispatcher();
+  const API_BASE = getBasePath() + "/api/rules";
 
-  function toggleExpand() {
-    dispatch("toggle");
-  }
+  let saving = false;
+  let deleting = false;
+  let error = "";
+  let validationError = "";
 
-  // Ensure arrays are initialized
+  // Form inputs
+  let domainPatternInput = "";
+  let contentTypeInput = "";
+  let urlRegexInput = "";
+  let userInput = "";
+  let contentTypeSelectedId = undefined;
+  let userSelectedId = undefined;
+
+  // API data
+  let availableDomainLists = [];
+  let availableUsers = [];
+
+  // Ensure arrays and objects are initialized
   $: {
     if (!rule.blocked_content_types) rule.blocked_content_types = [];
     if (!rule.url_regex_patterns) rule.url_regex_patterns = [];
     if (!rule.users) rule.users = [];
-  }
-
-  let contentTypeInput = "";
-  let urlRegexInput = "";
-  let userInput = "";
-
-  function addContentType() {
-    if (contentTypeInput.trim()) {
-      rule.blocked_content_types = [
-        ...rule.blocked_content_types,
-        contentTypeInput.trim(),
-      ];
-      contentTypeInput = "";
+    if (!rule.domain_patterns) rule.domain_patterns = [];
+    if (!rule.domain_lists) rule.domain_lists = [];
+    if (!rule.content_domain_lists) rule.content_domain_lists = [];
+    if (!rule.time_restriction)
+      rule.time_restriction = { from: "00:00", to: "23:59" };
+    if (rule.domain && rule.domain.trim()) {
+      if (!rule.domain_patterns.includes(rule.domain.trim())) {
+        rule.domain_patterns = [...rule.domain_patterns, rule.domain.trim()];
+      }
+      rule.domain = "";
     }
   }
 
+  $: showContentTypeOptions =
+    rule.mitm_action === "enable" &&
+    rule.block_type !== "none" &&
+    (rule.block_type === "content_type" ||
+      rule.block_type === "both" ||
+      rule.block_type === "all");
+
+  $: showUrlRegexOptions =
+    rule.mitm_action === "enable" &&
+    rule.block_type !== "none" &&
+    (rule.block_type === "url_regex" ||
+      rule.block_type === "both" ||
+      rule.block_type === "all");
+
+  $: showDomainListContentOptions =
+    rule.mitm_action === "enable" &&
+    rule.block_type !== "none" &&
+    (rule.block_type === "domain_list" || rule.block_type === "all");
+
+  onMount(async () => {
+    try {
+      const token = localStorage.getItem("jwt");
+      const [listsRes, usersRes] = await Promise.all([
+        fetch(getBasePath() + "/api/domainlists", {
+          headers: { Authorization: `Bearer ${token}` },
+        }),
+        fetch(getBasePath() + "/api/users", {
+          headers: { Authorization: `Bearer ${token}` },
+        }),
+      ]);
+      if (listsRes.ok) {
+        const data = await listsRes.json();
+        availableDomainLists = (data.lists || []).map((l) => ({
+          id: l.id,
+          text: `${l.name} (${l.entry_count || 0})`,
+        }));
+      }
+      if (usersRes.ok) {
+        const data = await usersRes.json();
+        availableUsers = (data.users || []).map((u) => ({
+          id: u.username,
+          text: u.username,
+        }));
+      }
+    } catch (e) {
+      console.error("Failed to fetch data:", e);
+    }
+  });
+
+  // --- Domain Patterns ---
+  function addDomainPattern() {
+    if (domainPatternInput.trim()) {
+      rule.domain_patterns = [
+        ...rule.domain_patterns,
+        domainPatternInput.trim(),
+      ];
+      domainPatternInput = "";
+    }
+  }
+  function removeDomainPattern(pattern) {
+    rule.domain_patterns = rule.domain_patterns.filter((p) => p !== pattern);
+  }
+
+  // --- Content Types ---
+  function addContentType(value?: string) {
+    const v = (value || contentTypeInput || "").trim();
+    if (v && !rule.blocked_content_types.includes(v)) {
+      rule.blocked_content_types = [...rule.blocked_content_types, v];
+    }
+    contentTypeInput = "";
+    contentTypeSelectedId = undefined;
+  }
+  function shouldFilterMimeItem(item, value) {
+    if (!value) return true;
+    return item.text.toLowerCase().includes(value.toLowerCase());
+  }
   function removeContentType(type) {
     rule.blocked_content_types = rule.blocked_content_types.filter(
-      (t) => t !== type
+      (t) => t !== type,
     );
   }
 
+  // --- URL Regex ---
   function addUrlRegex() {
     if (urlRegexInput.trim()) {
       rule.url_regex_patterns = [
@@ -74,476 +168,663 @@
       urlRegexInput = "";
     }
   }
-
   function removeUrlRegex(pattern) {
     rule.url_regex_patterns = rule.url_regex_patterns.filter(
-      (p) => p !== pattern
+      (p) => p !== pattern,
     );
   }
 
-  function addUser() {
-    if (userInput.trim()) {
-      rule.users = [...rule.users, userInput.trim()];
-      userInput = "";
+  // --- Users ---
+  function addUser(value?: string) {
+    const v = (value || userInput || "").trim();
+    if (v && !rule.users.includes(v)) {
+      rule.users = [...rule.users, v];
     }
+    userInput = "";
+    userSelectedId = undefined;
   }
-
+  function shouldFilterUserItem(item, value) {
+    if (!value) return true;
+    return item.text.toLowerCase().includes(value.toLowerCase());
+  }
   function removeUser(user) {
     rule.users = rule.users.filter((u) => u !== user);
   }
 
-  $: showContentTypeOptions =
-    rule.mitm_action === "enable" &&
-    rule.block_type !== "none" &&
-    (rule.block_type === "content_type" || rule.block_type === "both");
+  // --- Save ---
+  async function saveRule() {
+    validationError = "";
+    if (rule.enabled && rule.time_restriction) {
+      const from = rule.time_restriction.from || "00:00";
+      const to = rule.time_restriction.to || "23:59";
+      if (to <= from) {
+        validationError = "End time must be after begin time.";
+        return;
+      }
+    }
 
-  $: showUrlRegexOptions =
-    rule.mitm_action === "enable" &&
-    rule.block_type !== "none" &&
-    (rule.block_type === "url_regex" || rule.block_type === "both");
+    saving = true;
+    error = "";
+    try {
+      const token = localStorage.getItem("jwt");
+      const url = rule.id ? `${API_BASE}/${rule.id}` : API_BASE;
+      const method = rule.id ? "PUT" : "POST";
+      const response = await fetch(url, {
+        method,
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(rule),
+      });
+      if (!response.ok) {
+        const errorData = await response.text();
+        throw new Error(`Failed to save rule: ${errorData}`);
+      }
+      notificationstore.add({
+        title: "Saved",
+        subtitle: `Rule "${rule.name || "Unnamed"}" saved successfully`,
+        kind: "success",
+        timeout: 3000,
+      });
+      dispatch("back");
+    } catch (err) {
+      error = err.message;
+    } finally {
+      saving = false;
+    }
+  }
+
+  // --- Delete ---
+  async function deleteRule() {
+    if (!rule.id) {
+      dispatch("back");
+      return;
+    }
+    deleting = true;
+    error = "";
+    try {
+      const token = localStorage.getItem("jwt");
+      const response = await fetch(`${API_BASE}/${rule.id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!response.ok) {
+        const errorData = await response.text();
+        throw new Error(`Failed to delete rule: ${errorData}`);
+      }
+      notificationstore.add({
+        title: "Deleted",
+        subtitle: `Rule "${rule.name || "Unnamed"}" deleted`,
+        kind: "success",
+        timeout: 3000,
+      });
+      dispatch("back");
+    } catch (err) {
+      error = err.message;
+    } finally {
+      deleting = false;
+    }
+  }
+
+  function goBack() {
+    dispatch("back");
+  }
 </script>
 
-<div class="simple-border">
-  <!-- Collapsed Summary View -->
-  {#if !expanded}
-    <div class="rule-summary" on:click={toggleExpand}>
-      <div class="summary-content">
-        <div class="summary-left">
-          <span class="rule-number">#{index + 1}</span>
-          <strong>{rule.name || `Rule ${index + 1}`}</strong>
-          {#if rule.domain}
-            <span class="domain-badge">{rule.domain}</span>
-          {/if}
-        </div>
-        <div class="summary-right">
-          <span class="action-badge action-{rule.action}">{rule.action}</span>
-          <span class="mitm-badge mitm-{rule.mitm_action}">
-            MITM: {rule.mitm_action}
-          </span>
-          <Button
-            size="small"
-            kind="ghost"
-            icon={ChevronDown}
-            iconDescription="Expand"
-          />
-        </div>
+<!-- Header bar -->
+<div class="rd-header">
+  <!-- svelte-ignore a11y-click-events-have-key-events a11y-no-static-element-interactions -->
+  <span class="rd-back" on:click={goBack} title="Back to rules">
+    <ArrowLeft size={20} />
+  </span>
+  <div class="rd-header-text">
+    <span class="rd-header-label">{isNew ? "New Rule" : "Edit Rule"}</span>
+    {#if !isNew}
+      <h3 class="rd-title">{rule.name || "Unnamed Rule"}</h3>
+    {/if}
+  </div>
+</div>
+
+{#if error}
+  <InlineNotification
+    kind="error"
+    title="Error"
+    subtitle={error}
+    on:close={() => (error = "")}
+  />
+{/if}
+
+<div class="rd-scroll">
+  <!-- Rule Status -->
+  <div class="rd-field">
+    <div class="rd-toggle-card">
+      <div class="rd-toggle-info">
+        <span class="rd-toggle-title">Rule Status</span>
+        <span class="rd-toggle-desc"
+          >{rule.enabled
+            ? "This rule is active and being evaluated"
+            : "This rule is disabled and will be skipped"}</span
+        >
       </div>
-    </div>
-  {:else}
-    <!-- Expanded Edit View -->
-    <div class="rule-header" on:click={toggleExpand}>
-      <h5>{$_("Rule")} {index + 1}</h5>
-      <Button
-        size="small"
-        kind="ghost"
-        icon={ChevronUp}
-        iconDescription="Collapse"
+      <Toggle
+        size="sm"
+        bind:toggled={rule.enabled}
+        hideLabel
+        labelA=""
+        labelB=""
       />
     </div>
-    
-    <div class="rule-form">
-      <table class="rule-table">
-        <tbody>
-          <!-- Enabled Toggle -->
-          <tr>
-            <td class="label-col">{$_("Enabled")}</td>
-            <td class="input-col">
-              <Toggle
-                size="sm"
-                bind:toggled={rule.enabled}
-                hideLabel
-                labelA=""
-                labelB=""
-              />
-            </td>
-          </tr>
+  </div>
 
-          <!-- Name -->
-          <tr>
-            <td class="label-col">{$_("Name")}</td>
-            <td class="input-col">
-              <TextInput
-                size="sm"
-                type="text"
-                bind:value={rule.name}
-                placeholder="Rule Name"
-              />
-            </td>
-          </tr>
+  <!-- Active Hours -->
+  {#if rule.enabled}
+    <div class="rd-field">
+      <span class="rd-field-label">Active Hours</span>
+      <div class="rd-time-inputs">
+        <input
+          type="time"
+          class="rd-time"
+          bind:value={rule.time_restriction.from}
+        />
+        <span class="rd-time-sep">to</span>
+        <input
+          type="time"
+          class="rd-time"
+          bind:value={rule.time_restriction.to}
+        />
+      </div>
+      {#if validationError}
+        <p class="rd-val-error">{validationError}</p>
+      {/if}
+    </div>
+  {/if}
 
-          <!-- Domain -->
-          <tr>
-            <td class="label-col">{$_("Domain")} *</td>
-            <td class="input-col">
-              <TextInput
-                size="sm"
-                type="text"
-                bind:value={rule.domain}
-                placeholder="*.example.com or example.com"
-              />
-            </td>
-          </tr>
+  <!-- Name -->
+  <div class="rd-field">
+    <span class="rd-field-label">Name</span>
+    <TextInput
+      size="sm"
+      hideLabel
+      bind:value={rule.name}
+      placeholder="Rule Name"
+    />
+  </div>
 
-          <!-- Priority -->
-          <tr>
-            <td class="label-col">{$_("Priority")}</td>
-            <td class="input-col">
-              <TextInput
-                size="sm"
-                type="number"
-                bind:value={rule.priority}
-                placeholder="0"
-              />
-            </td>
-          </tr>
+  <!-- Priority -->
+  <div class="rd-field">
+    <span class="rd-field-label">Priority</span>
+    <TextInput
+      size="sm"
+      hideLabel
+      type="number"
+      bind:value={rule.priority}
+      placeholder="0"
+    />
+  </div>
 
-          <!-- Action - always show -->
-          <tr>
-            <td class="label-col">{$_("Action")}</td>
-            <td class="input-col">
-              <Dropdown
-                size="sm"
-                selectedId={rule.action}
-                on:select={(e) => {
-                  rule.action = e.detail.selectedId;
-                }}
-                items={[
-                  { id: "allow", text: "Allow" },
-                  { id: "block", text: "Block" },
-                ]}
-              />
-            </td>
-          </tr>
+  <!-- Action -->
+  <div class="rd-field">
+    <span class="rd-field-label">Action</span>
+    <Dropdown
+      size="sm"
+      titleText=""
+      selectedId={rule.action}
+      on:select={(e) => {
+        rule.action = e.detail.selectedId;
+      }}
+      items={[
+        { id: "allow", text: "Allow" },
+        { id: "block", text: "Block" },
+      ]}
+    />
+  </div>
 
-          <!-- MITM Action -->
-          <tr>
-            <td class="label-col">{$_("SSL Inspection")}</td>
-            <td class="input-col">
-              <Dropdown
-                size="sm"
-                selectedId={rule.mitm_action}
-                on:select={(e) => {
-                  rule.mitm_action = e.detail.selectedId;
-                }}
-                items={[
-                  { id: "default", text: "Use Global Setting" },
-                  { id: "enable", text: "Enable (Inspect HTTPS)" },
-                  { id: "disable", text: "Disable (Pass Through)" },
-                ]}
-              />
-            </td>
-          </tr>
+  <!-- Domain Patterns -->
+  <div class="rd-field">
+    <span class="rd-field-label">Domain Patterns</span>
+    <div class="rd-add-row">
+      <div class="rd-add-input">
+        <TextInput
+          size="sm"
+          bind:value={domainPatternInput}
+          placeholder="e.g., *.ads.com"
+          on:keydown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              addDomainPattern();
+            }
+          }}
+        />
+      </div>
+      <Button size="small" on:click={addDomainPattern}>Add</Button>
+    </div>
+    {#if rule.domain_patterns && rule.domain_patterns.length > 0}
+      <div class="rd-tags">
+        {#each rule.domain_patterns as pattern}
+          <Tag size="sm" filter on:close={() => removeDomainPattern(pattern)}
+            >{pattern}</Tag
+          >
+        {/each}
+      </div>
+    {/if}
+  </div>
 
-          {#if rule.mitm_action === "enable"}
-            <!-- Block Type -->
-            <tr>
-              <td class="label-col">{$_("Content Filtering")}</td>
-              <td class="input-col">
-                <Dropdown
-                  size="sm"
-                  selectedId={rule.block_type}
-                  on:select={(e) => {
-                    rule.block_type = e.detail.selectedId;
-                  }}
-                  items={[
-                    { id: "none", text: "None (Allow all content)" },
-                    { id: "content_type", text: "Block by Content Type" },
-                    { id: "url_regex", text: "Block by URL Pattern" },
-                    { id: "both", text: "Block Both" },
-                  ]}
-                />
-              </td>
-            </tr>
+  <!-- Domain Lists -->
+  {#if availableDomainLists.length > 0}
+    <div class="rd-field">
+      <span class="rd-field-label">Domain Lists</span>
+      <MultiSelect
+        size="sm"
+        titleText=""
+        label="Select domain lists..."
+        items={availableDomainLists}
+        selectedIds={rule.domain_lists || []}
+        on:select={(e) => {
+          rule.domain_lists = e.detail.selectedIds;
+        }}
+      />
+    </div>
+  {/if}
 
-            {#if showContentTypeOptions}
-              <!-- Blocked Content Types -->
-              <tr>
-                <td class="label-col">{$_("Blocked Types")}</td>
-                <td class="input-col">
-                  <div class="list-input">
-                    <TextInput
-                      size="sm"
-                      type="text"
-                      bind:value={contentTypeInput}
-                      placeholder="e.g., video/mp4"
-                      on:keydown={(e) => {
-                        if (e.key === "Enter") {
-                          e.preventDefault();
-                          addContentType();
-                        }
-                      }}
-                    />
-                    <Button size="small" on:click={addContentType}>Add</Button>
-                  </div>
-                  {#if rule.blocked_content_types && rule.blocked_content_types.length > 0}
-                    <div class="tags" style="margin-top: 8px;">
-                      {#each rule.blocked_content_types as type}
-                        <Tag size="sm" filter on:close={() => removeContentType(type)}>{type}</Tag>
-                      {/each}
-                    </div>
-                  {/if}
-                </td>
-              </tr>
-            {/if}
+  <!-- SSL Inspection -->
+  <div class="rd-field">
+    <span class="rd-field-label">SSL Inspection</span>
+    <Dropdown
+      size="sm"
+      titleText=""
+      selectedId={rule.mitm_action}
+      on:select={(e) => {
+        rule.mitm_action = e.detail.selectedId;
+      }}
+      items={[
+        { id: "default", text: "Use Global Setting" },
+        { id: "enable", text: "Enable (Inspect HTTPS)" },
+        { id: "disable", text: "Disable (Pass Through)" },
+      ]}
+    />
+  </div>
 
-            {#if showUrlRegexOptions}
-              <!-- URL Patterns -->
-              <tr>
-                <td class="label-col">{$_("URL Patterns")}</td>
-                <td class="input-col">
-                  <div class="list-input">
-                    <TextInput
-                      size="sm"
-                      type="text"
-                      bind:value={urlRegexInput}
-                      placeholder="e.g., /ads/.*"
-                      on:keydown={(e) => {
-                        if (e.key === "Enter") {
-                          e.preventDefault();
-                          addUrlRegex();
-                        }
-                      }}
-                    />
-                    <Button size="small" on:click={addUrlRegex}>Add</Button>
-                  </div>
-                  {#if rule.url_regex_patterns && rule.url_regex_patterns.length > 0}
-                    <div class="tags" style="margin-top: 8px;">
-                      {#each rule.url_regex_patterns as pattern}
-                        <Tag size="sm" filter on:close={() => removeUrlRegex(pattern)}>{pattern}</Tag>
-                      {/each}
-                    </div>
-                  {/if}
-                </td>
-              </tr>
-            {/if}
-          {/if}
-
-          <!-- Time Restriction -->
-          <tr>
-            <td class="label-col">{$_("Time Restriction")}</td>
-            <td class="input-col">
-              <div style="display: flex; align-items: center; gap: 10px;">
-                <Toggle
-                  size="sm"
-                  toggled={rule.time_restriction !== null}
-                  hideLabel
-                  labelA=""
-                  labelB=""
-                  on:toggle={(e) => {
-                    if (e.detail.toggled) {
-                      rule.time_restriction = { from: "09:00", to: "17:00" };
-                    } else {
-                      rule.time_restriction = null;
-                    }
-                  }}
-                />
-                {#if rule.time_restriction}
-                  <Timepicker bind:value={rule.time_restriction.from} label="From" />
-                  <span>to</span>
-                  <Timepicker bind:value={rule.time_restriction.to} label="To" />
-                {/if}
-              </div>
-            </td>
-          </tr>
-
-          <!-- Users -->
-          <tr>
-            <td class="label-col">{$_("Users")}</td>
-            <td class="input-col">
-              <div class="list-input">
-                <TextInput
-                  size="sm"
-                  type="text"
-                  bind:value={userInput}
-                  placeholder="Username (empty = all users)"
-                  on:keydown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      addUser();
-                    }
-                  }}
-                />
-                <Button size="small" on:click={addUser}>Add</Button>
-              </div>
-              {#if rule.users && rule.users.length > 0}
-                <div class="tags" style="margin-top: 8px;">
-                  {#each rule.users as user}
-                    <Tag size="sm" filter on:close={() => removeUser(user)}>{user}</Tag>
-                  {/each}
-                </div>
-              {/if}
-            </td>
-          </tr>
-
-          <!-- Description -->
-          <tr>
-            <td class="label-col">{$_("Description")}</td>
-            <td class="input-col">
-              <TextArea
-                rows={2}
-                bind:value={rule.description}
-                placeholder="Optional description"
-              />
-            </td>
-          </tr>
-        </tbody>
-      </table>
+  {#if rule.mitm_action === "enable"}
+    <!-- Content Filtering -->
+    <div class="rd-field">
+      <span class="rd-field-label">Content Filtering</span>
+      <Dropdown
+        size="sm"
+        titleText=""
+        selectedId={rule.block_type}
+        on:select={(e) => {
+          rule.block_type = e.detail.selectedId;
+        }}
+        items={[
+          { id: "none", text: "None (Allow all content)" },
+          { id: "content_type", text: "Block by Content Type" },
+          { id: "url_regex", text: "Block by URL Pattern" },
+          { id: "both", text: "Block Content Type + URL Pattern" },
+          { id: "domain_list", text: "Block by Domain List" },
+          { id: "all", text: "Block All (Type + URL + Domain List)" },
+        ]}
+      />
     </div>
 
-    <div class="rule-footer">
+    {#if showContentTypeOptions}
+      <div class="rd-field">
+        <span class="rd-field-label">Blocked Content Types</span>
+        <div class="rd-add-row">
+          <div class="rd-add-input">
+            <ComboBox
+              size="sm"
+              items={MIME_TYPE_ITEMS}
+              bind:selectedId={contentTypeSelectedId}
+              bind:value={contentTypeInput}
+              shouldFilterItem={shouldFilterMimeItem}
+              placeholder="Search or type a MIME type"
+              on:select={(e) => {
+                if (e.detail.selectedItem)
+                  addContentType(e.detail.selectedItem.text);
+              }}
+              on:keydown={(e) => {
+                if (e.key === "Enter" && contentTypeInput) {
+                  e.preventDefault();
+                  addContentType();
+                }
+              }}
+            />
+          </div>
+          <Button size="small" on:click={() => addContentType()}>Add</Button>
+        </div>
+        {#if rule.blocked_content_types && rule.blocked_content_types.length > 0}
+          <div class="rd-tags">
+            {#each rule.blocked_content_types as type}
+              <Tag size="sm" filter on:close={() => removeContentType(type)}
+                >{type}</Tag
+              >
+            {/each}
+          </div>
+        {/if}
+      </div>
+    {/if}
+
+    {#if showUrlRegexOptions}
+      <div class="rd-field">
+        <span class="rd-field-label">URL Patterns</span>
+        <div class="rd-add-row">
+          <div class="rd-add-input">
+            <TextInput
+              size="sm"
+              bind:value={urlRegexInput}
+              placeholder="e.g., /ads/.*"
+              on:keydown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  addUrlRegex();
+                }
+              }}
+            />
+          </div>
+          <Button size="small" on:click={addUrlRegex}>Add</Button>
+        </div>
+        {#if rule.url_regex_patterns && rule.url_regex_patterns.length > 0}
+          <div class="rd-tags">
+            {#each rule.url_regex_patterns as pattern}
+              <Tag size="sm" filter on:close={() => removeUrlRegex(pattern)}
+                >{pattern}</Tag
+              >
+            {/each}
+          </div>
+        {/if}
+      </div>
+    {/if}
+
+    {#if showDomainListContentOptions && availableDomainLists.length > 0}
+      <div class="rd-field">
+        <span class="rd-field-label">Block Embedded Resources</span>
+        <MultiSelect
+          size="sm"
+          titleText=""
+          label="Block embedded resources from these lists..."
+          items={availableDomainLists}
+          selectedIds={rule.content_domain_lists || []}
+          on:select={(e) => {
+            rule.content_domain_lists = e.detail.selectedIds;
+          }}
+        />
+      </div>
+    {/if}
+  {/if}
+
+  <!-- Users -->
+  <div class="rd-field">
+    <span class="rd-field-label">Users</span>
+    <div class="rd-add-row">
+      <div class="rd-add-input">
+        <ComboBox
+          size="sm"
+          items={availableUsers}
+          bind:selectedId={userSelectedId}
+          bind:value={userInput}
+          shouldFilterItem={shouldFilterUserItem}
+          placeholder="Search users (empty = all users)"
+          on:select={(e) => {
+            if (e.detail.selectedItem) addUser(e.detail.selectedItem.text);
+          }}
+          on:keydown={(e) => {
+            if (e.key === "Enter" && userInput) {
+              e.preventDefault();
+              addUser();
+            }
+          }}
+        />
+      </div>
+      <Button size="small" on:click={() => addUser()}>Add</Button>
+    </div>
+    {#if rule.users && rule.users.length > 0}
+      <div class="rd-tags">
+        {#each rule.users as user}
+          <Tag size="sm" filter on:close={() => removeUser(user)}>{user}</Tag>
+        {/each}
+      </div>
+    {/if}
+  </div>
+
+  <!-- Description -->
+  <div class="rd-field">
+    <span class="rd-field-label">Description</span>
+    <TextArea
+      rows={3}
+      hideLabel
+      bind:value={rule.description}
+      placeholder="Optional description"
+    />
+  </div>
+
+  <!-- Actions -->
+  <div class="rd-actions">
+    <Button
+      size="small"
+      kind="primary"
+      icon={Save}
+      disabled={saving}
+      on:click={saveRule}
+    >
+      {saving ? "Saving..." : "Save Rule"}
+    </Button>
+    {#if !isNew && rule.id}
       <Button
         size="small"
-        icon={RowDelete}
         kind="danger-tertiary"
-        on:click={() => dispatch("remove", index)}
+        icon={TrashCan}
+        disabled={deleting}
+        on:click={deleteRule}
       >
-        Remove Rule
+        {deleting ? "Deleting..." : "Delete Rule"}
       </Button>
-      <Button
-        size="small"
-        kind="primary"
-        on:click={() => dispatch("save", index)}
-      >
-        Save Rule
-      </Button>
+    {/if}
+  </div>
+
+  {#if saving || deleting}
+    <div style="margin-top: 8px;">
+      <InlineLoading description={saving ? "Saving..." : "Deleting..."} />
     </div>
   {/if}
 </div>
 
 <style>
-  .rule-summary {
-    padding: 15px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    transition: background-color 0.2s;
-  }
-
-  .rule-summary:hover {
-    background-color: #f4f4f4;
-  }
-
-  .summary-content {
-    display: flex;
-    width: 100%;
-    justify-content: space-between;
-    align-items: center;
-  }
-
-  .summary-left {
-    display: flex;
-    align-items: center;
-    gap: 15px;
-  }
-
-  .summary-right {
+  .rd-header {
     display: flex;
     align-items: center;
     gap: 10px;
+    margin-bottom: 16px;
   }
 
-  .rule-number {
-    color: #525252;
-    font-weight: 500;
-  }
-
-  .domain-badge {
-    background-color: #e0e0e0;
-    padding: 4px 12px;
-    border-radius: 12px;
-    font-size: 0.875rem;
-    color: #161616;
-  }
-
-  .action-badge {
-    padding: 4px 12px;
-    border-radius: 12px;
-    font-size: 0.875rem;
-    font-weight: 500;
-    text-transform: uppercase;
-  }
-
-  .action-allow {
-    background-color: #d0e2ff;
-    color: #0043ce;
-  }
-
-  .action-block {
-    background-color: #ffd7d9;
-    color: #a2191f;
-  }
-
-  .mitm-badge {
-    padding: 4px 12px;
-    border-radius: 12px;
-    font-size: 0.875rem;
-    background-color: #e8daff;
-    color: #6929c4;
-  }
-
-  .rule-header {
+  .rd-back {
     display: flex;
-    justify-content: space-between;
     align-items: center;
-    padding: 12px 15px;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
     cursor: pointer;
-    border-bottom: 1px solid #e0e0e0;
-    background-color: #f4f4f4;
+    color: #525252;
+    flex-shrink: 0;
+    transition: background-color 0.12s;
+  }
+  .rd-back:hover {
+    background: #e0e0e0;
+  }
+  .rd-back:active {
+    background: #c6c6c6;
   }
 
-  .rule-header:hover {
-    background-color: #e8e8e8;
+  .rd-header-text {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    min-width: 0;
   }
 
-  .rule-form {
-    padding: 15px;
-  }
-
-  .rule-table {
-    width: 100%;
-    border-collapse: collapse;
-  }
-
-  .rule-table td {
-    padding: 8px 10px;
-    vertical-align: top;
-  }
-
-  .label-col {
-    width: 150px;
+  .rd-header-label {
+    font-size: 0.75rem;
     font-weight: 500;
+    color: #6f6f6f;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .rd-title {
+    font-size: 1.125rem;
+    font-weight: 600;
     color: #161616;
-    padding-top: 12px;
+    word-break: break-word;
+    margin: 0;
   }
 
-  .input-col {
-    padding-left: 20px;
+  .rd-scroll {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding-bottom: 40px; /* room for mobile keyboards */
   }
 
-  .list-input {
+  .rd-toggle-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .rd-toggle-card :global(.bx--form-item) {
+    flex: 0 0 auto;
+  }
+
+  .rd-toggle-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  .rd-toggle-title {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: #161616;
+  }
+
+  .rd-toggle-desc {
+    font-size: 0.75rem;
+    color: #6f6f6f;
+  }
+
+  .rd-time-inputs {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .rd-time {
+    font-size: 0.875rem;
+    font-family: inherit;
+    padding: 4px 8px;
+    border: 1px solid #8d8d8d;
+    border-radius: 0;
+    background: #f4f4f4;
+    color: #161616;
+    height: 32px;
+    min-width: 110px;
+    outline: none;
+  }
+  .rd-time:focus {
+    border-color: #0f62fe;
+    outline: 2px solid #0f62fe;
+    outline-offset: -2px;
+  }
+
+  .rd-time-sep {
+    font-size: 0.85rem;
+    color: #525252;
+  }
+
+  .rd-val-error {
+    font-size: 0.8rem;
+    color: #da1e28;
+    margin-top: 6px;
+    font-weight: 500;
+  }
+
+  .rd-field {
+    background: #fff;
+    border: 1px solid #e0e0e0;
+    border-radius: 6px;
+    padding: 14px 16px;
+    margin-bottom: 8px;
+  }
+
+  .rd-field-label {
+    display: block;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #525252;
+    margin-bottom: 6px;
+    letter-spacing: 0.02em;
+  }
+
+  .rd-add-row {
     display: flex;
     gap: 8px;
-    align-items: center;
+    align-items: flex-start;
   }
 
-  .tags {
+  .rd-add-input {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .rd-tags {
     display: flex;
     flex-wrap: wrap;
-    gap: 5px;
+    gap: 4px;
+    margin-top: 8px;
   }
 
-  .rule-footer {
+  .rd-actions {
     display: flex;
-    justify-content: space-between;
-    padding: 10px 15px;
-    border-top: 1px solid #e0e0e0;
-    background-color: #f4f4f4;
+    gap: 12px;
+    align-items: center;
+    margin-top: 8px;
+    padding: 14px 0;
   }
 
-  .simple-border {
-    border: 1px solid #e0e0e0;
-    margin-bottom: 10px;
-    border-radius: 4px;
-    background-color: white;
+  @media (max-width: 671px) {
+    .rd-title {
+      font-size: 1rem;
+    }
+
+    .rd-field {
+      padding: 12px 12px;
+    }
+
+    .rd-add-row {
+      flex-direction: column;
+      align-items: center;
+    }
+    .rd-add-row .rd-add-input {
+      width: 100%;
+    }
+    .rd-add-row :global(.bx--btn) {
+      max-width: 280px;
+      width: 100%;
+    }
+
+    .rd-time-inputs {
+      flex-wrap: wrap;
+    }
+
+    .rd-actions {
+      flex-direction: column;
+      align-items: center;
+    }
+    .rd-actions :global(.bx--btn) {
+      max-width: 280px;
+      width: 100%;
+    }
   }
 </style>

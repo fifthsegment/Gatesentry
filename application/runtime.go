@@ -27,6 +27,7 @@ import (
 	"syscall"
 
 	gatesentryDnsServer "bitbucket.org/abdullah_irfan/gatesentryf/dns/server"
+	gatesentryDomainList "bitbucket.org/abdullah_irfan/gatesentryf/domainlist"
 	gatesentry2filters "bitbucket.org/abdullah_irfan/gatesentryf/filters"
 	gatesentry2logger "bitbucket.org/abdullah_irfan/gatesentryf/logger"
 	gatesentry2storage "bitbucket.org/abdullah_irfan/gatesentryf/storage"
@@ -84,6 +85,11 @@ type GSRuntime struct {
 	DNSServerChannel            chan int
 	BoundAddress                *string
 	DnsServerInfo               *GatesentryTypes.DnsServerInfo
+
+	// DomainListManager is the shared domain list manager used by both
+	// the web server (API endpoints) and the DNS server (blocklist lookups).
+	// Created once in Start() and passed to both subsystems.
+	DomainListManager *gatesentryDomainList.DomainListManager
 
 	// OnDNSServerStateChanged is called when the DNS server enabled state
 	// changes during Init/Reload. Parameters: (enabled bool, upstreamResolver string).

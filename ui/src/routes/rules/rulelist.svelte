@@ -1,49 +1,42 @@
 <script lang="ts">
   import {
     Button,
-    Column,
     InlineLoading,
     InlineNotification,
-    Row,
+    Toggle,
   } from "carbon-components-svelte";
-  import Ruleform from "./rform.svelte";
-  import { Add } from "carbon-icons-svelte";
-  import { onMount } from "svelte";
+  import { Add, ChevronRight, DragVertical } from "carbon-icons-svelte";
+  import { onMount, createEventDispatcher } from "svelte";
   import { getBasePath } from "../../lib/navigate";
+  import { notificationstore } from "../../store/notifications";
+
+  const dispatch = createEventDispatcher();
 
   let rules = [];
-  let loading = false;
+  let initialLoading = true;
+  let saving = false;
   let error = "";
-  let success = "";
-  let expandedRules = new Set(); // Track which rules are expanded
+
+  // Drag state
+  let dragIdx = -1;
+  let dragOverIdx = -1;
 
   const API_BASE = getBasePath() + "/api/rules";
 
-  function toggleExpand(index) {
-    if (expandedRules.has(index)) {
-      expandedRules.delete(index);
-    } else {
-      expandedRules.add(index);
-    }
-    expandedRules = expandedRules; // Trigger reactivity
+  function ruleKey(rule) {
+    return rule.id || `_new_${rule.name}_${rule.priority}`;
   }
 
   async function loadRules() {
-    loading = true;
     error = "";
     try {
       const token = localStorage.getItem("jwt");
-      if (!token) {
-        throw new Error("Please login first to view rules");
-      }
+      if (!token) throw new Error("Please login first to view rules");
       const response = await fetch(API_BASE, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
+        headers: { Authorization: `Bearer ${token}` },
       });
-      if (response.status === 401) {
+      if (response.status === 401)
         throw new Error("Authentication failed. Please login again");
-      }
       if (!response.ok) {
         const errorText = await response.text();
         throw new Error(
@@ -51,222 +44,582 @@
         );
       }
       const data = await response.json();
-      rules = data.rules || [];
+      rules = (data.rules || [])
+        .slice()
+        .sort((a, b) => a.priority - b.priority);
     } catch (err) {
       error = err.message;
     } finally {
-      loading = false;
+      initialLoading = false;
     }
   }
 
-  onMount(() => {
-    loadRules();
-  });
+  onMount(loadRules);
+
+  function openRule(rule) {
+    dispatch("open", rule);
+  }
 
   function addRule() {
-    console.log("add rule");
-    const newIndex = rules.length;
-    rules = [
-      ...rules,
-      {
-        id: "",
-        name: `Rule ${rules.length + 1}`,
-        enabled: true,
-        priority: rules.length,
-        domain: "",
-        action: "allow",
-        mitm_action: "enable",
-        block_type: "none",
-        blocked_content_types: [],
-        url_regex_patterns: [],
-        time_restriction: null,
-        users: [],
-        description: "",
-      },
-    ];
-    // Auto-expand newly added rule
-    expandedRules.add(newIndex);
-    expandedRules = expandedRules;
+    const maxPriority = rules.reduce((max, r) => Math.max(max, r.priority), 0);
+    const newRule = {
+      id: "",
+      name: "",
+      enabled: true,
+      priority: maxPriority + 1,
+      domain: "",
+      action: "allow",
+      mitm_action: "default",
+      block_type: "none",
+      blocked_content_types: [],
+      url_regex_patterns: [],
+      domain_patterns: [],
+      domain_lists: [],
+      content_domain_lists: [],
+      time_restriction: { from: "00:00", to: "23:59" },
+      users: [],
+      description: "",
+    };
+    dispatch("create", newRule);
   }
 
-  async function removeRule(e) {
-    const index = e.detail;
-    const rule = rules[index];
+  // --- Mouse Drag (desktop) ---
+  let dragAllowed = false;
 
-    // If the rule has an ID, delete it from the backend
-    if (rule.id) {
-      loading = true;
-      error = "";
-      success = "";
+  function allowDrag() {
+    dragAllowed = true;
+  }
+  function disallowDrag() {
+    dragAllowed = false;
+  }
 
-      try {
-        const token = localStorage.getItem("jwt");
-        const response = await fetch(`${API_BASE}/${rule.id}`, {
-          method: "DELETE",
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        });
+  function handleDragStart(e, idx) {
+    if (!dragAllowed) {
+      e.preventDefault();
+      return;
+    }
+    dragIdx = idx;
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", String(idx));
+    requestAnimationFrame(() => {
+      rules = rules;
+    });
+  }
 
-        if (!response.ok) {
-          const errorData = await response.text();
-          throw new Error(`Failed to delete rule: ${errorData}`);
+  // --- Touch Drag (mobile) ---
+  let rowEls = [];
+  let touchDragging = false;
+  let touchClone = null;
+  let touchOffsetY = 0;
+
+  function handleTouchDragStart(e, idx) {
+    e.preventDefault(); // prevent scroll while dragging from handle
+    const touch = e.touches[0];
+    dragIdx = idx;
+    touchDragging = true;
+
+    // Create a floating clone of the row
+    const rowEl = rowEls[idx];
+    if (rowEl) {
+      const rect = rowEl.getBoundingClientRect();
+      touchOffsetY = touch.clientY - rect.top;
+      touchClone = rowEl.cloneNode(true);
+      touchClone.style.position = "fixed";
+      touchClone.style.left = rect.left + "px";
+      touchClone.style.top = touch.clientY - touchOffsetY + "px";
+      touchClone.style.width = rect.width + "px";
+      touchClone.style.zIndex = "9999";
+      touchClone.style.opacity = "0.85";
+      touchClone.style.boxShadow = "0 4px 12px rgba(0,0,0,0.2)";
+      touchClone.style.pointerEvents = "none";
+      touchClone.style.transition = "none";
+      document.body.appendChild(touchClone);
+    }
+    rules = rules; // trigger reactivity for rl-dragging class
+  }
+
+  function handleTouchDragMove(e) {
+    if (!touchDragging || dragIdx === -1) return;
+    e.preventDefault();
+    const touch = e.touches[0];
+
+    // Move clone
+    if (touchClone) {
+      touchClone.style.top = touch.clientY - touchOffsetY + "px";
+    }
+
+    // Determine which row we're over
+    let overIdx = -1;
+    for (let i = 0; i < rowEls.length; i++) {
+      if (i === dragIdx || !rowEls[i]) continue;
+      const rect = rowEls[i].getBoundingClientRect();
+      if (touch.clientY >= rect.top && touch.clientY <= rect.bottom) {
+        overIdx = i;
+        break;
+      }
+    }
+    dragOverIdx = overIdx;
+  }
+
+  function handleTouchDragEnd(e) {
+    if (!touchDragging) return;
+    // Remove clone
+    if (touchClone) {
+      touchClone.remove();
+      touchClone = null;
+    }
+
+    if (dragIdx !== -1 && dragOverIdx !== -1 && dragIdx !== dragOverIdx) {
+      const reordered = rules.slice();
+      const [moved] = reordered.splice(dragIdx, 1);
+      reordered.splice(dragOverIdx, 0, moved);
+      const changed = [];
+      for (let i = 0; i < reordered.length; i++) {
+        const np = i + 1;
+        if (reordered[i].priority !== np) {
+          reordered[i].priority = np;
+          changed.push(reordered[i]);
         }
-
-        success = `Rule "${
-          rule.name || `#${index + 1}`
-        }" deleted successfully!`;
-
-        // Clear success message after 3 seconds
-        setTimeout(() => {
-          success = "";
-        }, 3000);
-      } catch (err) {
-        error = err.message;
-        loading = false;
-        return; // Don't remove from UI if delete failed
-      } finally {
-        loading = false;
       }
+      rules = reordered;
+      if (changed.length > 0) saveReorderedRules(changed);
     }
-
-    // Remove from local array
-    console.log("Removing rule", index);
-    rules = rules.filter((_, i) => i !== index);
-    // Clean up expanded state
-    expandedRules.delete(index);
-    expandedRules = expandedRules;
+    touchDragging = false;
+    cleanupDrag();
   }
 
-  async function saveRule(e) {
-    const index = e.detail;
-    loading = true;
-    error = "";
-    success = "";
+  // Chevron touch-scroll protection: only fire open if finger didn't move
+  let chevronTouchStartY = 0;
+  let chevronTouchStartX = 0;
+  const TOUCH_SLOP = 10;
 
-    try {
-      const token = localStorage.getItem("jwt");
-      const rule = rules[index];
-      const url = rule.id ? `${API_BASE}/${rule.id}` : API_BASE;
-      const method = rule.id ? "PUT" : "POST";
+  function chevronTouchStart(e) {
+    const t = e.touches[0];
+    chevronTouchStartX = t.clientX;
+    chevronTouchStartY = t.clientY;
+  }
 
-      const response = await fetch(url, {
-        method,
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(rule),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.text();
-        throw new Error(`Failed to save rule: ${errorData}`);
-      }
-
-      const savedRule = await response.json();
-      // Update the rule with the response (gets ID if newly created)
-      rules[index] = savedRule.rule || savedRule;
-      rules = rules; // Trigger reactivity
-
-      success = `Rule "${rule.name || `#${index + 1}`}" saved successfully!`;
-
-      // Collapse the rule after successful save
-      expandedRules.delete(index);
-      expandedRules = expandedRules;
-
-      // Clear success message after 3 seconds
-      setTimeout(() => {
-        success = "";
-      }, 3000);
-    } catch (err) {
-      error = err.message;
-    } finally {
-      loading = false;
+  function chevronTouchEnd(e, rule) {
+    const t = e.changedTouches[0];
+    const dx = Math.abs(t.clientX - chevronTouchStartX);
+    const dy = Math.abs(t.clientY - chevronTouchStartY);
+    if (dx < TOUCH_SLOP && dy < TOUCH_SLOP) {
+      openRule(rule);
     }
   }
 
-  async function saveRules() {
-    loading = true;
-    error = "";
-    success = "";
+  function handleDragOver(e, idx) {
+    e.preventDefault();
+    if (idx !== dragIdx) dragOverIdx = idx;
+  }
 
+  function handleDrop(e, idx) {
+    e.preventDefault();
+    if (dragIdx === -1 || dragIdx === idx) {
+      cleanupDrag();
+      return;
+    }
+    const reordered = rules.slice();
+    const [moved] = reordered.splice(dragIdx, 1);
+    reordered.splice(idx, 0, moved);
+    const changed = [];
+    for (let i = 0; i < reordered.length; i++) {
+      const np = i + 1;
+      if (reordered[i].priority !== np) {
+        reordered[i].priority = np;
+        changed.push(reordered[i]);
+      }
+    }
+    rules = reordered;
+    cleanupDrag();
+    if (changed.length > 0) saveReorderedRules(changed);
+  }
+
+  function handleDragEnd() {
+    cleanupDrag();
+  }
+
+  function cleanupDrag() {
+    dragIdx = -1;
+    dragOverIdx = -1;
+    dragAllowed = false;
+  }
+
+  async function saveReorderedRules(changedRules) {
+    saving = true;
     try {
       const token = localStorage.getItem("jwt");
-
-      // Save each rule (create or update)
-      for (const rule of rules) {
-        const url = rule.id ? `${API_BASE}/${rule.id}` : API_BASE;
-        const method = rule.id ? "PUT" : "POST";
-
-        const response = await fetch(url, {
-          method,
+      for (const rule of changedRules) {
+        if (!rule.id) continue;
+        const response = await fetch(`${API_BASE}/${rule.id}`, {
+          method: "PUT",
           headers: {
             "Content-Type": "application/json",
             Authorization: `Bearer ${token}`,
           },
           body: JSON.stringify(rule),
         });
-
         if (!response.ok) {
           const errorData = await response.text();
-          throw new Error(`Failed to save rule: ${errorData}`);
+          throw new Error(`Failed to save rule priority: ${errorData}`);
         }
       }
-
-      success = "All rules saved successfully!";
-      // Reload rules to get updated IDs
-      await loadRules();
-
-      // Clear success message after 3 seconds
-      setTimeout(() => {
-        success = "";
-      }, 3000);
+      notificationstore.add({
+        title: "Reordered",
+        subtitle: `Updated priority for ${changedRules.length} rule${
+          changedRules.length > 1 ? "s" : ""
+        }`,
+        kind: "success",
+        timeout: 3000,
+      });
     } catch (err) {
-      error = err.message;
+      notificationstore.add({
+        title: "Error",
+        subtitle: err.message,
+        kind: "error",
+        timeout: 5000,
+      });
+      await loadRules();
     } finally {
-      loading = false;
+      saving = false;
     }
+  }
+
+  async function toggleEnabled(rule, idx) {
+    rule.enabled = !rule.enabled;
+    rules = rules; // reactivity
+    if (!rule.id) return;
+    try {
+      const token = localStorage.getItem("jwt");
+      const response = await fetch(`${API_BASE}/${rule.id}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(rule),
+      });
+      if (!response.ok) throw new Error(await response.text());
+    } catch (err) {
+      rule.enabled = !rule.enabled; // revert
+      rules = rules;
+      notificationstore.add({
+        title: "Error",
+        subtitle: err.message,
+        kind: "error",
+        timeout: 5000,
+      });
+    }
+  }
+
+  function actionLabel(action) {
+    return action === "block" ? "Block" : "Allow";
+  }
+
+  function usersSummary(users) {
+    if (!users || users.length === 0) return "Everyone";
+    if (users.length <= 2) return users.join(", ");
+    return `${users[0]}, +${users.length - 1}`;
   }
 </script>
 
-<Row>
-  <Column>
-    {#if error}
-      <InlineNotification
-        kind="error"
-        title="Error"
-        subtitle={error}
-        on:close={() => (error = "")}
-      />
-    {/if}
+{#if error}
+  <InlineNotification
+    kind="error"
+    title="Error"
+    subtitle={error}
+    on:close={() => (error = "")}
+  />
+{/if}
 
-    {#if success}
-      <InlineNotification
-        kind="success"
-        title="Success"
-        subtitle={success}
-        on:close={() => (success = "")}
-      />
-    {/if}
+<div class="rl-topbar">
+  <Button on:click={addRule} icon={Add} size="small" kind="tertiary"
+    >Add Rule</Button
+  >
+</div>
 
-    <div style="display: flex; justify-content: flex-end; margin-bottom: 15px;">
-      <Button on:click={addRule} icon={Add} size="small">Add Rule</Button>
-    </div>
+{#if initialLoading}
+  <InlineLoading description="Loading rules..." />
+{:else if rules.length === 0}
+  <div class="gs-card">
+    <p class="gs-empty" style="text-align: center; padding: 24px 0;">
+      No rules configured. Click <strong>Add Rule</strong> to create one.
+    </p>
+  </div>
+{:else}
+  <!-- svelte-ignore a11y-no-static-element-interactions -->
+  <div
+    class="rl-list"
+    on:touchmove|nonpassive={handleTouchDragMove}
+    on:touchend={handleTouchDragEnd}
+    on:touchcancel={handleTouchDragEnd}
+  >
+    {#each rules as rule, idx (ruleKey(rule))}
+      <!-- svelte-ignore a11y-no-static-element-interactions -->
+      <div
+        class="rl-row"
+        class:rl-dragging={dragIdx === idx}
+        class:rl-drag-over={dragOverIdx === idx}
+        class:rl-disabled={!rule.enabled}
+        bind:this={rowEls[idx]}
+        draggable="true"
+        on:mousedown={disallowDrag}
+        on:dragstart={(e) => handleDragStart(e, idx)}
+        on:dragover={(e) => handleDragOver(e, idx)}
+        on:dragenter|preventDefault
+        on:drop={(e) => handleDrop(e, idx)}
+        on:dragend={handleDragEnd}
+      >
+        <!-- svelte-ignore a11y-no-static-element-interactions -->
+        <span
+          class="rl-drag"
+          title="Drag to reorder"
+          on:mousedown|stopPropagation={allowDrag}
+          on:touchstart|nonpassive={(e) => handleTouchDragStart(e, idx)}
+          ><DragVertical size={16} /></span
+        >
 
-    {#if loading}
-      <InlineLoading description="Loading rules..." />
-    {:else}
-      {#each rules as rule, index (index)}
-        <Ruleform
-          {rule}
-          {index}
-          expanded={expandedRules.has(index)}
-          on:toggle={() => toggleExpand(index)}
-          on:remove={removeRule}
-          on:save={saveRule}
-        />
-      {/each}
-    {/if}
-  </Column>
-</Row>
+        <div class="rl-body">
+          <div class="rl-top-line">
+            <span class="rl-name">{rule.name || "Unnamed Rule"}</span>
+            <span class="rl-action rl-action--{rule.action}"
+              >{actionLabel(rule.action)}</span
+            >
+          </div>
+          <div class="rl-meta">
+            <span class="rl-users">{usersSummary(rule.users)}</span>
+            {#if rule.domain_patterns && rule.domain_patterns.length > 0}
+              <span class="rl-badge"
+                >{rule.domain_patterns.length} pattern{rule.domain_patterns
+                  .length > 1
+                  ? "s"
+                  : ""}</span
+              >
+            {/if}
+            {#if rule.domain_lists && rule.domain_lists.length > 0}
+              <span class="rl-badge rl-badge--list"
+                >{rule.domain_lists.length} list{rule.domain_lists.length > 1
+                  ? "s"
+                  : ""}</span
+              >
+            {/if}
+            {#if rule.mitm_action === "enable"}
+              <span class="rl-badge rl-badge--mitm">MITM</span>
+            {/if}
+          </div>
+        </div>
+
+        <!-- svelte-ignore a11y-no-static-element-interactions a11y-click-events-have-key-events -->
+        <span
+          class="rl-toggle"
+          on:click|stopPropagation
+          on:keydown|stopPropagation
+        >
+          <Toggle
+            size="sm"
+            toggled={rule.enabled}
+            hideLabel
+            labelA=""
+            labelB=""
+            on:toggle={() => toggleEnabled(rule, idx)}
+          />
+        </span>
+
+        <!-- svelte-ignore a11y-no-static-element-interactions -->
+        <span
+          class="rl-chevron-btn"
+          role="button"
+          tabindex="0"
+          title="Edit rule"
+          on:click|stopPropagation={() => openRule(rule)}
+          on:keydown|stopPropagation={(e) => {
+            if (e.key === "Enter" || e.key === " ") openRule(rule);
+          }}
+          on:touchstart|passive={chevronTouchStart}
+          on:touchend|preventDefault={(e) => chevronTouchEnd(e, rule)}
+          ><ChevronRight size={20} /></span
+        >
+      </div>
+    {/each}
+  </div>
+{/if}
+
+{#if saving}
+  <div style="margin-top: 12px;">
+    <InlineLoading description="Saving..." />
+  </div>
+{/if}
+
+<style>
+  .rl-topbar {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: 12px;
+  }
+
+  .rl-list {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    background: #e0e0e0;
+    border: 1px solid #e0e0e0;
+    border-radius: 6px;
+    overflow: hidden;
+  }
+
+  .rl-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 14px;
+    background: #fff;
+    cursor: default;
+    transition: background-color 0.12s;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .rl-disabled {
+    opacity: 0.65;
+  }
+  .rl-dragging {
+    opacity: 0.35;
+  }
+  .rl-drag-over {
+    box-shadow: inset 0 2px 0 0 #0f62fe;
+  }
+
+  .rl-drag {
+    cursor: grab;
+    color: #a8a8a8;
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    padding: 4px 2px;
+    border-radius: 4px;
+    touch-action: none;
+  }
+  .rl-drag:hover {
+    color: #525252;
+    background: #e0e0e0;
+  }
+  .rl-drag:active {
+    cursor: grabbing;
+    color: #525252;
+  }
+
+  .rl-toggle {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+  }
+
+  .rl-body {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .rl-top-line {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .rl-name {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: #161616;
+    word-break: break-word;
+  }
+
+  .rl-action {
+    font-size: 0.6875rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    padding: 1px 8px;
+    border-radius: 10px;
+    flex-shrink: 0;
+  }
+  .rl-action--allow {
+    background: #d0e2ff;
+    color: #0043ce;
+  }
+  .rl-action--block {
+    background: #ffd7d9;
+    color: #a2191f;
+  }
+
+  .rl-meta {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    font-size: 0.75rem;
+    color: #6f6f6f;
+  }
+
+  .rl-users {
+    max-width: 160px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .rl-badge {
+    background: #e0e0e0;
+    color: #393939;
+    padding: 1px 7px;
+    border-radius: 8px;
+    font-size: 0.6875rem;
+    white-space: nowrap;
+  }
+  .rl-badge--list {
+    background: #d0e2ff;
+    color: #0043ce;
+  }
+  .rl-badge--mitm {
+    background: #e8daff;
+    color: #6929c4;
+  }
+
+  .rl-chevron-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 40px;
+    height: 40px;
+    margin: -8px -6px -8px 0;
+    border-radius: 50%;
+    color: #a8a8a8;
+    cursor: pointer;
+    transition:
+      background-color 0.12s,
+      color 0.12s;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .rl-chevron-btn:hover {
+    background: #e0e0e0;
+    color: #525252;
+  }
+  .rl-chevron-btn:active {
+    background: #c6c6c6;
+    color: #161616;
+  }
+
+  @media (max-width: 671px) {
+    .rl-row {
+      padding: 10px 10px;
+      gap: 8px;
+    }
+    .rl-drag {
+      color: #525252;
+    }
+    .rl-chevron-btn {
+      width: 44px;
+      height: 44px;
+    }
+  }
+</style>

@@ -16,6 +16,7 @@ type RuleManagerInterface interface {
 	UpdateRule(ruleID string, updatedRule GatesentryTypes.Rule) error
 	DeleteRule(ruleID string) error
 	MatchRule(domain, user string) GatesentryTypes.RuleMatch
+	CheckContentDomainBlocked(domain string, domainListIDs []string) bool
 }
 
 var ruleManager RuleManagerInterface
@@ -82,9 +83,9 @@ func GSApiRuleCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate rule
-	if rule.Domain == "" {
-		http.Error(w, "Domain is required", http.StatusBadRequest)
+	// Validate rule — must have at least one domain matching criterion
+	if rule.Domain == "" && len(rule.DomainPatterns) == 0 && len(rule.DomainLists) == 0 {
+		http.Error(w, "At least one domain pattern or domain list is required", http.StatusBadRequest)
 		return
 	}
 
@@ -120,9 +121,9 @@ func GSApiRuleUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate rule
-	if rule.Domain == "" {
-		http.Error(w, "Domain is required", http.StatusBadRequest)
+	// Validate rule — must have at least one domain matching criterion
+	if rule.Domain == "" && len(rule.DomainPatterns) == 0 && len(rule.DomainLists) == 0 {
+		http.Error(w, "At least one domain pattern or domain list is required", http.StatusBadRequest)
 		return
 	}
 

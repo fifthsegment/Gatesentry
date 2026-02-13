@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log"
 	"strings"
+	"sync"
 	"time"
 
 	gatesentry2utils "bitbucket.org/abdullah_irfan/gatesentryf/utils"
@@ -19,6 +20,44 @@ type Log struct {
 	// DataCache
 	LastCommitTime time.Time
 	LogLocation    string
+
+	// SSE subscriber support
+	mu          sync.RWMutex
+	subscribers map[chan LogEntry]struct{}
+}
+
+// Subscribe returns a channel that receives new log entries in real-time.
+// The caller MUST call Unsubscribe when done to avoid goroutine leaks.
+func (L *Log) Subscribe() chan LogEntry {
+	ch := make(chan LogEntry, 64)
+	L.mu.Lock()
+	if L.subscribers == nil {
+		L.subscribers = make(map[chan LogEntry]struct{})
+	}
+	L.subscribers[ch] = struct{}{}
+	L.mu.Unlock()
+	return ch
+}
+
+// Unsubscribe removes a subscriber channel and closes it.
+func (L *Log) Unsubscribe(ch chan LogEntry) {
+	L.mu.Lock()
+	delete(L.subscribers, ch)
+	L.mu.Unlock()
+	close(ch)
+}
+
+// broadcast sends a log entry to all active subscribers (non-blocking).
+func (L *Log) broadcast(entry LogEntry) {
+	L.mu.RLock()
+	defer L.mu.RUnlock()
+	for ch := range L.subscribers {
+		select {
+		case ch <- entry:
+		default:
+			// subscriber is slow, drop the entry
+		}
+	}
 }
 
 type LogEntry struct {
@@ -98,6 +137,15 @@ func (L *Log) LogDNS(domain string, user string, responseType string) {
 		})
 		// fmt.Println( err );
 		_ = err
+
+		// Broadcast to SSE subscribers
+		L.broadcast(LogEntry{
+			Time:            secs,
+			IP:              ip,
+			URL:             domain,
+			Type:            "dns",
+			DNSResponseType: responseType,
+		})
 	}()
 }
 
@@ -122,6 +170,15 @@ func (L *Log) LogProxy(url string, user string, actionType string) {
 		})
 		// fmt.Println( err );
 		_ = err
+
+		// Broadcast to SSE subscribers
+		L.broadcast(LogEntry{
+			Time:              secs,
+			IP:                ip,
+			URL:               url,
+			Type:              "proxy",
+			ProxyResponseType: actionType,
+		})
 	}()
 
 }

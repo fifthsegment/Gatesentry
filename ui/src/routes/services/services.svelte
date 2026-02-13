@@ -1,14 +1,14 @@
 <script lang="ts">
-  import { Breadcrumb, BreadcrumbItem, Toggle } from "carbon-components-svelte";
+  import { Toggle } from "carbon-components-svelte";
   import { _ } from "svelte-i18n";
   import ToggleComponent from "../../components/toggle.svelte";
+  import { Power } from "carbon-icons-svelte";
 </script>
 
-<Breadcrumb style="margin-bottom: 10px;">
-  <BreadcrumbItem href="/">Dashboard</BreadcrumbItem>
-  <BreadcrumbItem>Toggle Services</BreadcrumbItem>
-</Breadcrumb>
-<h2>Toggle Services</h2>
+<div class="gs-page-title">
+  <Power size={24} />
+  <h2>Toggle Services</h2>
+</div>
 
 <br />
 

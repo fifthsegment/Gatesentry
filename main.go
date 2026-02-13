@@ -315,24 +315,6 @@ func RunGateSentry() {
 		// R.UpdateConsumption is currently a no-op
 	}
 
-	ngp.ContentTypeHandler = func(gafd *gatesentryproxy.GSContentTypeFilterData) {
-		contentType := gafd.ContentType
-		responder := &gresponder.GSFilterResponder{Blocked: false}
-		application.RunFilter("url/all_blocked_mimes", contentType, responder)
-		if responder.Blocked {
-			// rs.Changed = true
-			message := "This content type has been blocked on this network."
-			if contentType == "image/png" || contentType == "image/jpeg" || contentType == "image/jpg" || "image/gif" == contentType || "image/webp" == contentType {
-				transparentImageBytes, _ := filters.Asset("app/transparent.png")
-				gafd.FilterResponseAction = gatesentryproxy.ProxyActionBlockedFileType
-				gafd.FilterResponse = transparentImageBytes
-			} else {
-				gafd.FilterResponseAction = gatesentryproxy.ProxyActionBlockedFileType
-				gafd.FilterResponse = []byte(gresponder.BuildGeneralResponsePage([]string{message}, -1))
-			}
-		}
-	}
-
 	ngp.TimeAccessHandler = func(gafd *gatesentryproxy.GSTimeAccessFilterData) {
 		blockedtimes := R.GSSettings.Get("blocktimes")
 		responder := &gresponder.GSFilterResponder{Blocked: false}
@@ -398,6 +380,14 @@ func RunGateSentry() {
 		return match
 	}
 
+	ngp.ContentDomainBlockHandler = func(domain string, domainListIDs []string) bool {
+		ruleManager := gatesentryWebserverEndpoints.GetRuleManager()
+		if ruleManager == nil {
+			return false
+		}
+		return ruleManager.CheckContentDomainBlocked(domain, domainListIDs)
+	}
+
 	ngp.ProxyErrorHandler = func(gafd *gatesentryproxy.GSProxyErrorData) {
 		// clienterror := string(*bytesReceived)
 		msg := "Proxy Error. Unable to fulfill your request. <br/><strong>" + gafd.Error + "</strong>."
@@ -412,7 +402,7 @@ func RunGateSentry() {
 	}
 
 	// Making a comm channel for our internal dns server
-	go application.DNSServerThread(application.GetBaseDir(), R.Logger, R.DNSServerChannel, R.GSSettings, R.DnsServerInfo)
+	go application.DNSServerThread(application.GetBaseDir(), R.Logger, R.DNSServerChannel, R.GSSettings, R.DnsServerInfo, R.DomainListManager)
 
 	addr := "0.0.0.0:"
 	addr += GSPROXYPORT

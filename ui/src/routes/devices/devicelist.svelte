@@ -1,17 +1,11 @@
 <script lang="ts">
   import {
-    Button,
-    DataTable,
     InlineLoading,
     InlineNotification,
-    OverflowMenu,
-    OverflowMenuItem,
+    Search,
     Tag,
-    Toolbar,
-    ToolbarContent,
-    ToolbarSearch,
   } from "carbon-components-svelte";
-  import { Renew } from "carbon-icons-svelte";
+  import { ChevronRight, Renew } from "carbon-icons-svelte";
   import { onMount, onDestroy } from "svelte";
   import { getBasePath } from "../../lib/navigate";
   import DeviceDetail from "./devicedetail.svelte";
@@ -39,24 +33,13 @@
   }
 
   let devices: Device[] = [];
+  let search = "";
   let loading = false;
   let error = "";
   let success = "";
   let selectedDevice: Device | null = null;
   let detailOpen = false;
   let refreshInterval: ReturnType<typeof setInterval>;
-
-  const headers = [
-    { key: "status", value: "Status" },
-    { key: "display_name", value: "Name" },
-    { key: "dns_name", value: "DNS Name" },
-    { key: "ipv4", value: "IPv4" },
-    { key: "ipv6", value: "IPv6" },
-    { key: "macs_display", value: "MAC" },
-    { key: "source", value: "Via" },
-    { key: "last_seen_display", value: "Last Seen" },
-    { key: "actions", value: "" },
-  ];
 
   function getToken(): string {
     return localStorage.getItem("jwt") || "";
@@ -77,7 +60,6 @@
         throw new Error("Authentication failed. Please login again");
       }
       if (response.status === 503) {
-        // DNS server not started yet — not an error, just empty
         devices = [];
         return;
       }
@@ -100,9 +82,8 @@
     return {
       ...d,
       id: d.id,
-      status: d.online ? "online" : "offline",
       display_name: d.manual_name || d.display_name || d.dns_name || "Unknown",
-      macs_display: d.macs?.length ? d.macs[0] : "—",
+      macs_display: d.macs?.length ? d.macs[0] : "",
       last_seen_display: formatTimeAgo(d.last_seen),
     };
   }
@@ -120,6 +101,14 @@
     if (diffHr < 24) return `${diffHr}h ago`;
     const diffDay = Math.floor(diffHr / 24);
     return `${diffDay}d ago`;
+  }
+
+  function sourceTagType(s: string): string {
+    if (s === "ddns") return "green";
+    if (s === "mdns") return "blue";
+    if (s === "passive") return "warm-gray";
+    if (s === "manual") return "purple";
+    return "gray";
   }
 
   function openDetail(device: Device) {
@@ -155,9 +144,25 @@
     }
   }
 
+  $: filtered = search
+    ? devices.filter((d) => {
+        const q = search.toLowerCase();
+        return (
+          d.display_name?.toLowerCase().includes(q) ||
+          d.dns_name?.toLowerCase().includes(q) ||
+          d.ipv4?.includes(q) ||
+          d.ipv6?.includes(q) ||
+          d.macs_display?.toLowerCase().includes(q) ||
+          d.source?.toLowerCase().includes(q) ||
+          d.owner?.toLowerCase().includes(q)
+        );
+      })
+    : devices;
+
+  $: onlineCount = devices.filter((d) => d.online).length;
+
   onMount(() => {
     loadDevices();
-    // Auto-refresh every 30 seconds
     refreshInterval = setInterval(loadDevices, 30000);
   });
 
@@ -167,96 +172,112 @@
 </script>
 
 {#if error}
-  <InlineNotification
-    kind="error"
-    title="Error"
-    subtitle={error}
-    on:close={() => (error = "")}
-  />
+  <div class="dl-notice">
+    <InlineNotification
+      kind="error"
+      title="Error"
+      subtitle={error}
+      on:close={() => (error = "")}
+    />
+  </div>
 {/if}
 
 {#if success}
-  <InlineNotification
-    kind="success"
-    title="Success"
-    subtitle={success}
-    on:close={() => (success = "")}
-  />
+  <div class="dl-notice">
+    <InlineNotification
+      kind="success"
+      title="Success"
+      subtitle={success}
+      on:close={() => (success = "")}
+    />
+  </div>
 {/if}
 
-{#if loading && devices.length === 0}
-  <InlineLoading description="Loading devices..." />
-{:else}
-  <DataTable
-    sortable
-    title="Device Inventory"
-    description="Devices discovered on your network via DNS queries, mDNS, and DDNS updates."
-    {headers}
-    rows={devices}
-  >
-    <Toolbar>
-      <ToolbarContent>
-        <ToolbarSearch
-          persistent
-          shouldFilterRows
-          placeholder="Search devices..."
-        />
-        <Button
-          kind="ghost"
-          icon={Renew}
-          iconDescription="Refresh"
-          on:click={loadDevices}
-        />
-      </ToolbarContent>
-    </Toolbar>
-    <svelte:fragment slot="cell" let:row let:cell>
-      {#if cell.key === "status"}
-        <span
-          class="status-dot {row.online ? 'online' : 'offline'}"
-          title={row.online ? "Online" : "Offline"}
-        ></span>
-      {:else if cell.key === "display_name"}
-        <button class="device-name-link" on:click={() => openDetail(row)}>
-          {cell.value}
-        </button>
-        {#if !row.manual_name && row.source !== "manual"}
-          <Tag size="sm" type="cyan">auto</Tag>
-        {/if}
-      {:else if cell.key === "source"}
-        <Tag
-          size="sm"
-          type={cell.value === "ddns"
-            ? "green"
-            : cell.value === "mdns"
-            ? "blue"
-            : cell.value === "passive"
-            ? "warm-gray"
-            : cell.value === "manual"
-            ? "purple"
-            : "gray"}>{cell.value}</Tag
-        >
-      {:else if cell.key === "actions"}
-        <OverflowMenu flipped>
-          <OverflowMenuItem
-            text="Edit / Name"
-            on:click={() => openDetail(row)}
-          />
-          <OverflowMenuItem
-            danger
-            text="Remove"
-            on:click={() => removeDevice(row)}
-          />
-        </OverflowMenu>
-      {:else}
-        {cell.value || "—"}
-      {/if}
-    </svelte:fragment>
-  </DataTable>
+<div class="dl-toolbar">
+  <div class="dl-search">
+    <Search bind:value={search} placeholder="Search devices…" size="sm" />
+  </div>
+  <button class="dl-refresh" on:click={loadDevices} title="Refresh">
+    <Renew size={20} />
+  </button>
+</div>
 
-  <div class="device-summary">
-    {devices.length} device{devices.length !== 1 ? "s" : ""} discovered · {devices.filter(
-      (d) => d.online,
-    ).length} online
+{#if loading && devices.length === 0}
+  <InlineLoading description="Loading devices…" />
+{:else}
+  <div class="gs-card-flush">
+    <div class="gs-row-list">
+      {#if filtered.length === 0}
+        <div class="gs-row-item">
+          <span class="gs-empty"
+            >{search
+              ? "No matching devices"
+              : "No devices discovered yet"}</span
+          >
+        </div>
+      {/if}
+      {#each filtered as dev (dev.id)}
+        <button class="gs-row-item dl-row" on:click={() => openDetail(dev)}>
+          <!-- Desktop layout -->
+          <div class="dl-desktop">
+            <span
+              class="dl-dot"
+              class:dl-online={dev.online}
+              class:dl-offline={!dev.online}
+            ></span>
+            <span class="dl-name">
+              {dev.display_name}
+              {#if !dev.manual_name && dev.source !== "manual"}
+                <Tag size="sm" type="cyan">auto</Tag>
+              {/if}
+            </span>
+            <span class="dl-ip">{dev.ipv4 || "—"}</span>
+            <span class="dl-mac">{dev.macs_display || "—"}</span>
+            <span class="dl-source"
+              ><Tag size="sm" type={sourceTagType(dev.source)}>{dev.source}</Tag
+              ></span
+            >
+            <span class="dl-seen">{dev.last_seen_display}</span>
+          </div>
+          <!-- Mobile layout -->
+          <div class="dl-mobile">
+            <div class="dl-mob-top">
+              <span class="dl-mob-name">
+                <span
+                  class="dl-dot"
+                  class:dl-online={dev.online}
+                  class:dl-offline={!dev.online}
+                ></span>
+                {dev.display_name}
+              </span>
+              <Tag size="sm" type={sourceTagType(dev.source)}>{dev.source}</Tag>
+            </div>
+            <div class="dl-mob-mid">
+              <span class="dl-ip">{dev.ipv4 || "—"}</span>
+              {#if dev.macs_display}
+                <span class="dl-mac-sep">·</span>
+                <span class="dl-mac">{dev.macs_display}</span>
+              {/if}
+            </div>
+            <div class="dl-mob-bottom">
+              <span class="dl-seen">{dev.last_seen_display}</span>
+            </div>
+          </div>
+          <span class="dl-chevron"><ChevronRight size={20} /></span>
+        </button>
+      {/each}
+    </div>
+  </div>
+
+  <div
+    class="gs-info-footer"
+    style="border:none; background:transparent; padding: 8px 0;"
+  >
+    <span class="gs-info-icon">i</span>
+    <p>
+      {devices.length} device{devices.length !== 1 ? "s" : ""} discovered · {onlineCount}
+      online
+    </p>
   </div>
 {/if}
 
@@ -273,34 +294,182 @@
 {/if}
 
 <style>
-  .status-dot {
-    display: inline-block;
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    vertical-align: middle;
+  .dl-notice {
+    margin-bottom: 0.75rem;
   }
-  .status-dot.online {
-    background-color: #24a148; /* Carbon green-60 */
+  .dl-notice :global(.bx--inline-notification) {
+    max-width: 100%;
   }
-  .status-dot.offline {
-    background-color: #8d8d8d; /* Carbon gray-50 */
+
+  .dl-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 0.75rem;
   }
-  .device-name-link {
-    background: none;
-    border: none;
-    color: #0f62fe; /* Carbon blue-60 */
+  .dl-search {
+    flex: 1;
+    max-width: 360px;
+  }
+  .dl-refresh {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border: 1px solid #e0e0e0;
+    border-radius: 4px;
+    background: #fff;
     cursor: pointer;
-    padding: 0;
+    color: #525252;
+    flex-shrink: 0;
+  }
+  .dl-refresh:hover {
+    background: #e5e5e5;
+  }
+
+  /* Row as a button */
+  .dl-row {
+    cursor: pointer;
+    border: none;
+    text-align: left;
     font: inherit;
-    text-decoration: underline;
+    width: 100%;
   }
-  .device-name-link:hover {
-    color: #0043ce; /* Carbon blue-70 */
+  .dl-row:hover {
+    background: #f4f4f4 !important;
   }
-  .device-summary {
-    margin-top: 1rem;
+
+  /* Status dot */
+  .dl-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .dl-online {
+    background-color: #24a148;
+  }
+  .dl-offline {
+    background-color: #c6c6c6;
+  }
+
+  /* Desktop row */
+  .dl-desktop {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex: 1;
+    min-width: 0;
+  }
+  .dl-name {
+    flex: 1;
+    min-width: 0;
     font-size: 0.875rem;
-    color: #525252; /* Carbon gray-70 */
+    font-weight: 500;
+    color: #161616;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .dl-ip {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 0.8125rem;
+    color: #393939;
+    width: 110px;
+    flex-shrink: 0;
+  }
+  .dl-mac {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 0.75rem;
+    color: #6f6f6f;
+    width: 130px;
+    flex-shrink: 0;
+  }
+  .dl-source {
+    width: 70px;
+    flex-shrink: 0;
+  }
+  .dl-seen {
+    font-size: 0.8125rem;
+    color: #6f6f6f;
+    width: 80px;
+    flex-shrink: 0;
+    text-align: right;
+  }
+
+  .dl-chevron {
+    color: #a8a8a8;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+  }
+
+  /* Mobile layout — hidden on desktop */
+  .dl-mobile {
+    display: none;
+  }
+  .dl-mob-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    gap: 8px;
+  }
+  .dl-mob-name {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: #161616;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .dl-mob-mid {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    width: 100%;
+  }
+  .dl-mob-mid .dl-ip {
+    width: auto;
+  }
+  .dl-mob-mid .dl-mac {
+    width: auto;
+  }
+  .dl-mac-sep {
+    color: #a8a8a8;
+  }
+  .dl-mob-bottom {
+    width: 100%;
+  }
+  .dl-mob-bottom .dl-seen {
+    width: auto;
+    text-align: left;
+  }
+
+  /* ── Mobile ── */
+  @media (max-width: 671px) {
+    .dl-search {
+      max-width: none;
+    }
+    .dl-desktop {
+      display: none;
+    }
+    .dl-mobile {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      flex: 1;
+      min-width: 0;
+    }
+    .dl-row {
+      flex-direction: row;
+      align-items: center;
+    }
   }
 </style>
