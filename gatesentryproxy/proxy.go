@@ -448,10 +448,17 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	shouldBlock, ruleMatch, ruleShouldMITM := CheckProxyRules(requestHost, user)
 	if shouldBlock {
-		if DebugLogging {
-			log.Printf("[Proxy] Blocking request to %s by rule", r.URL.String())
-		}
+		log.Printf("[Proxy] Blocking request to %s by rule", r.URL.String())
+		passthru.ProxyActionToLog = ProxyActionBlockedUrl
 		LogProxyAction(r.URL.String(), user, ProxyActionBlockedUrl)
+		var blockContent []byte
+		if IProxy.RuleBlockPageHandler != nil {
+			blockContent = IProxy.RuleBlockPageHandler(requestHost)
+		}
+		if blockContent == nil {
+			blockContent = []byte("Blocked by proxy rule")
+		}
+		sendBlockMessageBytes(w, r, nil, blockContent, nil)
 		return
 	}
 
@@ -471,8 +478,10 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if isHostLanAddress {
-		action = ACTION_NONE
-		// modified = true
+		// LAN addresses bypass MITM by default, but explicit rules can override.
+		if !ruleMatched {
+			action = ACTION_NONE
+		}
 	}
 
 	if shouldMitm == false {
@@ -514,9 +523,16 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if len(r.Header["X-Forwarded-For"]) >= 10 {
+	// Count actual XFF entries across all header lines. RFC 7239 allows
+	// comma-separated IPs in a single X-Forwarded-For header, so we must
+	// split and count rather than just counting header lines.
+	xffCount := 0
+	for _, line := range r.Header["X-Forwarded-For"] {
+		xffCount += len(strings.Split(line, ","))
+	}
+	if xffCount >= 10 {
 		http.Error(w, "Proxy forwarding loop", http.StatusBadRequest)
-		log.Printf("Proxy forwarding loop from %s to %v", r.Header.Get("X-Forwarded-For"), r.URL)
+		log.Printf("Proxy forwarding loop from %s to %v (%d XFF entries)", r.Header.Get("X-Forwarded-For"), r.URL, xffCount)
 		return
 	}
 
@@ -600,6 +616,7 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Check URL regex match criteria from the matched rule.
 	if passthru.UserData != nil {
 		matchVal := reflect.ValueOf(passthru.UserData)
 		if matchVal.Kind() == reflect.Struct {
@@ -608,48 +625,32 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 			if urlRegexField.IsValid() && urlRegexField.Kind() == reflect.Slice && urlRegexField.Len() > 0 {
 				requestURL := r.URL.String()
-				shouldBlock := false
-				blockAction := actionField.IsValid() && actionField.Kind() == reflect.Bool && actionField.Bool()
+				matched := false
 				for i := 0; i < urlRegexField.Len(); i++ {
 					patternVal := urlRegexField.Index(i)
-					log.Println("Checking URL regex pattern ", patternVal.String(), " for ", requestURL)
 					if patternVal.Kind() == reflect.String {
 						pattern := patternVal.String()
-						matched, err := regexp.MatchString(pattern, requestURL)
-						log.Printf("Regex match result for pattern %s on URL %s: %v (err: %v)", pattern, requestURL, matched, err)
-						if err == nil && matched {
-							shouldBlock = blockAction
+						ok, err := regexp.MatchString(pattern, requestURL)
+						if DebugLogging {
+							log.Printf("URL regex match: pattern %s on URL %s: %v (err: %v)", pattern, requestURL, ok, err)
+						}
+						if err == nil && ok {
+							matched = true
 							break
 						}
 					}
 				}
 
-				if shouldBlock {
-					passthru.ProxyActionToLog = ProxyActionBlockedUrl
-					IProxy.LogHandler(GSLogData{Url: requestURL, User: user, Action: ProxyActionBlockedUrl})
-					sendBlockMessageBytes(w, r, nil, []byte("URL blocked by rule"), nil)
-					return
-				}
-			}
-
-			// Check BlockContentDomainLists — block sub-requests whose domain
-			// appears in any of the referenced domain lists.
-			domainListsField := matchVal.FieldByName("BlockContentDomainLists")
-			if domainListsField.IsValid() && domainListsField.Kind() == reflect.Slice && domainListsField.Len() > 0 {
-				blockAction := actionField.IsValid() && actionField.Kind() == reflect.Bool && actionField.Bool()
-				if blockAction && IProxy.ContentDomainBlockHandler != nil {
-					requestHost := r.URL.Hostname()
-					listIDs := make([]string, domainListsField.Len())
-					for i := 0; i < domainListsField.Len(); i++ {
-						listIDs[i] = domainListsField.Index(i).String()
-					}
-					if IProxy.ContentDomainBlockHandler(requestHost, listIDs) {
-						requestURL := r.URL.String()
+				// URL pattern matched — apply the rule's action
+				if matched {
+					isBlock := actionField.IsValid() && actionField.Kind() == reflect.Bool && actionField.Bool()
+					if isBlock {
 						passthru.ProxyActionToLog = ProxyActionBlockedUrl
 						IProxy.LogHandler(GSLogData{Url: requestURL, User: user, Action: ProxyActionBlockedUrl})
-						sendBlockMessageBytes(w, r, nil, []byte("Domain blocked by content filtering rule"), nil)
+						sendBlockMessageBytes(w, r, nil, []byte("URL blocked by rule"), nil)
 						return
 					}
+					// Action is "allow" — URL matched, continue processing
 				}
 			}
 		}
@@ -664,6 +665,32 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if DebugLogging {
 		log.Println("Content type is = ", contentType, " for ", r.URL.String())
+	}
+
+	// Check per-rule BlockContentTypes — block responses whose Content-Type
+	// matches any entry in the rule's blocked_content_types list.
+	// This is a request-level filter: when the browser fetches a sub-resource
+	// (e.g. <img src="photo.jpeg">), the proxy sees it as a separate request
+	// and blocks based on the response Content-Type header.
+	if contentType != "" && passthru.UserData != nil {
+		matchVal := reflect.ValueOf(passthru.UserData)
+		if matchVal.Kind() == reflect.Struct {
+			ctField := matchVal.FieldByName("BlockContentTypes")
+			if ctField.IsValid() && ctField.Kind() == reflect.Slice && ctField.Len() > 0 {
+				for i := 0; i < ctField.Len(); i++ {
+					blocked := strings.ToLower(strings.TrimSpace(ctField.Index(i).String()))
+					if blocked != "" && strings.Contains(contentType, blocked) {
+						if DebugLogging {
+							log.Printf("[Rule] Blocking response for %s — content-type %q matches blocked type %q", r.URL, contentType, blocked)
+						}
+						passthru.ProxyActionToLog = ProxyActionBlockedFileType
+						IProxy.LogHandler(GSLogData{Url: r.URL.String(), User: user, Action: ProxyActionBlockedFileType})
+						sendInsecureBlockBytes(w, r, resp, []byte("Content type blocked by rule"), &contentType)
+						return
+					}
+				}
+			}
+		}
 	}
 
 	// Phase 3: Three-path response pipeline.
@@ -852,12 +879,15 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// Run text/HTML scanner
-		responseSentText, proxyActionTaken := ScanText(localCopyData, contentType, r, w, resp, buf, passthru)
-		if responseSentText {
-			passthru.ProxyActionToLog = proxyActionTaken
-			IProxy.LogHandler(GSLogData{Url: r.URL.String(), User: user, Action: proxyActionTaken})
-			return
+		// Run text/HTML keyword scanner — only when the matched rule enables it.
+		// Keyword scanning is a per-rule filter, not a global pipeline step.
+		if isKeywordFilterEnabled(passthru) {
+			responseSentText, proxyActionTaken := ScanText(localCopyData, contentType, r, w, resp, buf, passthru)
+			if responseSentText {
+				passthru.ProxyActionToLog = proxyActionTaken
+				IProxy.LogHandler(GSLogData{Url: r.URL.String(), User: user, Action: proxyActionTaken})
+				return
+			}
 		}
 
 		// Deliver the buffered response
@@ -883,19 +913,36 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// isKeywordFilterEnabled checks whether the rule match in passthru has keyword
+// filtering enabled. Returns false if no rule matched or the flag is unset.
+func isKeywordFilterEnabled(passthru *GSProxyPassthru) bool {
+	if passthru == nil || passthru.UserData == nil {
+		return false
+	}
+	matchVal := reflect.ValueOf(passthru.UserData)
+	if matchVal.Kind() == reflect.Struct {
+		field := matchVal.FieldByName("KeywordFilterEnabled")
+		if field.IsValid() && field.Kind() == reflect.Bool {
+			return field.Bool()
+		}
+	}
+	return false
+}
+
 func sendInsecureBlockBytes(w http.ResponseWriter, r *http.Request, resp *http.Response, content []byte, contentType *string) {
-	w.WriteHeader(http.StatusOK)
 	// string ends with
 
 	if contentType != nil && isImage(*contentType) {
 		reasonForBlockArray := append([]string{"", "Image blocked by Gatesentry", "Reason(s) for blocking", "1. The content type is blocked"})
 		emptyImage, _ := createEmptyImage(500, 500, "jpeg", reasonForBlockArray)
 		w.Header().Set("Content-Type", "image/jpeg; charset=utf-8")
+		w.WriteHeader(http.StatusForbidden)
 		w.Write(emptyImage)
 		return
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusForbidden)
 	w.Write(content)
 }
 
@@ -975,22 +1022,13 @@ func CheckProxyRules(host string, user string) (bool, interface{}, bool) {
 	}
 
 	shouldBlockField := matchVal.FieldByName("ShouldBlock")
-	urlRegexField := matchVal.FieldByName("BlockURLRegexes")
-	domainListsField := matchVal.FieldByName("BlockContentDomainLists")
 	mitmField := matchVal.FieldByName("ShouldMITM")
 
 	shouldBlock := false
 	shouldMITM := false
 
 	if shouldBlockField.IsValid() && shouldBlockField.Kind() == reflect.Bool && shouldBlockField.Bool() {
-		// Only block at connection level if no per-resource filters are specified.
-		// If URL regexes or content domain lists are present, defer to the MITM
-		// response handler which checks each sub-request individually.
-		hasURLRegexes := urlRegexField.IsValid() && urlRegexField.Kind() == reflect.Slice && urlRegexField.Len() > 0
-		hasDomainLists := domainListsField.IsValid() && domainListsField.Kind() == reflect.Slice && domainListsField.Len() > 0
-		if !hasURLRegexes && !hasDomainLists {
-			shouldBlock = true
-		}
+		shouldBlock = true
 	}
 
 	if mitmField.IsValid() && mitmField.Kind() == reflect.Bool {

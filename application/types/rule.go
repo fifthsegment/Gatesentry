@@ -55,6 +55,9 @@ type Rule struct {
 	// Block embedded resources (images, scripts, etc.) whose domain is in any of these lists.
 	ContentDomainLists []string `json:"content_domain_lists,omitempty"` // Domain List IDs for embedded resource blocking
 
+	// Keyword filtering — enable per-rule keyword scanning on MITM'd HTML content
+	KeywordFilterEnabled bool `json:"keyword_filter_enabled"`
+
 	// Optional: Time-based restrictions
 	TimeRestriction *TimeRestriction `json:"time_restriction,omitempty"`
 
@@ -80,11 +83,11 @@ type RuleList struct {
 
 // RuleMatch represents the result of matching a request against rules
 type RuleMatch struct {
-	Matched                 bool
-	Rule                    *Rule
-	ShouldMITM              bool
-	ShouldBlock             bool
-	BlockContentTypes       []string
-	BlockURLRegexes         []string
-	BlockContentDomainLists []string // Domain List IDs — block sub-requests whose domain is in these lists
+	Matched              bool
+	Rule                 *Rule
+	ShouldMITM           bool
+	ShouldBlock          bool
+	BlockContentTypes    []string
+	BlockURLRegexes      []string
+	KeywordFilterEnabled bool // Whether keyword scanning should run for this request
 }

@@ -6,6 +6,10 @@ export GATESENTRY_DNS_RESOLVER="${GATESENTRY_DNS_RESOLVER:-192.168.1.1:53}"
 export GS_ADMIN_PORT="${GS_ADMIN_PORT:-8080}"
 export GS_MAX_SCAN_SIZE_MB="${GS_MAX_SCAN_SIZE_MB:-2}"
 
+# Unset proxy env vars — the GateSentry proxy server must not route its own
+# outbound requests through itself (or any other proxy).
+unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY no_proxy NO_PROXY
+
 P=$(pgrep gatesentry)
 
 if [ "$P" == "" ]; then

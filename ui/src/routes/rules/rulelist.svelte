@@ -5,7 +5,12 @@
     InlineNotification,
     Toggle,
   } from "carbon-components-svelte";
-  import { Add, ChevronRight, DragVertical } from "carbon-icons-svelte";
+  import {
+    Add,
+    ChevronRight,
+    DragVertical,
+    Information,
+  } from "carbon-icons-svelte";
   import { onMount, createEventDispatcher } from "svelte";
   import { getBasePath } from "../../lib/navigate";
   import { notificationstore } from "../../store/notifications";
@@ -70,12 +75,12 @@
       domain: "",
       action: "allow",
       mitm_action: "default",
-      block_type: "none",
       blocked_content_types: [],
       url_regex_patterns: [],
       domain_patterns: [],
       domain_lists: [],
       content_domain_lists: [],
+      keyword_filter_enabled: false,
       time_restriction: { from: "00:00", to: "23:59" },
       users: [],
       description: "",
@@ -333,6 +338,9 @@
 {/if}
 
 <div class="rl-topbar">
+  <span class="rl-info"
+    ><Information size={16} />All rules are evaluated in sequence</span
+  >
   <Button on:click={addRule} icon={Add} size="small" kind="tertiary"
     >Add Rule</Button
   >
@@ -453,8 +461,16 @@
 <style>
   .rl-topbar {
     display: flex;
-    justify-content: flex-end;
+    align-items: center;
+    justify-content: space-between;
     margin-bottom: 12px;
+  }
+  .rl-info {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.85rem;
+    color: #6f6f6f;
   }
 
   .rl-list {

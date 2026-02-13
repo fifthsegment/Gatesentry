@@ -16,7 +16,6 @@ type RuleManagerInterface interface {
 	UpdateRule(ruleID string, updatedRule GatesentryTypes.Rule) error
 	DeleteRule(ruleID string) error
 	MatchRule(domain, user string) GatesentryTypes.RuleMatch
-	CheckContentDomainBlocked(domain string, domainListIDs []string) bool
 }
 
 var ruleManager RuleManagerInterface

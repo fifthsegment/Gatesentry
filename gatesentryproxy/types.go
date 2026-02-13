@@ -23,21 +23,21 @@ type GSUserCached struct {
 }
 
 type GSProxy struct {
-	AuthHandler               func(authheader string) bool
-	ContentHandler            func(*GSContentFilterData)
-	ContentSizeHandler        func(GSContentSizeFilterData)
-	UserAccessHandler         func(*GSUserAccessFilterData)
-	TimeAccessHandler         func(*GSTimeAccessFilterData)
-	UrlAccessHandler          func(*GSUrlFilterData)
-	ProxyErrorHandler         func(*GSProxyErrorData)
-	DoMitm                    func(host string) bool
-	IsExceptionUrl            func(url string) bool
-	IsAuthEnabled             func() bool
-	LogHandler                func(GSLogData)
-	RuleMatchHandler          func(domain string, user string) interface{}     // Returns RuleMatch
-	ContentDomainBlockHandler func(domain string, domainListIDs []string) bool // Check if domain is in any of the given domain lists
-	Handlers                  map[string][]*GSHandler
-	UsersCache                map[string]GSUserCached
+	AuthHandler          func(authheader string) bool
+	ContentHandler       func(*GSContentFilterData)
+	ContentSizeHandler   func(GSContentSizeFilterData)
+	UserAccessHandler    func(*GSUserAccessFilterData)
+	TimeAccessHandler    func(*GSTimeAccessFilterData)
+	UrlAccessHandler     func(*GSUrlFilterData)
+	ProxyErrorHandler    func(*GSProxyErrorData)
+	DoMitm               func(host string) bool
+	IsExceptionUrl       func(url string) bool
+	IsAuthEnabled        func() bool
+	LogHandler           func(GSLogData)
+	RuleMatchHandler     func(domain string, user string) interface{} // Returns RuleMatch
+	RuleBlockPageHandler func(domain string) []byte                   // Build HTML block page for rule-based domain blocks
+	Handlers             map[string][]*GSHandler
+	UsersCache           map[string]GSUserCached
 }
 
 // For the refactored filter input

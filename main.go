@@ -380,12 +380,10 @@ func RunGateSentry() {
 		return match
 	}
 
-	ngp.ContentDomainBlockHandler = func(domain string, domainListIDs []string) bool {
-		ruleManager := gatesentryWebserverEndpoints.GetRuleManager()
-		if ruleManager == nil {
-			return false
-		}
-		return ruleManager.CheckContentDomainBlocked(domain, domainListIDs)
+	ngp.RuleBlockPageHandler = func(domain string) []byte {
+		return []byte(gresponder.BuildGeneralResponsePage([]string{
+			"Unable to fulfill your request because <strong>" + domain + "</strong> is blocked by a proxy rule.",
+		}, -1))
 	}
 
 	ngp.ProxyErrorHandler = func(gafd *gatesentryproxy.GSProxyErrorData) {

@@ -294,22 +294,16 @@ func (rm *RuleManager) MatchRule(domain, user string) GatesentryTypes.RuleMatch 
 		match.ShouldMITM = rule.MITMAction == GatesentryTypes.MITMActionEnable
 		match.ShouldBlock = rule.Action == GatesentryTypes.RuleActionBlock
 
-		if match.ShouldMITM {
-			if rule.BlockType == GatesentryTypes.BlockTypeContentType ||
-				rule.BlockType == GatesentryTypes.BlockTypeBoth ||
-				rule.BlockType == GatesentryTypes.BlockTypeAll {
-				match.BlockContentTypes = rule.BlockedContentTypes
-			}
-			if rule.BlockType == GatesentryTypes.BlockTypeURLRegex ||
-				rule.BlockType == GatesentryTypes.BlockTypeBoth ||
-				rule.BlockType == GatesentryTypes.BlockTypeAll {
-				match.BlockURLRegexes = rule.URLRegexPatterns
-			}
-			if rule.BlockType == GatesentryTypes.BlockTypeDomainList ||
-				rule.BlockType == GatesentryTypes.BlockTypeAll {
-				match.BlockContentDomainLists = rule.ContentDomainLists
-			}
+		// Populate match criteria — these are always set regardless of MITM.
+		// Content types and URL regexes are request-level match criteria.
+		// Keyword filtering is content scanning (works on HTTP and HTTPS+MITM).
+		if len(rule.BlockedContentTypes) > 0 {
+			match.BlockContentTypes = rule.BlockedContentTypes
 		}
+		if len(rule.URLRegexPatterns) > 0 {
+			match.BlockURLRegexes = rule.URLRegexPatterns
+		}
+		match.KeywordFilterEnabled = rule.KeywordFilterEnabled
 
 		return match
 	}
@@ -345,16 +339,6 @@ func CheckURLPathBlocked(urlPath string, patterns []string) bool {
 	}
 
 	return false
-}
-
-// CheckContentDomainBlocked checks if a sub-request domain is in any of the
-// given domain lists. Used during MITM content filtering to block embedded
-// resources (images, scripts, etc.) whose domain appears in a blocklist.
-func (rm *RuleManager) CheckContentDomainBlocked(domain string, domainListIDs []string) bool {
-	if len(domainListIDs) == 0 || rm.domainListMgr == nil || rm.domainListMgr.Index == nil {
-		return false
-	}
-	return rm.domainListMgr.Index.IsDomainInAnyList(strings.ToLower(domain), domainListIDs)
 }
 
 func generateRuleID() string {

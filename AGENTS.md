@@ -17,7 +17,12 @@ Important context for AI agents working on this project.
 - The server runs from the `bin/` directory (working dir matters for data paths)
 - Log output goes to `log.txt`
 - **Deep test DNS & proxy**: `scripts/dns_deep_test.sh` — fully tests and retests DNS services and proxy
+- **Deep test proxy**: `scripts/proxy_deep_tests.sh` — comprehensive proxy filtering, MITM, and content pipeline tests
 - **full unittest**: `make tests` -- run all unit tests
+
+### Proxy Deep Tests — State Management
+
+`scripts/proxy_deep_tests.sh` saves and restores the server's full state (rules, settings, keyword filters) around each test run. During setup, **all existing proxy rules are deleted** so only the test-created rules (`PT: ...` prefixed) are active — this ensures deterministic results regardless of what rules the admin has configured. On exit (including Ctrl-C), all rules are deleted and the original saved rules are re-created.
 
 ## Ports
 
@@ -76,6 +81,35 @@ The `blockedDomainMiddleware` in `webserver.go` intercepts requests where the HT
 - Settings file: `bin/gatesentry/GSSettings` (encrypted JSON)
 - Filter files: `bin/gatesentry/filterfiles/`
 - The `MapStore` persists via `Update()` → `Set()` → `Persist()` → writes to disk
+
+## Proxy Rule Architecture
+
+### Rule Actions and Content Filtering
+
+- **Action: "block"** — The matched domain is blocked outright. No content filtering applies because the connection is refused before any content is fetched.
+- **Action: "allow"** — The matched domain is allowed through the proxy. Content filtering options (keyword scanning, content-type blocking, URL regex blocking, embedded resource blocking) are **only evaluated on allow rules**.
+
+**Important**: Content Filtering Options in the UI are hidden when the rule action is "Block" because those filters never execute — a blocked domain never reaches the content pipeline. Always set action to "Allow" before configuring content filters.
+
+### Per-Rule Filtering (No Global Filters)
+
+All filtering is scoped to individual rules. There are no global filtering pipelines:
+
+- **Content-type blocking** — A **request-level** filter (not a content filter). When the browser fetches a sub-resource (e.g. `<img src="photo.jpeg">`), that is a separate proxy request. The proxy checks the **response** Content-Type header against `blocked_content_types` on the matched rule. If it matches (e.g. `image/jpeg`), the response is blocked with a 403. In the UI, this is in the general rule definition area, not under Content Filtering Options. Enforcement is in `proxy.go` after response headers are read, using `sendInsecureBlockBytes()` for images.
+- **Keyword scanning** — A **content filter**. Controlled by `keyword_filter_enabled` on each rule. The proxy only calls `ScanText` when the matched rule has this flag set (`isKeywordFilterEnabled()` in `proxy.go`). Requires MITM for HTTPS.
+- **URL regex blocking** — Auto-derived from `url_regex_patterns` array on the rule.
+- **Embedded resource blocking** — Auto-derived from `content_domain_lists` array on the rule.
+- **SSL Inspection (MITM)** — Must be enabled (`mitm_action: "enable"`) for content filters (keyword, URL regex, domain list) to function on HTTPS traffic. Content-type blocking works without MITM since it only reads response headers.
+
+The legacy `block_type` enum field still exists on the `Rule` struct for backward compatibility but is **no longer used** in matching logic. Filters are auto-derived from populated fields in `MatchRule()` (`application/rules.go`).
+
+### Rule Evaluation Flow
+
+1. Request arrives at proxy → `matchRuleForRequest()` finds first matching rule by priority
+2. If rule action is "block" → serve block page, done
+3. If rule action is "allow" → proxy the request, populate `RuleMatch` with filter config
+4. Response arrives → content pipeline checks `RuleMatch` for active filters
+5. Each filter (keyword, content-type, URL regex, domain list) only runs if the matched rule has data for it
 
 ## Current Work In Progress
 

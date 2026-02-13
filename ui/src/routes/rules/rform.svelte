@@ -25,12 +25,12 @@
     domain: "",
     action: "allow",
     mitm_action: "default",
-    block_type: "none",
     blocked_content_types: [],
     url_regex_patterns: [],
     domain_patterns: [],
     domain_lists: [],
     content_domain_lists: [],
+    keyword_filter_enabled: false,
     time_restriction: { from: "00:00", to: "23:59" },
     users: [],
     description: "",
@@ -75,25 +75,6 @@
       rule.domain = "";
     }
   }
-
-  $: showContentTypeOptions =
-    rule.mitm_action === "enable" &&
-    rule.block_type !== "none" &&
-    (rule.block_type === "content_type" ||
-      rule.block_type === "both" ||
-      rule.block_type === "all");
-
-  $: showUrlRegexOptions =
-    rule.mitm_action === "enable" &&
-    rule.block_type !== "none" &&
-    (rule.block_type === "url_regex" ||
-      rule.block_type === "both" ||
-      rule.block_type === "all");
-
-  $: showDomainListContentOptions =
-    rule.mitm_action === "enable" &&
-    rule.block_type !== "none" &&
-    (rule.block_type === "domain_list" || rule.block_type === "all");
 
   onMount(async () => {
     try {
@@ -280,9 +261,6 @@
   </span>
   <div class="rd-header-text">
     <span class="rd-header-label">{isNew ? "New Rule" : "Edit Rule"}</span>
-    {#if !isNew}
-      <h3 class="rd-title">{rule.name || "Unnamed Rule"}</h3>
-    {/if}
   </div>
 </div>
 
@@ -296,11 +274,22 @@
 {/if}
 
 <div class="rd-scroll">
+  <!-- Name -->
+  <div class="rd-field">
+    <span class="rd-field-label">Name</span>
+    <TextInput
+      size="sm"
+      hideLabel
+      bind:value={rule.name}
+      placeholder="Rule Name"
+    />
+  </div>
+
   <!-- Rule Status -->
   <div class="rd-field">
     <div class="rd-toggle-card">
       <div class="rd-toggle-info">
-        <span class="rd-toggle-title">Rule Status</span>
+        <span class="rd-field-label" style="margin-bottom:0">Rule Status</span>
         <span class="rd-toggle-desc"
           >{rule.enabled
             ? "This rule is active and being evaluated"
@@ -340,17 +329,6 @@
     </div>
   {/if}
 
-  <!-- Name -->
-  <div class="rd-field">
-    <span class="rd-field-label">Name</span>
-    <TextInput
-      size="sm"
-      hideLabel
-      bind:value={rule.name}
-      placeholder="Rule Name"
-    />
-  </div>
-
   <!-- Priority -->
   <div class="rd-field">
     <span class="rd-field-label">Priority</span>
@@ -379,6 +357,28 @@
       ]}
     />
   </div>
+
+  <!-- Description -->
+  <div class="rd-field">
+    <span class="rd-field-label">Description</span>
+    <TextArea
+      rows={3}
+      hideLabel
+      bind:value={rule.description}
+      placeholder="Optional description"
+    />
+  </div>
+
+  <hr />
+
+  <!-- Matching Rules -->
+  <div class="rd-section-header">
+    <span class="rd-section-title">Match Criteria</span>
+  </div>
+
+  <p class="rd-filter-hint">
+    Conditions determine if this rule applies to the URL.
+  </p>
 
   <!-- Domain Patterns -->
   <div class="rd-field">
@@ -427,131 +427,72 @@
     </div>
   {/if}
 
-  <!-- SSL Inspection -->
+  <!-- URL Patterns -->
   <div class="rd-field">
-    <span class="rd-field-label">SSL Inspection</span>
-    <Dropdown
-      size="sm"
-      titleText=""
-      selectedId={rule.mitm_action}
-      on:select={(e) => {
-        rule.mitm_action = e.detail.selectedId;
-      }}
-      items={[
-        { id: "default", text: "Use Global Setting" },
-        { id: "enable", text: "Enable (Inspect HTTPS)" },
-        { id: "disable", text: "Disable (Pass Through)" },
-      ]}
-    />
-  </div>
-
-  {#if rule.mitm_action === "enable"}
-    <!-- Content Filtering -->
-    <div class="rd-field">
-      <span class="rd-field-label">Content Filtering</span>
-      <Dropdown
-        size="sm"
-        titleText=""
-        selectedId={rule.block_type}
-        on:select={(e) => {
-          rule.block_type = e.detail.selectedId;
-        }}
-        items={[
-          { id: "none", text: "None (Allow all content)" },
-          { id: "content_type", text: "Block by Content Type" },
-          { id: "url_regex", text: "Block by URL Pattern" },
-          { id: "both", text: "Block Content Type + URL Pattern" },
-          { id: "domain_list", text: "Block by Domain List" },
-          { id: "all", text: "Block All (Type + URL + Domain List)" },
-        ]}
-      />
-    </div>
-
-    {#if showContentTypeOptions}
-      <div class="rd-field">
-        <span class="rd-field-label">Blocked Content Types</span>
-        <div class="rd-add-row">
-          <div class="rd-add-input">
-            <ComboBox
-              size="sm"
-              items={MIME_TYPE_ITEMS}
-              bind:selectedId={contentTypeSelectedId}
-              bind:value={contentTypeInput}
-              shouldFilterItem={shouldFilterMimeItem}
-              placeholder="Search or type a MIME type"
-              on:select={(e) => {
-                if (e.detail.selectedItem)
-                  addContentType(e.detail.selectedItem.text);
-              }}
-              on:keydown={(e) => {
-                if (e.key === "Enter" && contentTypeInput) {
-                  e.preventDefault();
-                  addContentType();
-                }
-              }}
-            />
-          </div>
-          <Button size="small" on:click={() => addContentType()}>Add</Button>
-        </div>
-        {#if rule.blocked_content_types && rule.blocked_content_types.length > 0}
-          <div class="rd-tags">
-            {#each rule.blocked_content_types as type}
-              <Tag size="sm" filter on:close={() => removeContentType(type)}
-                >{type}</Tag
-              >
-            {/each}
-          </div>
-        {/if}
-      </div>
-    {/if}
-
-    {#if showUrlRegexOptions}
-      <div class="rd-field">
-        <span class="rd-field-label">URL Patterns</span>
-        <div class="rd-add-row">
-          <div class="rd-add-input">
-            <TextInput
-              size="sm"
-              bind:value={urlRegexInput}
-              placeholder="e.g., /ads/.*"
-              on:keydown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  addUrlRegex();
-                }
-              }}
-            />
-          </div>
-          <Button size="small" on:click={addUrlRegex}>Add</Button>
-        </div>
-        {#if rule.url_regex_patterns && rule.url_regex_patterns.length > 0}
-          <div class="rd-tags">
-            {#each rule.url_regex_patterns as pattern}
-              <Tag size="sm" filter on:close={() => removeUrlRegex(pattern)}
-                >{pattern}</Tag
-              >
-            {/each}
-          </div>
-        {/if}
-      </div>
-    {/if}
-
-    {#if showDomainListContentOptions && availableDomainLists.length > 0}
-      <div class="rd-field">
-        <span class="rd-field-label">Block Embedded Resources</span>
-        <MultiSelect
+    <span class="rd-field-label">URL Patterns</span>
+    <div class="rd-add-row">
+      <div class="rd-add-input">
+        <TextInput
           size="sm"
-          titleText=""
-          label="Block embedded resources from these lists..."
-          items={availableDomainLists}
-          selectedIds={rule.content_domain_lists || []}
-          on:select={(e) => {
-            rule.content_domain_lists = e.detail.selectedIds;
+          bind:value={urlRegexInput}
+          placeholder="e.g., /ads/.*"
+          on:keydown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              addUrlRegex();
+            }
           }}
         />
       </div>
+      <Button size="small" on:click={addUrlRegex}>Add</Button>
+    </div>
+    {#if rule.url_regex_patterns && rule.url_regex_patterns.length > 0}
+      <div class="rd-tags">
+        {#each rule.url_regex_patterns as pattern}
+          <Tag size="sm" filter on:close={() => removeUrlRegex(pattern)}
+            >{pattern}</Tag
+          >
+        {/each}
+      </div>
     {/if}
-  {/if}
+  </div>
+
+  <!-- Content Type -->
+  <div class="rd-field">
+    <span class="rd-field-label">Content Type</span>
+    <div class="rd-add-row">
+      <div class="rd-add-input">
+        <ComboBox
+          size="sm"
+          items={MIME_TYPE_ITEMS}
+          bind:selectedId={contentTypeSelectedId}
+          bind:value={contentTypeInput}
+          shouldFilterItem={shouldFilterMimeItem}
+          placeholder="Search or type a MIME type"
+          on:select={(e) => {
+            if (e.detail.selectedItem)
+              addContentType(e.detail.selectedItem.text);
+          }}
+          on:keydown={(e) => {
+            if (e.key === "Enter" && contentTypeInput) {
+              e.preventDefault();
+              addContentType();
+            }
+          }}
+        />
+      </div>
+      <Button size="small" on:click={() => addContentType()}>Add</Button>
+    </div>
+    {#if rule.blocked_content_types && rule.blocked_content_types.length > 0}
+      <div class="rd-tags">
+        {#each rule.blocked_content_types as type}
+          <Tag size="sm" filter on:close={() => removeContentType(type)}
+            >{type}</Tag
+          >
+        {/each}
+      </div>
+    {/if}
+  </div>
 
   <!-- Users -->
   <div class="rd-field">
@@ -587,15 +528,56 @@
     {/if}
   </div>
 
-  <!-- Description -->
+  <hr />
+
+  <!-- Content Filtering -->
+  <div class="rd-section-header">
+    <span class="rd-section-title">Content Filtering</span>
+  </div>
+
+  <p class="rd-filter-hint">
+    Scans page content on HTTP and HTTPS (with SSL Inspection) traffic.
+  </p>
+
+  <!-- SSL Inspection -->
   <div class="rd-field">
-    <span class="rd-field-label">Description</span>
-    <TextArea
-      rows={3}
-      hideLabel
-      bind:value={rule.description}
-      placeholder="Optional description"
+    <span class="rd-field-label">SSL Inspection</span>
+    <Dropdown
+      size="sm"
+      titleText=""
+      selectedId={rule.mitm_action}
+      on:select={(e) => {
+        rule.mitm_action = e.detail.selectedId;
+      }}
+      items={[
+        { id: "default", text: "Use Global Setting" },
+        { id: "enable", text: "Enable (Inspect HTTPS)" },
+        { id: "disable", text: "Disable (Pass Through)" },
+      ]}
     />
+  </div>
+
+  <!-- Keyword Filter Toggle -->
+  <div class="rd-field">
+    <div class="rd-toggle-card">
+      <div class="rd-toggle-info">
+        <span class="rd-field-label" style="margin-bottom:0"
+          >Keyword Filter</span
+        >
+        <span class="rd-toggle-desc"
+          >{rule.keyword_filter_enabled
+            ? "Page text will be scanned for blocked keywords"
+            : "Keyword scanning is disabled for this rule"}</span
+        >
+      </div>
+      <Toggle
+        size="sm"
+        bind:toggled={rule.keyword_filter_enabled}
+        hideLabel
+        labelA=""
+        labelB=""
+      />
+    </div>
   </div>
 
   <!-- Actions -->
@@ -664,19 +646,10 @@
   }
 
   .rd-header-label {
-    font-size: 0.75rem;
-    font-weight: 500;
-    color: #6f6f6f;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-  }
-
-  .rd-title {
-    font-size: 1.125rem;
+    font-size: 0.85rem;
     font-weight: 600;
     color: #161616;
-    word-break: break-word;
-    margin: 0;
+    letter-spacing: 0.02em;
   }
 
   .rd-scroll {
@@ -703,15 +676,37 @@
     min-width: 0;
   }
 
-  .rd-toggle-title {
-    font-size: 0.875rem;
-    font-weight: 600;
-    color: #161616;
-  }
-
   .rd-toggle-desc {
     font-size: 0.75rem;
     color: #6f6f6f;
+  }
+
+  .rd-section-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 4px 0 6px 0;
+  }
+
+  .rd-section-title {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #525252;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+  }
+
+  .rd-badge-disabled {
+    display: inline-block;
+    font-size: 0.65rem;
+    font-weight: 600;
+    color: #8d8d8d;
+    background: #e0e0e0;
+    padding: 1px 8px;
+    border-radius: 10px;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    line-height: 1.4;
   }
 
   .rd-time-inputs {
@@ -793,11 +788,14 @@
     padding: 14px 0;
   }
 
-  @media (max-width: 671px) {
-    .rd-title {
-      font-size: 1rem;
-    }
+  .rd-filter-hint {
+    font-size: 0.8rem;
+    color: #6f6f6f;
+    margin: 4px 0 8px 0;
+    font-style: italic;
+  }
 
+  @media (max-width: 671px) {
     .rd-field {
       padding: 12px 12px;
     }
