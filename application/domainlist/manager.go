@@ -307,6 +307,29 @@ func (m *DomainListManager) GetDomainsForList(id string) ([]string, error) {
 	return nil, nil
 }
 
+// IsDomainInList checks whether a domain is present in a specific list
+// using the in-memory index (works for both local and URL-sourced lists).
+func (m *DomainListManager) IsDomainInList(domain string, listID string) bool {
+	if m.Index == nil {
+		return false
+	}
+	return m.Index.IsDomainInList(domain, listID)
+}
+
+// IsDomainInAnyList checks whether a domain is present in any of the given lists
+// using the in-memory index. Returns the first matching list ID, or empty string.
+func (m *DomainListManager) IsDomainInAnyList(domain string, listIDs []string) (bool, string) {
+	if m.Index == nil {
+		return false, ""
+	}
+	for _, id := range listIDs {
+		if m.Index.IsDomainInList(domain, id) {
+			return true, id
+		}
+	}
+	return false, ""
+}
+
 // ---------- Loading and Refreshing ----------
 
 // LoadAllLists downloads URL-sourced lists and indexes local lists.

@@ -184,7 +184,25 @@ func NewGSHandler(handlerid string, f func(*[]byte, *GSResponder, *GSProxyPassth
 func NewGSProxy() *GSProxy {
 	proxy := GSProxy{}
 	IProxy = &proxy
-	IProxy.UsersCache = map[string]GSUserCached{}
+	// UsersCache is sync.Map — zero value is ready to use, no init needed
+
+	// Start periodic eviction of expired user cache entries
+	go func() {
+		ticker := time.NewTicker(1 * time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
+			now := time.Now().Unix()
+			IProxy.UsersCache.Range(func(key, value interface{}) bool {
+				if cached, ok := value.(GSUserCached); ok {
+					if now-cached.CachedAt > 300 { // 5 minutes
+						IProxy.UsersCache.Delete(key)
+					}
+				}
+				return true
+			})
+		}
+	}()
+
 	return &proxy
 }
 
@@ -269,7 +287,6 @@ func decodeBase64Credentials(auth string) (user, pass string, ok bool) {
 
 type DataPassThru struct {
 	io.Writer
-	Bytes []byte
 	// total int64 // Total # of bytes transferred
 	Contenttype string
 	Passthru    *GSProxyPassthru
@@ -277,7 +294,6 @@ type DataPassThru struct {
 
 func (pt *DataPassThru) Write(p []byte) (int, error) {
 	n, err := pt.Writer.Write(p)
-	pt.Bytes = append(pt.Bytes, p...)
 	if err == nil {
 		IProxy.ContentSizeHandler(
 			GSContentSizeFilterData{
@@ -447,19 +463,73 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	shouldBlock, ruleMatch, ruleShouldMITM := CheckProxyRules(requestHost, user)
+
+	// For block rules with post-response match criteria (URL patterns,
+	// content-type criteria, or keyword filtering), we cannot short-circuit
+	// the block here. We must proxy the request first so the response handler
+	// can evaluate those criteria in steps 5-8 of the rule pipeline.
+	//
+	// Exception: HTTPS (CONNECT) without MITM — the response handler won't
+	// run for passthrough tunnels, so we must block at the domain level.
 	if shouldBlock {
-		log.Printf("[Proxy] Blocking request to %s by rule", r.URL.String())
-		passthru.ProxyActionToLog = ProxyActionBlockedUrl
-		LogProxyAction(r.URL.String(), user, ProxyActionBlockedUrl)
-		var blockContent []byte
-		if IProxy.RuleBlockPageHandler != nil {
-			blockContent = IProxy.RuleBlockPageHandler(requestHost)
+		canDeferBlock := false
+		if ruleMatch != nil {
+			matchVal := reflect.ValueOf(ruleMatch)
+			if matchVal.Kind() == reflect.Struct {
+				hasPostCriteria := false
+				urlRegex := matchVal.FieldByName("BlockURLRegexes")
+				if urlRegex.IsValid() && urlRegex.Kind() == reflect.Slice && urlRegex.Len() > 0 {
+					hasPostCriteria = true
+				}
+				contentTypes := matchVal.FieldByName("BlockContentTypes")
+				if contentTypes.IsValid() && contentTypes.Kind() == reflect.Slice && contentTypes.Len() > 0 {
+					hasPostCriteria = true
+				}
+				kwEnabled := matchVal.FieldByName("KeywordFilterEnabled")
+				if kwEnabled.IsValid() && kwEnabled.Kind() == reflect.Bool && kwEnabled.Bool() {
+					hasPostCriteria = true
+				}
+
+				// Can only defer the block if the response handler will run:
+				// - HTTP requests always go through the response handler
+				// - HTTPS (CONNECT) only goes through the response handler if MITM is active
+				isHTTPS := r.Method == "CONNECT"
+				if hasPostCriteria && (!isHTTPS || ruleShouldMITM) {
+					canDeferBlock = true
+					if DebugLogging {
+						log.Printf("[Rule] Block rule has post-response criteria — deferring block for %s", r.URL)
+					}
+				}
+			}
 		}
-		if blockContent == nil {
-			blockContent = []byte("Blocked by proxy rule")
+
+		if !canDeferBlock {
+			log.Printf("[Proxy] Blocking request to %s by rule", r.URL.String())
+			passthru.ProxyActionToLog = ProxyActionBlockedUrl
+			LogProxyAction(r.URL.String(), user, ProxyActionBlockedUrl)
+			var blockContent []byte
+			if IProxy.RuleBlockPageHandler != nil {
+				ruleName := ""
+				if ruleMatch != nil {
+					mv := reflect.ValueOf(ruleMatch)
+					if mv.Kind() == reflect.Struct {
+						ruleField := mv.FieldByName("Rule")
+						if ruleField.IsValid() && !ruleField.IsNil() {
+							nameField := ruleField.Elem().FieldByName("Name")
+							if nameField.IsValid() && nameField.Kind() == reflect.String {
+								ruleName = nameField.String()
+							}
+						}
+					}
+				}
+				blockContent = IProxy.RuleBlockPageHandler(requestHost, ruleName)
+			}
+			if blockContent == nil {
+				blockContent = []byte("Blocked by proxy rule")
+			}
+			sendBlockMessageBytes(w, r, nil, blockContent, nil)
+			return
 		}
-		sendBlockMessageBytes(w, r, nil, blockContent, nil)
-		return
 	}
 
 	ruleMatched := ruleMatch != nil
@@ -616,12 +686,14 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check URL regex match criteria from the matched rule.
+	// Step 5: Check URL regex match criteria from the matched rule.
+	// If patterns exist but NONE match the request URL, the rule is skipped
+	// (the request is allowed through as if the rule didn't match).
+	// If patterns exist and one matches, continue to step 6/7/8.
 	if passthru.UserData != nil {
 		matchVal := reflect.ValueOf(passthru.UserData)
 		if matchVal.Kind() == reflect.Struct {
 			urlRegexField := matchVal.FieldByName("BlockURLRegexes")
-			actionField := matchVal.FieldByName("ShouldBlock")
 
 			if urlRegexField.IsValid() && urlRegexField.Kind() == reflect.Slice && urlRegexField.Len() > 0 {
 				requestURL := r.URL.String()
@@ -641,16 +713,14 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 
-				// URL pattern matched — apply the rule's action
-				if matched {
-					isBlock := actionField.IsValid() && actionField.Kind() == reflect.Bool && actionField.Bool()
-					if isBlock {
-						passthru.ProxyActionToLog = ProxyActionBlockedUrl
-						IProxy.LogHandler(GSLogData{Url: requestURL, User: user, Action: ProxyActionBlockedUrl})
-						sendBlockMessageBytes(w, r, nil, []byte("URL blocked by rule"), nil)
-						return
+				if !matched {
+					// URL patterns exist but none matched — rule doesn't apply.
+					// Allow the request through (skip this rule).
+					if DebugLogging {
+						log.Printf("[Rule] URL patterns didn't match %s — skipping rule", requestURL)
 					}
-					// Action is "allow" — URL matched, continue processing
+					// Fall through to normal response delivery below
+					passthru.UserData = nil // Clear the rule match so steps 6-8 don't fire
 				}
 			}
 		}
@@ -667,28 +737,77 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		log.Println("Content type is = ", contentType, " for ", r.URL.String())
 	}
 
-	// Check per-rule BlockContentTypes — block responses whose Content-Type
-	// matches any entry in the rule's blocked_content_types list.
-	// This is a request-level filter: when the browser fetches a sub-resource
-	// (e.g. <img src="photo.jpeg">), the proxy sees it as a separate request
-	// and blocks based on the response Content-Type header.
+	// Step 6: Check per-rule BlockContentTypes — if the rule has content-type
+	// criteria, match the response Content-Type against the list.
+	// If patterns exist but NONE match, the rule doesn't apply (skip it).
+	// If a pattern matches, continue to step 7/8.
 	if contentType != "" && passthru.UserData != nil {
 		matchVal := reflect.ValueOf(passthru.UserData)
 		if matchVal.Kind() == reflect.Struct {
 			ctField := matchVal.FieldByName("BlockContentTypes")
 			if ctField.IsValid() && ctField.Kind() == reflect.Slice && ctField.Len() > 0 {
+				ctMatched := false
 				for i := 0; i < ctField.Len(); i++ {
 					blocked := strings.ToLower(strings.TrimSpace(ctField.Index(i).String()))
 					if blocked != "" && strings.Contains(contentType, blocked) {
-						if DebugLogging {
-							log.Printf("[Rule] Blocking response for %s — content-type %q matches blocked type %q", r.URL, contentType, blocked)
-						}
-						passthru.ProxyActionToLog = ProxyActionBlockedFileType
-						IProxy.LogHandler(GSLogData{Url: r.URL.String(), User: user, Action: ProxyActionBlockedFileType})
-						sendInsecureBlockBytes(w, r, resp, []byte("Content type blocked by rule"), &contentType)
-						return
+						ctMatched = true
+						break
 					}
 				}
+				if !ctMatched {
+					// Content-type criteria exist but none matched — rule doesn't apply.
+					if DebugLogging {
+						log.Printf("[Rule] Content-type %q didn't match any blocked types — skipping rule for %s", contentType, r.URL)
+					}
+					passthru.UserData = nil // Clear the rule match so steps 7-8 don't fire
+				}
+			}
+		}
+	}
+
+	// Step 8 (pre-keyword): Apply rule action if all match criteria passed.
+	// If we still have a matched rule at this point (UserData not cleared by
+	// steps 5-6), and the rule's action is "block", block the request now.
+	// Keyword scanning (step 7) happens in the buffer pipeline and can also
+	// force a block regardless of rule action.
+	if passthru.UserData != nil {
+		matchVal := reflect.ValueOf(passthru.UserData)
+		if matchVal.Kind() == reflect.Struct {
+			actionField := matchVal.FieldByName("ShouldBlock")
+			if actionField.IsValid() && actionField.Kind() == reflect.Bool && actionField.Bool() {
+				// All match criteria satisfied and action is "block"
+				requestURL := r.URL.String()
+				passthru.ProxyActionToLog = ProxyActionBlockedUrl
+				IProxy.LogHandler(GSLogData{Url: requestURL, User: user, Action: ProxyActionBlockedUrl})
+
+				// Get rule name for block page
+				ruleName := ""
+				ruleField := matchVal.FieldByName("Rule")
+				if ruleField.IsValid() && !ruleField.IsNil() {
+					nameField := ruleField.Elem().FieldByName("Name")
+					if nameField.IsValid() && nameField.Kind() == reflect.String {
+						ruleName = nameField.String()
+					}
+				}
+
+				var blockContent []byte
+				if IProxy.RuleBlockPageHandler != nil {
+					host, _, _ := net.SplitHostPort(r.URL.Host)
+					if host == "" {
+						host = r.URL.Host
+					}
+					blockContent = IProxy.RuleBlockPageHandler(host, ruleName)
+				}
+				if blockContent == nil {
+					blockContent = []byte("Blocked by proxy rule")
+				}
+
+				if contentType != "" && isImage(contentType) {
+					sendInsecureBlockBytes(w, r, resp, blockContent, &contentType)
+				} else {
+					sendBlockMessageBytes(w, r, nil, blockContent, nil)
+				}
+				return
 			}
 		}
 	}
@@ -942,6 +1061,9 @@ func sendInsecureBlockBytes(w http.ResponseWriter, r *http.Request, resp *http.R
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+	w.Header().Set("Pragma", "no-cache")
+	w.Header().Set("Expires", "0")
 	w.WriteHeader(http.StatusForbidden)
 	w.Write(content)
 }
@@ -958,11 +1080,15 @@ func sendBlockMessageBytes(w http.ResponseWriter, r *http.Request, resp *http.Re
 		defer conn.Close()
 		conn.Write([]byte("HTTP/1.1 200 OK\r\n\r\n"))
 
-		// clientHello, err := gsClientHello.ReadClientHello(conn)
+		// Extract the hostname for certificate generation
+		blockHost := r.URL.Host
+		if h, _, splitErr := net.SplitHostPort(blockHost); splitErr == nil {
+			blockHost = h
+		}
 
-		tlsConfig, err := createSelfSignedTLSConfig()
+		tlsConfig, err := createBlockPageTLSConfig(blockHost)
 		if err != nil {
-			fmt.Println("[Proxy][Error:showBlockPage] Error creating self-signed certificate:", err)
+			fmt.Println("[Proxy][Error:showBlockPage] Error creating block page certificate:", err)
 			conn.Close()
 			return
 		}
@@ -975,15 +1101,10 @@ func sendBlockMessageBytes(w http.ResponseWriter, r *http.Request, resp *http.Re
 			return
 		}
 
-		_, err = tlsConn.Write([]byte("HTTP/1.1 403 Forbidden\r\n"))
+		headers := fmt.Sprintf("HTTP/1.1 403 Forbidden\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: %d\r\nCache-Control: no-store, no-cache, must-revalidate, max-age=0\r\nPragma: no-cache\r\nExpires: 0\r\nConnection: close\r\n\r\n", len(content))
+		_, err = tlsConn.Write([]byte(headers))
 		if err != nil {
-			log.Println("[Proxy][Error:showBlockPage] writing to connection", err)
-			return
-		}
-		_, err = tlsConn.Write([]byte("Content-Type: text/html\r\n\r\n"))
-		if err != nil {
-			log.Println("[Proxy][Error:showBlockPage] Error writing to connection", err)
-			conn.Close()
+			log.Println("[Proxy][Error:showBlockPage] writing headers to connection", err)
 			return
 		}
 		_, err = tlsConn.Write(content)

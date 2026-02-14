@@ -22,6 +22,8 @@ type DomainListManagerInterface interface {
 	AddDomainsToList(id string, domains []string) error
 	RemoveDomainFromList(id string, domain string) error
 	GetDomainsForList(id string) ([]string, error)
+	IsDomainInList(domain string, listID string) bool
+	IsDomainInAnyList(domain string, listIDs []string) (bool, string)
 }
 
 var domainListManager DomainListManagerInterface

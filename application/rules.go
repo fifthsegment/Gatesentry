@@ -291,7 +291,18 @@ func (rm *RuleManager) MatchRule(domain, user string) GatesentryTypes.RuleMatch 
 			Rule:    &rule,
 		}
 
-		match.ShouldMITM = rule.MITMAction == GatesentryTypes.MITMActionEnable
+		// Resolve MITM state:
+		//   "enable"  → true
+		//   "disable" → false
+		//   "default" → use global enable_https_filtering setting
+		switch rule.MITMAction {
+		case GatesentryTypes.MITMActionEnable:
+			match.ShouldMITM = true
+		case GatesentryTypes.MITMActionDisable:
+			match.ShouldMITM = false
+		default: // "default" or empty
+			match.ShouldMITM = rm.storage.Get("enable_https_filtering") == "true"
+		}
 		match.ShouldBlock = rule.Action == GatesentryTypes.RuleActionBlock
 
 		// Populate match criteria — these are always set regardless of MITM.

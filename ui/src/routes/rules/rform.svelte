@@ -57,6 +57,15 @@
   // API data
   let availableDomainLists = [];
   let availableUsers = [];
+  let globalMitmEnabled = false;
+
+  // Resolve effective MITM state: enable → true, disable → false, default → globalMitmEnabled
+  $: mitmEffective =
+    rule.mitm_action === "enable"
+      ? true
+      : rule.mitm_action === "disable"
+      ? false
+      : globalMitmEnabled;
 
   // Ensure arrays and objects are initialized
   $: {
@@ -79,11 +88,14 @@
   onMount(async () => {
     try {
       const token = localStorage.getItem("jwt");
-      const [listsRes, usersRes] = await Promise.all([
+      const [listsRes, usersRes, mitmRes] = await Promise.all([
         fetch(getBasePath() + "/api/domainlists", {
           headers: { Authorization: `Bearer ${token}` },
         }),
         fetch(getBasePath() + "/api/users", {
+          headers: { Authorization: `Bearer ${token}` },
+        }),
+        fetch(getBasePath() + "/api/settings/enable_https_filtering", {
           headers: { Authorization: `Bearer ${token}` },
         }),
       ]);
@@ -100,6 +112,10 @@
           id: u.username,
           text: u.username,
         }));
+      }
+      if (mitmRes.ok) {
+        const data = await mitmRes.json();
+        globalMitmEnabled = data.Value === "true";
       }
     } catch (e) {
       console.error("Failed to fetch data:", e);
@@ -251,6 +267,48 @@
   function goBack() {
     dispatch("back");
   }
+
+  // --- Rule Tester ---
+  let testUrl = "";
+  let testResult = null;
+  let testLive = false;
+  let testLoading = false;
+  let testUser = "";
+
+  async function testRule() {
+    testResult = null;
+    if (!testUrl.trim()) return;
+
+    testLoading = true;
+    try {
+      const token = localStorage.getItem("jwt");
+      const res = await fetch(getBasePath() + "/api/test/rule-match", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          rule: rule,
+          url: testUrl.trim(),
+          user: testUser.trim(),
+          live: testLive,
+        }),
+      });
+
+      if (!res.ok) {
+        const errText = await res.text();
+        testResult = { error: `Server error: ${errText}` };
+        return;
+      }
+
+      testResult = await res.json();
+    } catch (err) {
+      testResult = { error: `Request failed: ${err.message}` };
+    } finally {
+      testLoading = false;
+    }
+  }
 </script>
 
 <!-- Header bar -->
@@ -272,6 +330,13 @@
     on:close={() => (error = "")}
   />
 {/if}
+
+<!-- Rule Definition -->
+<div class="rd-section-header">
+  <span class="rd-section-title">Rule Definition</span>
+</div>
+
+<p class="rd-filter-hint">Rule name and schedule.</p>
 
 <div class="rd-scroll">
   <!-- Name -->
@@ -329,33 +394,36 @@
     </div>
   {/if}
 
-  <!-- Priority -->
+  <!-- SSL Inspection -->
   <div class="rd-field">
-    <span class="rd-field-label">Priority</span>
-    <TextInput
-      size="sm"
-      hideLabel
-      type="number"
-      bind:value={rule.priority}
-      placeholder="0"
-    />
-  </div>
-
-  <!-- Action -->
-  <div class="rd-field">
-    <span class="rd-field-label">Action</span>
+    <span class="rd-field-label">SSL Inspection (MITM)</span>
     <Dropdown
       size="sm"
       titleText=""
-      selectedId={rule.action}
+      selectedId={rule.mitm_action}
       on:select={(e) => {
-        rule.action = e.detail.selectedId;
+        rule.mitm_action = e.detail.selectedId;
       }}
       items={[
-        { id: "allow", text: "Allow" },
-        { id: "block", text: "Block" },
+        {
+          id: "default",
+          text: `Use Global Setting (${
+            globalMitmEnabled ? "Enabled" : "Disabled"
+          })`,
+        },
+        { id: "enable", text: "Enable (Inspect HTTPS)" },
+        { id: "disable", text: "Disable (Pass Through)" },
       ]}
     />
+    <div
+      class="rd-mitm-badge"
+      class:rd-mitm-on={mitmEffective}
+      class:rd-mitm-off={!mitmEffective}
+    >
+      {mitmEffective
+        ? "✓ MITM Active — full inspection on HTTP and HTTPS"
+        : "✗ MITM Inactive — URL patterns, content-type, and keyword filters work on HTTP only"}
+    </div>
   </div>
 
   <!-- Description -->
@@ -371,13 +439,61 @@
 
   <hr />
 
-  <!-- Matching Rules -->
+  <!-- User Matching Rules -->
   <div class="rd-section-header">
-    <span class="rd-section-title">Match Criteria</span>
+    <span class="rd-section-title">User Match Criteria</span>
   </div>
 
   <p class="rd-filter-hint">
-    Conditions determine if this rule applies to the URL.
+    Rules apply to everyone or specific users. The rule is skipped if it does
+    not match any specified users. Empty input means all users are included.
+  </p>
+
+  <!-- Users -->
+  <div class="rd-field">
+    <span class="rd-field-label">Users</span>
+    <div class="rd-add-row">
+      <div class="rd-add-input">
+        <ComboBox
+          size="sm"
+          items={availableUsers}
+          bind:selectedId={userSelectedId}
+          bind:value={userInput}
+          shouldFilterItem={shouldFilterUserItem}
+          placeholder="Search users (empty = all users)"
+          on:select={(e) => {
+            if (e.detail.selectedItem) addUser(e.detail.selectedItem.text);
+          }}
+          on:keydown={(e) => {
+            if (e.key === "Enter" && userInput) {
+              e.preventDefault();
+              addUser();
+            }
+          }}
+        />
+      </div>
+      <Button size="small" on:click={() => addUser()}>Add</Button>
+    </div>
+    {#if rule.users && rule.users.length > 0}
+      <div class="rd-tags">
+        {#each rule.users as user}
+          <Tag size="sm" filter on:close={() => removeUser(user)}>{user}</Tag>
+        {/each}
+      </div>
+    {/if}
+  </div>
+
+  <hr />
+
+  <!-- Domain Matching Rules -->
+  <div class="rd-section-header">
+    <span class="rd-section-title">Rule Selection Criteria</span>
+  </div>
+
+  <p class="rd-filter-hint">
+    All conditions must match for the rule to apply. Empty conditions are
+    effectively "match all." URL patterns, content-type, and keyword filters
+    always work on HTTP. For HTTPS, they require MITM to be active.
   </p>
 
   <!-- Domain Patterns -->
@@ -429,13 +545,22 @@
 
   <!-- URL Patterns -->
   <div class="rd-field">
-    <span class="rd-field-label">URL Patterns</span>
+    <span class="rd-field-label">
+      URL Patterns
+      {#if !mitmEffective}<span class="rd-info-badge">HTTPS requires MITM</span
+        >{/if}
+    </span>
+    <p class="rd-field-hint">
+      Regex patterns matched against the full URL. If any pattern matches, the
+      rule applies. If none match, the rule is skipped for this request.
+      {#if !mitmEffective}Only evaluated on HTTP traffic when MITM is inactive.{/if}
+    </p>
     <div class="rd-add-row">
       <div class="rd-add-input">
         <TextInput
           size="sm"
           bind:value={urlRegexInput}
-          placeholder="e.g., /ads/.*"
+          placeholder="e.g., /ads/.* or /tracker"
           on:keydown={(e) => {
             if (e.key === "Enter") {
               e.preventDefault();
@@ -459,7 +584,16 @@
 
   <!-- Content Type -->
   <div class="rd-field">
-    <span class="rd-field-label">Content Type</span>
+    <span class="rd-field-label">
+      Content Type
+      {#if !mitmEffective}<span class="rd-info-badge">HTTPS requires MITM</span
+        >{/if}
+    </span>
+    <p class="rd-field-hint">
+      Match by response MIME type. If specified and the response content-type
+      doesn't match, the rule is skipped.
+      {#if !mitmEffective}Only evaluated on HTTP traffic when MITM is inactive.{/if}
+    </p>
     <div class="rd-add-row">
       <div class="rd-add-input">
         <ComboBox
@@ -494,81 +628,39 @@
     {/if}
   </div>
 
-  <!-- Users -->
-  <div class="rd-field">
-    <span class="rd-field-label">Users</span>
-    <div class="rd-add-row">
-      <div class="rd-add-input">
-        <ComboBox
-          size="sm"
-          items={availableUsers}
-          bind:selectedId={userSelectedId}
-          bind:value={userInput}
-          shouldFilterItem={shouldFilterUserItem}
-          placeholder="Search users (empty = all users)"
-          on:select={(e) => {
-            if (e.detail.selectedItem) addUser(e.detail.selectedItem.text);
-          }}
-          on:keydown={(e) => {
-            if (e.key === "Enter" && userInput) {
-              e.preventDefault();
-              addUser();
-            }
-          }}
-        />
-      </div>
-      <Button size="small" on:click={() => addUser()}>Add</Button>
-    </div>
-    {#if rule.users && rule.users.length > 0}
-      <div class="rd-tags">
-        {#each rule.users as user}
-          <Tag size="sm" filter on:close={() => removeUser(user)}>{user}</Tag>
-        {/each}
-      </div>
-    {/if}
-  </div>
-
   <hr />
 
-  <!-- Content Filtering -->
+  <!-- Matching Results -->
   <div class="rd-section-header">
-    <span class="rd-section-title">Content Filtering</span>
+    <span class="rd-section-title">Matching Results</span>
   </div>
 
   <p class="rd-filter-hint">
-    Scans page content on HTTP and HTTPS (with SSL Inspection) traffic.
+    When all match criteria above are satisfied, these results are applied.
+    Keywords can force a block even if the action is "Allow."
   </p>
-
-  <!-- SSL Inspection -->
-  <div class="rd-field">
-    <span class="rd-field-label">SSL Inspection</span>
-    <Dropdown
-      size="sm"
-      titleText=""
-      selectedId={rule.mitm_action}
-      on:select={(e) => {
-        rule.mitm_action = e.detail.selectedId;
-      }}
-      items={[
-        { id: "default", text: "Use Global Setting" },
-        { id: "enable", text: "Enable (Inspect HTTPS)" },
-        { id: "disable", text: "Disable (Pass Through)" },
-      ]}
-    />
-  </div>
 
   <!-- Keyword Filter Toggle -->
   <div class="rd-field">
     <div class="rd-toggle-card">
       <div class="rd-toggle-info">
-        <span class="rd-field-label" style="margin-bottom:0"
-          >Keyword Filter</span
-        >
-        <span class="rd-toggle-desc"
-          >{rule.keyword_filter_enabled
-            ? "Page text will be scanned for blocked keywords"
-            : "Keyword scanning is disabled for this rule"}</span
-        >
+        <span class="rd-field-label" style="margin-bottom:0">
+          Keyword Filter
+          {#if !mitmEffective}<span class="rd-info-badge"
+              >HTTPS requires MITM</span
+            >{/if}
+        </span>
+        <span class="rd-toggle-desc">
+          {#if !mitmEffective}
+            Keywords are scanned on HTTP traffic only when MITM is inactive.
+          {:else if rule.keyword_filter_enabled}
+            Page text will be scanned for blocked keywords. If the watermark
+            score is reached, the page is <strong>force-blocked</strong> regardless
+            of the rule action below.
+          {:else}
+            Keyword scanning is disabled for this rule.
+          {/if}
+        </span>
       </div>
       <Toggle
         size="sm"
@@ -578,6 +670,30 @@
         labelB=""
       />
     </div>
+  </div>
+
+  <!-- Action -->
+  <div class="rd-field">
+    <span class="rd-field-label">Rule Action</span>
+    <Dropdown
+      size="sm"
+      titleText=""
+      selectedId={rule.action}
+      on:select={(e) => {
+        rule.action = e.detail.selectedId;
+      }}
+      items={[
+        { id: "allow", text: "Allow" },
+        { id: "block", text: "Block" },
+      ]}
+    />
+    <p class="rd-field-hint">
+      {#if rule.action === "block"}
+        Matching requests will be blocked and shown a block page.
+      {:else}
+        Matching requests will be allowed through the proxy.
+      {/if}
+    </p>
   </div>
 
   <!-- Actions -->
@@ -609,6 +725,148 @@
       <InlineLoading description={saving ? "Saving..." : "Deleting..."} />
     </div>
   {/if}
+
+  <hr />
+
+  <!-- Rule Tester -->
+  <div class="rd-section-header">
+    <span class="rd-section-title">Rule Tester</span>
+  </div>
+
+  <p class="rd-filter-hint">
+    Test a URL against this rule's current configuration (no save required).
+    Enable <strong>Live Test</strong> to fetch the actual page and evaluate content-type
+    and keyword filters.
+  </p>
+
+  <div class="rd-field">
+    <span class="rd-field-label">Test URL</span>
+    <div class="rd-add-row">
+      <div class="rd-add-input">
+        <TextInput
+          size="sm"
+          bind:value={testUrl}
+          placeholder="e.g., https://example.com/path/page"
+          on:keydown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              testRule();
+            }
+          }}
+        />
+      </div>
+      <Button
+        size="small"
+        kind="secondary"
+        on:click={testRule}
+        disabled={testLoading}
+      >
+        {testLoading ? "Testing…" : "Test"}
+      </Button>
+    </div>
+
+    <div class="rt-options">
+      {#if rule.users && rule.users.length > 0}
+        <div class="rt-option">
+          <TextInput
+            size="sm"
+            bind:value={testUser}
+            placeholder="Test as user (optional)"
+            labelText="User"
+          />
+        </div>
+      {/if}
+    </div>
+
+    <div class="rt-live-row">
+      <span class="rt-live-hint">
+        Fetches URL from the server to test content-type & keywords
+      </span>
+    </div>
+
+    <div class="rt-live-toggle">
+      <Toggle
+        size="sm"
+        labelText="Live Test"
+        labelA="Off"
+        labelB="On"
+        bind:toggled={testLive}
+      />
+    </div>
+
+    {#if testLoading}
+      <div style="margin-top: 8px;">
+        <InlineLoading
+          description={testLive
+            ? "Fetching URL and evaluating…"
+            : "Evaluating rule…"}
+        />
+      </div>
+    {/if}
+
+    {#if testResult}
+      {#if testResult.error}
+        <div class="rt-result rt-error">{testResult.error}</div>
+      {:else}
+        <div
+          class="rt-result"
+          class:rt-block={testResult.outcome === "block"}
+          class:rt-allow={testResult.outcome === "allow"}
+          class:rt-skip={testResult.outcome === "skip" ||
+            testResult.outcome === "error"}
+        >
+          <div class="rt-outcome">{testResult.reason}</div>
+
+          {#if testResult.response_status}
+            <div class="rt-live-info">
+              <span class="rt-live-badge"
+                >HTTP {testResult.response_status}</span
+              >
+              {#if testResult.response_content_type}
+                <span class="rt-live-badge"
+                  >{testResult.response_content_type}</span
+                >
+              {/if}
+              {#if testResult.keyword_score > 0 || testResult.keyword_watermark > 0}
+                <span
+                  class="rt-live-badge"
+                  class:rt-live-badge-warn={testResult.keyword_score >
+                    testResult.keyword_watermark}
+                >
+                  Keywords: {testResult.keyword_score} / {testResult.keyword_watermark}
+                </span>
+              {/if}
+            </div>
+          {/if}
+
+          <div class="rt-steps">
+            {#each testResult.steps as s}
+              <div class="rt-step">
+                <span class="rt-step-num">{s.step}</span>
+                <span class="rt-step-name">{s.name}</span>
+                <span
+                  class="rt-step-icon"
+                  class:rt-pass={s.result === "pass" || s.result === "allow"}
+                  class:rt-fail={s.result === "fail" || s.result === "skip"}
+                  class:rt-info={s.result === "info"}
+                  class:rt-block-icon={s.result === "block"}
+                >
+                  {s.result === "pass" || s.result === "allow"
+                    ? "✓"
+                    : s.result === "fail" || s.result === "skip"
+                    ? "✗"
+                    : s.result === "block"
+                    ? "⊘"
+                    : "ℹ"}
+                </span>
+                <span class="rt-step-detail">{s.detail}</span>
+              </div>
+            {/each}
+          </div>
+        </div>
+      {/if}
+    {/if}
+  </div>
 </div>
 
 <style>
@@ -694,19 +952,6 @@
     color: #525252;
     letter-spacing: 0.02em;
     text-transform: uppercase;
-  }
-
-  .rd-badge-disabled {
-    display: inline-block;
-    font-size: 0.65rem;
-    font-weight: 600;
-    color: #8d8d8d;
-    background: #e0e0e0;
-    padding: 1px 8px;
-    border-radius: 10px;
-    letter-spacing: 0.03em;
-    text-transform: uppercase;
-    line-height: 1.4;
   }
 
   .rd-time-inputs {
@@ -795,6 +1040,43 @@
     font-style: italic;
   }
 
+  .rd-field-hint {
+    font-size: 0.75rem;
+    color: #6f6f6f;
+    margin: 4px 0 6px 0;
+  }
+
+  .rd-info-badge {
+    display: inline-block;
+    font-size: 0.65rem;
+    font-weight: 600;
+    color: #0043ce;
+    background: #edf5ff;
+    border: 1px solid #0043ce;
+    border-radius: 3px;
+    padding: 1px 6px;
+    margin-left: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    vertical-align: middle;
+  }
+
+  .rd-mitm-badge {
+    font-size: 0.75rem;
+    font-weight: 500;
+    margin-top: 6px;
+    padding: 4px 8px;
+    border-radius: 4px;
+  }
+  .rd-mitm-on {
+    color: #198038;
+    background: #defbe6;
+  }
+  .rd-mitm-off {
+    color: #da1e28;
+    background: #fff1f1;
+  }
+
   @media (max-width: 671px) {
     .rd-field {
       padding: 12px 12px;
@@ -824,5 +1106,143 @@
       max-width: 280px;
       width: 100%;
     }
+  }
+
+  /* Rule Tester */
+  .rt-result {
+    margin-top: 12px;
+    border-radius: 6px;
+    padding: 12px 14px;
+    font-size: 0.85rem;
+  }
+  .rt-error {
+    background: #fff1f1;
+    color: #da1e28;
+    border: 1px solid #da1e28;
+  }
+  .rt-block {
+    background: #fff1f1;
+    border: 1px solid #da1e28;
+  }
+  .rt-allow {
+    background: #defbe6;
+    border: 1px solid #198038;
+  }
+  .rt-skip {
+    background: #f4f4f4;
+    border: 1px solid #8d8d8d;
+  }
+  .rt-outcome {
+    font-weight: 600;
+    font-size: 0.9rem;
+    margin-bottom: 10px;
+  }
+  .rt-block .rt-outcome {
+    color: #da1e28;
+  }
+  .rt-allow .rt-outcome {
+    color: #198038;
+  }
+  .rt-skip .rt-outcome {
+    color: #525252;
+  }
+  .rt-steps {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .rt-step {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    font-size: 0.8rem;
+    line-height: 1.4;
+  }
+  .rt-step-num {
+    flex: 0 0 18px;
+    text-align: center;
+    font-weight: 600;
+    color: #525252;
+    font-size: 0.7rem;
+    background: #e0e0e0;
+    border-radius: 3px;
+    padding: 1px 0;
+    margin-top: 1px;
+  }
+  .rt-step-name {
+    flex: 0 0 100px;
+    font-weight: 600;
+    color: #393939;
+  }
+  .rt-step-icon {
+    flex: 0 0 16px;
+    text-align: center;
+    font-weight: 700;
+    font-size: 0.85rem;
+    margin-top: -1px;
+  }
+  .rt-pass {
+    color: #198038;
+  }
+  .rt-fail {
+    color: #da1e28;
+  }
+  .rt-info {
+    color: #0043ce;
+  }
+  .rt-block-icon {
+    color: #da1e28;
+  }
+  .rt-step-detail {
+    flex: 1;
+    color: #525252;
+    min-width: 0;
+  }
+
+  /* Rule Tester options & live info */
+  .rt-options {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px;
+    margin-top: 10px;
+  }
+  .rt-option {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .rt-live-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 10px;
+  }
+  .rt-live-toggle {
+    flex-shrink: 0;
+  }
+  .rt-live-hint {
+    font-size: 0.75rem;
+    color: #6f6f6f;
+  }
+  .rt-live-info {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 10px;
+  }
+  .rt-live-badge {
+    display: inline-block;
+    font-size: 0.75rem;
+    font-weight: 500;
+    padding: 2px 8px;
+    border-radius: 4px;
+    background: #e0e0e0;
+    color: #393939;
+  }
+  .rt-live-badge-warn {
+    background: #fff1f1;
+    color: #da1e28;
+    font-weight: 600;
   }
 </style>

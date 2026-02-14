@@ -1,39 +1,16 @@
 package gatesentry2responder
 
-// GetCssString returns minimal CSS for the GateSentry block page.
-// This replaces the full Material Design Lite framework (132KB) with only
-// the styles actually used by the block page template (~1.5KB).
+// GetCssString returns clean, modern CSS for the GateSentry block page.
 func GetCssString() string {
 	return `
 *,*::before,*::after{box-sizing:border-box}
-html,body{width:100%;height:100%;margin:0;padding:0;font-family:'Roboto',Helvetica,Arial,sans-serif;font-size:14px;font-weight:400;line-height:20px;color:rgba(0,0,0,.87)}
-main{display:block}
-img{vertical-align:middle}
-h4{font-size:24px;font-weight:400;line-height:32px;margin:0 0 16px}
-h5{font-size:20px;font-weight:500;line-height:1;margin:0 0 16px}
-p{font-size:14px;font-weight:400;line-height:24px;margin:0 0 16px}
-ul{font-size:14px;font-weight:400;line-height:24px}
-.mdl-layout__container{position:relative;width:100%;height:100%}
-.mdl-layout{width:100%;height:100%;display:flex;flex-direction:column;overflow-y:auto;overflow-x:hidden;position:relative}
-.mdl-layout--fixed-header{}
-.mdl-js-layout{}
-.mdl-layout__content{flex-grow:1;position:relative;display:inline-block;overflow-y:auto;overflow-x:hidden}
-.mdl-grid{display:flex;flex-flow:row wrap;margin:0 auto;align-items:stretch;padding:8px}
-.mdl-cell{box-sizing:border-box;margin:8px}
-.mdl-cell--2-col{width:calc(16.6666666667% - 16px)}
-.mdl-cell--8-col{width:calc(66.6666666667% - 16px)}
-.mdl-color--red{background-color:#f44336!important}
-.mdl-color--white{background-color:#fff!important}
-.mdl-color-text--grey-800{color:#424242!important}
-.mdl-shadow--4dp{box-shadow:0 4px 5px 0 rgba(0,0,0,.14),0 1px 10px 0 rgba(0,0,0,.12),0 2px 4px -1px rgba(0,0,0,.2)}
-@media (max-width:479px){
-.mdl-cell{width:calc(100% - 16px)}
-.mdl-cell--hide-phone{display:none!important}
-}
-@media (min-width:480px) and (max-width:839px){
-.mdl-cell--hide-tablet{display:none!important}
-.mdl-cell--2-col{width:calc(25% - 16px)}
-.mdl-cell--8-col{width:calc(100% - 16px)}
-}
+body{margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:14px;line-height:1.5;color:#333;background:#e53935;min-height:100vh;display:flex;align-items:center;justify-content:center}
+.block-card{background:#fff;border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,.18);max-width:540px;width:90%;margin:32px auto;padding:40px 36px;text-align:center}
+.block-card img{max-width:120px;margin:0 auto 20px}
+.block-card h1{font-size:22px;font-weight:600;color:#333;margin:0 0 12px}
+.block-card .msg{font-size:15px;color:#555;line-height:1.6;margin:0 0 8px}
+.block-card .msg strong{color:#c62828}
+.block-card .divider{width:60px;height:3px;background:#e53935;margin:16px auto;border-radius:2px}
+.block-card .footer{font-size:12px;color:#999;margin-top:20px}
 `
 }

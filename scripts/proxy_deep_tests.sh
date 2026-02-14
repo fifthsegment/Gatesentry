@@ -1003,12 +1003,16 @@ for r in data.get('rules', []):
         print_verbose "Response: $rule_resp"
     fi
 
-    # URL regex block rule — match criteria, does not require MITM (priority 15)
+    # URL regex block rule — URL patterns are match criteria (step 5 of pipeline).
+    # If URL matches patterns AND domain matches → rule action applied (block).
+    # If URL does NOT match → rule is skipped (falls through to next rule).
+    # MITM must be enabled for URL patterns to work on HTTPS.
     rule_resp=$(api_post "/rules" "{
         \"name\": \"PT: URL Regex Block\",
         \"enabled\": true,
         \"priority\": 15,
         \"action\": \"block\",
+        \"mitm_action\": \"enable\",
         \"domain_patterns\": [\"regex-test.example.com\"],
         \"url_regex_patterns\": [\".*blocked-path.*\", \".*\\\\.exe$\"],
         \"time_restriction\": {\"from\": \"00:00\", \"to\": \"23:59\"}
@@ -1370,6 +1374,73 @@ test_mitm() {
         print_fail "Via header missing in MITM response"
         print_verbose "Headers: $(echo "$headers" | head -15)"
     fi
+
+    # --- 3C: MITM "default" resolution tests ---
+    # When mitm_action="default", the effective MITM state should follow the
+    # global enable_https_filtering setting. This tests step 4 of the pipeline.
+
+    print_section "3C: MITM Default Resolution (Step 4)"
+
+    # Create a temporary rule with mitm_action=default for the echo server
+    local mitm_default_rule_id
+    local mitm_resp
+    mitm_resp=$(api_post "/rules" "{
+        \"name\": \"PT: MITM Default Test\",
+        \"enabled\": true,
+        \"priority\": 0,
+        \"action\": \"allow\",
+        \"mitm_action\": \"default\",
+        \"domain_patterns\": [\"httpbin.org\", \"127.0.0.1\"],
+        \"time_restriction\": {\"from\": \"00:00\", \"to\": \"23:59\"}
+    }")
+    mitm_default_rule_id=$(echo "$mitm_resp" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('rule',{}).get('id',''))" 2>/dev/null)
+
+    if [[ -z "$mitm_default_rule_id" ]]; then
+        print_skip "Failed to create MITM default test rule — skipping 3C"
+    else
+        print_info "Created MITM default test rule (priority 0): $mitm_default_rule_id"
+        sleep 0.5
+
+        # Test 3.5: With global MITM=true, default resolves to MITM enabled
+        # The global setting is already "true" from setup_test_environment
+        print_test "3.5 MITM default resolves to enabled when global=true"
+        local body
+        body=$(proxy_https "https://${ECHO_DOMAIN}:${HTTPS_ECHO_PORT}/index.html")
+        if echo "$body" | grep -q "GateSentry Proxy Test Page"; then
+            print_pass "MITM default → enabled: content visible through MITM"
+        else
+            print_fail "MITM default → enabled: content NOT visible (MITM may not be active)"
+            print_verbose "Body (first 300): $(echo "$body" | head -c 300)"
+        fi
+
+        # Test 3.6: With global MITM=false, default resolves to MITM disabled
+        # Set global to false, then test that content is NOT visible (passthrough)
+        api_post "/settings/enable_https_filtering" '{"key":"enable_https_filtering","value":"false"}' >/dev/null
+        sleep 1
+
+        print_test "3.6 MITM default resolves to disabled when global=false"
+        # With MITM off, the HTTPS connection goes through as a direct tunnel.
+        # We can detect this by checking if the certificate is the proxy's
+        # generated cert (MITM) vs the real/self-signed echo server cert.
+        local cert_info
+        cert_info=$(curl -v --proxy "${PROXY_URL}" --noproxy '' \
+            --insecure --max-time 10 \
+            "https://${ECHO_DOMAIN}:${HTTPS_ECHO_PORT}/" 2>&1 | grep -i "issuer" || echo "")
+        if echo "$cert_info" | grep -qi "gatesentry"; then
+            print_fail "MITM default → disabled: still seeing GateSentry cert (MITM still active)"
+        else
+            print_pass "MITM default → disabled: not seeing GateSentry cert (passthrough)"
+        fi
+
+        # Restore global MITM to true for remaining tests
+        api_post "/settings/enable_https_filtering" '{"key":"enable_https_filtering","value":"true"}' >/dev/null
+        sleep 0.5
+
+        # Clean up the MITM default test rule
+        api_delete "/rules/${mitm_default_rule_id}" >/dev/null 2>&1 || true
+        print_info "Cleaned up MITM default test rule"
+        sleep 0.5
+    fi
 }
 
 # =============================================================================
@@ -1627,12 +1698,17 @@ test_content_type_pipeline() {
     print_section "8A: Content-Type Match Criteria"
 
     # Create rule: block image/jpeg for echo server (priority 0, highest)
+    # The rule action is "block" — content-type is a MATCH CRITERION (step 6).
+    # If the response Content-Type matches image/jpeg, all criteria are satisfied
+    # and the rule's action (block) is applied (step 8). If the Content-Type
+    # does NOT match (e.g., text/html), the rule is skipped (falls through).
     local ct_rule_resp ct_rule_id
     ct_rule_resp=$(api_post "/rules" "{
         \"name\": \"PT: Block JPEG Content-Type\",
         \"enabled\": true,
         \"priority\": 0,
-        \"action\": \"allow\",
+        \"action\": \"block\",
+        \"mitm_action\": \"enable\",
         \"domain_patterns\": [\"httpbin.org\", \"127.0.0.1\"],
         \"blocked_content_types\": [\"image/jpeg\"],
         \"time_restriction\": {\"from\": \"00:00\", \"to\": \"23:59\"}
@@ -1788,10 +1864,13 @@ for r in data.get('rules', []):
         fi
     fi
 
-    # --- 9B: Functional tests — URL regex blocks matching requests ---
+    # --- 9B: Functional tests — URL regex as match criteria ---
     # We create a temporary rule on the echo server domain (127.0.0.1) with
-    # URL patterns that match specific paths. This rule uses action=block
-    # and priority 0 (highest) so it fires before the echo MITM rule.
+    # URL patterns that match specific paths. This rule uses action=block,
+    # mitm_action=enable, and priority 0 (highest) so it fires before the
+    # echo MITM rule. With the 8-step pipeline:
+    #   - Matching URL → step 5 passes → step 8 blocks
+    #   - Non-matching URL → step 5 skips rule → request falls through → allowed
 
     print_section "9B: URL Regex Functional Tests"
 
@@ -1801,6 +1880,7 @@ for r in data.get('rules', []):
         \"enabled\": true,
         \"priority\": 0,
         \"action\": \"block\",
+        \"mitm_action\": \"enable\",
         \"domain_patterns\": [\"httpbin.org\", \"127.0.0.1\"],
         \"url_regex_patterns\": [\".*blocked-path.*\", \".*\\\\.exe$\"],
         \"time_restriction\": {\"from\": \"00:00\", \"to\": \"23:59\"}
@@ -1834,20 +1914,38 @@ for r in data.get('rules', []):
             print_verbose "Body (first 300): $(echo "$body" | head -c 300)"
         fi
 
-        # Test 9.5: Non-matching URL passes through (index.html)
-        # Delete the functional rule first so the echo MITM rule (priority 1) takes over
+        # Test 9.5: Non-matching URL passes through (rule still active!)
+        # With the 8-step pipeline, URL patterns are MATCH CRITERIA (step 5).
+        # If patterns exist but NONE match the request URL, the rule is skipped
+        # and the request falls through. The echo MITM rule (priority 1) then
+        # matches and allows the request.
+        print_test "9.5 Non-matching URL passes through (URL pattern skips rule)"
+        body=$(proxy_http "http://127.0.0.1:${HTTP_ECHO_PORT}/index.html")
+        if echo "$body" | grep -q "GateSentry Proxy Test Page"; then
+            print_pass "Non-matching URL passed through (rule skipped by step 5)"
+        else
+            if grep -qi "blocked\|GateSentry Web Filter" <<< "$body"; then
+                print_fail "Non-matching URL was BLOCKED — step 5 skip-rule not working"
+            else
+                print_fail "Non-matching URL gave unexpected response"
+            fi
+            print_verbose "Body (first 300): $(echo "$body" | head -c 300)"
+        fi
+
+        # Test 9.6: Another non-matching URL (no .exe, no blocked-path)
+        print_test "9.6 URL with safe extension passes through"
+        body=$(proxy_http "http://127.0.0.1:${HTTP_ECHO_PORT}/style.css")
+        if echo "$body" | grep -q "font-family"; then
+            print_pass "CSS file passed through (URL pattern didn't match)"
+        else
+            print_fail "CSS file was blocked or modified"
+            print_verbose "Body (first 300): $(echo "$body" | head -c 300)"
+        fi
+
+        # Clean up the functional test rule
         api_delete "/rules/${ur_rule_id}" >/dev/null 2>&1 || true
         print_info "Cleaned up URL regex functional rule"
         sleep 0.5
-
-        print_test "9.5 Non-matching URL passes through after rule removal"
-        body=$(proxy_http "http://127.0.0.1:${HTTP_ECHO_PORT}/index.html")
-        if echo "$body" | grep -q "GateSentry Proxy Test Page"; then
-            print_pass "Non-matching URL passed through correctly"
-        else
-            print_fail "Non-matching URL was unexpectedly blocked"
-            print_verbose "Body (first 300): $(echo "$body" | head -c 300)"
-        fi
 
         # Rule already deleted above
         ur_rule_id=""
@@ -1923,9 +2021,9 @@ test_block_pages() {
 
 test_rule_priority() {
     should_run "rule-priority" || return 0
-    print_header "Section 11: Rule Priority (First-Match-Wins)"
+    print_header "Section 11: Rule Priority & Pipeline (First-Match-Wins)"
 
-    # Test 12.1: Verify our test rules are in correct priority order
+    # Test 11.1: Verify our test rules are in correct priority order
     print_test "11.1 Test rules have correct priority ordering"
     local rules
     rules=$(api_get "/rules")
@@ -1945,24 +2043,74 @@ for p, n in test_rules:
         print_fail "Could not read test rule priorities"
     fi
 
-    # Test 12.2: Higher priority allow rule should override lower priority block rule
-    # PT: No MITM Passthrough (priority 3) — allow passthrough-test.example.com
-    # PT: Allow Test Pattern (priority 5) — allow allowed-test.example.com
-    # PT: Block Test Domains (priority 10) — block from test domain list
-    # If a domain is in both allow (priority 5) and block (priority 10), allow wins
-    print_test "11.2 Rules are evaluated in priority order (first match wins)"
-    # Check that the rules have different priorities
-    local rule_count
-    rule_count=$(echo "$rules" | python3 -c "
-import sys, json
-data = json.load(sys.stdin)
-test_rules = [r for r in data.get('rules', []) if r['name'].startswith('PT:')]
-print(len(test_rules))
-" 2>/dev/null)
-    if [[ "$rule_count" -ge 3 ]]; then
-        print_pass "Multiple test rules exist with different priorities ($rule_count rules)"
+    # Test 11.2: Higher priority allow overrides lower priority block
+    # Create: allow rule at priority 0 for echo server, block rule at priority 2
+    print_section "11B: Priority Functional Tests"
+
+    local pri_allow_id pri_block_id
+    local pri_resp
+
+    pri_resp=$(api_post "/rules" "{
+        \"name\": \"PT: Priority Allow\",
+        \"enabled\": true,
+        \"priority\": 0,
+        \"action\": \"allow\",
+        \"mitm_action\": \"enable\",
+        \"domain_patterns\": [\"127.0.0.1\"],
+        \"time_restriction\": {\"from\": \"00:00\", \"to\": \"23:59\"}
+    }")
+    pri_allow_id=$(echo "$pri_resp" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('rule',{}).get('id',''))" 2>/dev/null)
+
+    pri_resp=$(api_post "/rules" "{
+        \"name\": \"PT: Priority Block\",
+        \"enabled\": true,
+        \"priority\": 2,
+        \"action\": \"block\",
+        \"mitm_action\": \"enable\",
+        \"domain_patterns\": [\"127.0.0.1\"],
+        \"time_restriction\": {\"from\": \"00:00\", \"to\": \"23:59\"}
+    }")
+    pri_block_id=$(echo "$pri_resp" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('rule',{}).get('id',''))" 2>/dev/null)
+
+    if [[ -z "$pri_allow_id" || -z "$pri_block_id" ]]; then
+        print_skip "Failed to create priority test rules — skipping 11B"
     else
-        print_fail "Expected at least 3 test rules, found $rule_count"
+        print_info "Created priority allow (p=0): $pri_allow_id, block (p=2): $pri_block_id"
+        sleep 0.5
+
+        # 11.2: Allow rule (priority 0) takes precedence over block rule (priority 2)
+        print_test "11.2 Higher priority allow rule overrides lower priority block"
+        local body
+        body=$(proxy_http "http://127.0.0.1:${HTTP_ECHO_PORT}/index.html")
+        if echo "$body" | grep -q "GateSentry Proxy Test Page"; then
+            print_pass "Allow rule (priority 0) took precedence — request passed through"
+        else
+            if grep -qi "blocked\|GateSentry Web Filter" <<< "$body"; then
+                print_fail "Block rule (priority 2) fired instead of allow (priority 0)"
+            else
+                print_fail "Unexpected response for priority test"
+            fi
+            print_verbose "Body (first 300): $(echo "$body" | head -c 300)"
+        fi
+
+        # 11.3: Delete the allow rule — now block rule should take effect
+        api_delete "/rules/${pri_allow_id}" >/dev/null 2>&1 || true
+        pri_allow_id=""
+        sleep 0.5
+
+        print_test "11.3 After removing allow rule, block rule takes effect"
+        body=$(proxy_http "http://127.0.0.1:${HTTP_ECHO_PORT}/index.html")
+        if grep -qi "blocked\|GateSentry Web Filter" <<< "$body"; then
+            print_pass "Block rule now active after allow rule removal"
+        else
+            print_fail "Block rule did not take effect after allow rule removal"
+            print_verbose "Body (first 300): $(echo "$body" | head -c 300)"
+        fi
+
+        # Clean up
+        [[ -n "$pri_allow_id" ]] && api_delete "/rules/${pri_allow_id}" >/dev/null 2>&1 || true
+        [[ -n "$pri_block_id" ]] && api_delete "/rules/${pri_block_id}" >/dev/null 2>&1 || true
+        sleep 0.5
     fi
 }
 

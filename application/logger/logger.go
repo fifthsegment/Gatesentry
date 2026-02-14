@@ -115,6 +115,31 @@ func NewLogger(LogLocation string) *Log {
 	l.Database = db
 	l.LogLocation = LogLocation
 	l.LastCommitTime = time.Now()
+
+	// Shrink the database on startup to purge expired entries and reclaim disk space
+	go func() {
+		log.Println("[Logger] Running startup database shrink...")
+		if err := db.Shrink(); err != nil {
+			log.Println("[Logger] Startup shrink error:", err)
+		} else {
+			log.Println("[Logger] Startup shrink complete")
+		}
+	}()
+
+	// Periodic maintenance: shrink every 6 hours
+	go func() {
+		ticker := time.NewTicker(6 * time.Hour)
+		defer ticker.Stop()
+		for range ticker.C {
+			log.Println("[Logger] Running periodic database shrink...")
+			if err := db.Shrink(); err != nil {
+				log.Println("[Logger] Periodic shrink error:", err)
+			} else {
+				log.Println("[Logger] Periodic shrink complete")
+			}
+		}
+	}()
+
 	return l
 }
 
@@ -266,7 +291,13 @@ func (L *Log) GetLogSearch(search string) string {
 // When a groupByFormat is provided the return type is map[string][]LogEntry
 // where the key is the formatted local-time bucket string.
 func (L *Log) GetLastXSecondsDNSLogs(fromSeconds int64, groupByFormat string) (interface{}, error) {
-	var logs interface{} // The return type can be either []LogEntry or map[string][]LogEntry
+	var logSlice []LogEntry
+	var logMap map[string][]LogEntry
+
+	useGrouping := groupByFormat != ""
+	if useGrouping {
+		logMap = make(map[string][]LogEntry)
+	}
 
 	now := time.Now()
 	totime := now.Unix()
@@ -279,44 +310,36 @@ func (L *Log) GetLastXSecondsDNSLogs(fromSeconds int64, groupByFormat string) (i
 
 	L.Database.View(func(tx *buntdb.Tx) error {
 		return tx.DescendRange("entries", `{"time":`+to+`}`, `{"time":`+from+`}`, func(key, value string) bool {
-			var parsedValue map[string]interface{}
-			if err := json.Unmarshal([]byte(value), &parsedValue); err != nil {
+			var logEntry LogEntry
+			if err := json.Unmarshal([]byte(value), &logEntry); err != nil {
 				return true // Continue iterating
 			}
 
-			if v, ok := parsedValue["type"]; ok && (v == "dns" || v == "proxy") {
-				var logEntry LogEntry
-				if err := json.Unmarshal([]byte(value), &logEntry); err != nil {
-					log.Println("[LogViewer] Error parsing log entry: " + err.Error() + " - " + value)
-					return true // Continue iterating
-				}
-				if logEntry.Type == "proxy" {
-					logEntry.URL = strings.Replace(logEntry.URL, "http://", "", -1)
-					logEntry.URL = strings.Replace(logEntry.URL, ":443", "", -1)
-				}
-				if groupByFormat != "" {
-					// Group entries by the requested time bucket (local time)
-					if logs == nil {
-						logs = make(map[string][]LogEntry)
-					}
-					bucket := time.Unix(logEntry.Time, 0).Local().Format(groupByFormat)
-					logs.(map[string][]LogEntry)[bucket] = append(logs.(map[string][]LogEntry)[bucket], logEntry)
-				} else {
-					// No grouping, add directly to the slice
-					if logs == nil {
-						logs = []LogEntry{}
-					}
-					logs = append(logs.([]LogEntry), logEntry)
-				}
+			if logEntry.Type != "dns" && logEntry.Type != "proxy" {
+				return true
+			}
 
+			if logEntry.Type == "proxy" {
+				logEntry.URL = strings.Replace(logEntry.URL, "http://", "", -1)
+				logEntry.URL = strings.Replace(logEntry.URL, ":443", "", -1)
+			}
+
+			if useGrouping {
+				bucket := time.Unix(logEntry.Time, 0).Local().Format(groupByFormat)
+				logMap[bucket] = append(logMap[bucket], logEntry)
+			} else {
+				logSlice = append(logSlice, logEntry)
 			}
 
 			return true
 		})
 	})
-	if logs == nil {
-		logs = []LogEntry{}
-	}
 
-	return logs, nil
+	if useGrouping {
+		return logMap, nil
+	}
+	if logSlice == nil {
+		logSlice = []LogEntry{}
+	}
+	return logSlice, nil
 }

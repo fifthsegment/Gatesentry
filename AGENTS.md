@@ -84,32 +84,71 @@ The `blockedDomainMiddleware` in `webserver.go` intercepts requests where the HT
 
 ## Proxy Rule Architecture
 
-### Rule Actions and Content Filtering
+### Overview
 
-- **Action: "block"** — The matched domain is blocked outright. No content filtering applies because the connection is refused before any content is fetched.
-- **Action: "allow"** — The matched domain is allowed through the proxy. Content filtering options (keyword scanning, content-type blocking, URL regex blocking, embedded resource blocking) are **only evaluated on allow rules**.
+All filtering is scoped to individual rules. There are no global filtering pipelines. Rules are evaluated in **priority order** (lower number = higher priority). The first rule that fully matches a request is applied — subsequent rules are skipped.
 
-**Important**: Content Filtering Options in the UI are hidden when the rule action is "Block" because those filters never execute — a blocked domain never reaches the content pipeline. Always set action to "Allow" before configuring content filters.
+### HTTPS Visibility
 
-### Per-Rule Filtering (No Global Filters)
+The proxy's ability to inspect traffic depends on whether SSL MITM (Man-in-the-Middle) inspection is active:
 
-All filtering is scoped to individual rules. There are no global filtering pipelines:
+| What the proxy sees          | HTTP | HTTPS (no MITM) | HTTPS (MITM) |
+|------------------------------|------|------------------|---------------|
+| Domain / hostname            | ✅   | ✅               | ✅            |
+| URL path & query string      | ✅   | ❌               | ✅            |
+| Response Content-Type header | ✅   | ❌               | ✅            |
+| Response body (for keywords) | ✅   | ❌               | ✅            |
 
-- **Content-type blocking** — A **request-level** filter (not a content filter). When the browser fetches a sub-resource (e.g. `<img src="photo.jpeg">`), that is a separate proxy request. The proxy checks the **response** Content-Type header against `blocked_content_types` on the matched rule. If it matches (e.g. `image/jpeg`), the response is blocked with a 403. In the UI, this is in the general rule definition area, not under Content Filtering Options. Enforcement is in `proxy.go` after response headers are read, using `sendInsecureBlockBytes()` for images.
-- **Keyword scanning** — A **content filter**. Controlled by `keyword_filter_enabled` on each rule. The proxy only calls `ScanText` when the matched rule has this flag set (`isKeywordFilterEnabled()` in `proxy.go`). Requires MITM for HTTPS.
-- **URL regex blocking** — Auto-derived from `url_regex_patterns` array on the rule.
-- **Embedded resource blocking** — Auto-derived from `content_domain_lists` array on the rule.
-- **SSL Inspection (MITM)** — Must be enabled (`mitm_action: "enable"`) for content filters (keyword, URL regex, domain list) to function on HTTPS traffic. Content-type blocking works without MITM since it only reads response headers.
+Because virtually all sites are HTTPS, **MITM must be enabled** for URL patterns, content-type matching, and keyword scanning to function.
 
-The legacy `block_type` enum field still exists on the `Rule` struct for backward compatibility but is **no longer used** in matching logic. Filters are auto-derived from populated fields in `MatchRule()` (`application/rules.go`).
+### MITM Setting Resolution
 
-### Rule Evaluation Flow
+Each rule has a `mitm_action` field with three possible values:
+- `"enable"` — Always MITM this traffic (decrypt HTTPS)
+- `"disable"` — Never MITM (pass-through encrypted tunnel)
+- `"default"` — Use the **global setting** (`enable_https_filtering` in GSSettings)
 
-1. Request arrives at proxy → `matchRuleForRequest()` finds first matching rule by priority
-2. If rule action is "block" → serve block page, done
-3. If rule action is "allow" → proxy the request, populate `RuleMatch` with filter config
-4. Response arrives → content pipeline checks `RuleMatch` for active filters
-5. Each filter (keyword, content-type, URL regex, domain list) only runs if the matched rule has data for it
+The resolved MITM state determines whether steps 5–7 below can execute.
+
+### Rule Evaluation Flow (8-Step Pipeline)
+
+For each incoming proxy request, rules are evaluated in priority order:
+
+1. **Check rule status** — If the rule is disabled, or the current local time is outside the rule's active hours window, **skip this rule**.
+
+2. **Check user list** — If the rule's user list is empty, it applies to all users. If non-empty and the requesting user is NOT in the list, **skip this rule**.
+
+3. **Check domain match** — Compare the request hostname against the rule's Domain Patterns and Domain Lists. If both are empty (catch-all rule), the domain matches. If non-empty and the domain does NOT match any pattern or list, **skip this rule**.
+
+4. **Resolve MITM** — Determine the effective MITM state for this rule: `"enable"` → MITM on, `"disable"` → MITM off, `"default"` → use global `enable_https_filtering` setting. If MITM is off AND the request is HTTPS, steps 5–7 are **skipped** (the proxy cannot see URL paths, content-types, or body content through an encrypted tunnel) — proceed directly to step 8. **HTTP requests always pass through steps 5–7** regardless of the MITM setting.
+
+5. **Check URL patterns** *(always for HTTP; requires MITM for HTTPS)* — If the rule has `url_regex_patterns`, match them against the full request URL. If non-empty and NO pattern matches, **skip this rule** (fall through to next rule). If empty, this criterion is not evaluated (effective match).
+
+6. **Check content-type** *(always for HTTP; requires MITM for HTTPS)* — If the rule has `blocked_content_types`, match them against the response `Content-Type` header. If non-empty and NO type matches, **skip this rule**. If empty, this criterion is not evaluated (effective match).
+
+7. **Check keyword filter** *(always for HTTP; requires MITM for HTTPS)* — If `keyword_filter_enabled` is true, scan the response body for blocked keywords. If the keyword score exceeds the watermark threshold, **force a Block action** regardless of the rule's configured action. If below the watermark, continue to step 8.
+
+8. **Apply rule action** — All match criteria are satisfied. Apply the rule's action:
+   - `"allow"` → Proxy the request normally, deliver the response to the client.
+   - `"block"` → Serve a block page. The response body (if any) is discarded.
+
+If **no rule matches** after evaluating all rules, the request is allowed through (default-allow).
+
+### Implementation Notes
+
+- Steps 1–3 happen in `application/rules.go` → `MatchRule()` (pre-proxy, domain-level match).
+- Step 4 is resolved partly in `rules.go` (`ShouldMITM` field) and partly in `proxy.go` (global fallback for `"default"`).
+- Steps 5–7 happen in `gatesentryproxy/proxy.go` **after** the request has been proxied and the response headers/body are available. They are "post-response match criteria" — if they don't match, the rule is conceptually skipped (but since the request is already in flight, the proxy falls back to allowing it).
+- Step 8's block action at the domain level (step 3 match + no MITM-dependent criteria) short-circuits in `proxy.go` before the request is proxied.
+
+### UI Form Layout
+
+The rule form (`ui/src/routes/rules/rform.svelte`) is organized to match this pipeline:
+
+1. **Rule Definition** — Name, enabled toggle, active hours, MITM setting, description
+2. **User Match Criteria** — User list (empty = all users)
+3. **Rule Selection Criteria** — Domain patterns, domain lists, URL patterns, content-type. URL patterns and content-type show an informational "HTTPS requires MITM" badge when MITM is off (fields remain editable since they always work on HTTP).
+4. **Matching Results** — Keyword filter toggle (shows "HTTPS requires MITM" badge when MITM is off, remains editable) and final action (Allow / Block).
 
 ## Current Work In Progress
 

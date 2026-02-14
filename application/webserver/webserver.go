@@ -604,6 +604,19 @@ func RegisterEndpointsStartServer(
 	})
 	log.Println("Domain list API endpoints registered")
 
+	// Test endpoints (rule pipeline tester, domain lookup)
+	log.Println("Initializing test endpoints...")
+	gatesentryWebserverEndpoints.InitTestEndpoints(internalSettings, Filters)
+	log.Println("Test endpoints initialized")
+
+	internalServer.Post("/api/test/rule-match", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiTestRuleMatch(w, r)
+	})
+	internalServer.Post("/api/test/domain-lookup", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiTestDomainLookup(w, r)
+	})
+	log.Println("Test API endpoints registered")
+
 	// Device inventory endpoints
 	log.Println("Registering device API endpoints...")
 	internalServer.Get("/api/devices", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {

@@ -1,5 +1,7 @@
 package gatesentryproxy
 
+import "sync"
+
 type GSProxyPassthru struct {
 	UserData         interface{}
 	DontTouch        bool
@@ -18,8 +20,9 @@ type GSHandler struct {
 }
 
 type GSUserCached struct {
-	User string
-	Pass string
+	User     string
+	Pass     string
+	CachedAt int64
 }
 
 type GSProxy struct {
@@ -35,9 +38,9 @@ type GSProxy struct {
 	IsAuthEnabled        func() bool
 	LogHandler           func(GSLogData)
 	RuleMatchHandler     func(domain string, user string) interface{} // Returns RuleMatch
-	RuleBlockPageHandler func(domain string) []byte                   // Build HTML block page for rule-based domain blocks
+	RuleBlockPageHandler func(domain string, ruleName string) []byte  // Build HTML block page for rule-based domain blocks
 	Handlers             map[string][]*GSHandler
-	UsersCache           map[string]GSUserCached
+	UsersCache           sync.Map
 }
 
 // For the refactored filter input

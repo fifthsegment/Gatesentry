@@ -1,15 +1,18 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"log"
 	"net"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"errors"
@@ -29,7 +32,7 @@ var GSPROXYPORT = "10413"
 var GSWEBADMINPORT = "80"
 var GSBASEDIR = ""
 var Baseendpointv2 = "https://www.gatesentryfilter.com/api/"
-var GATESENTRY_VERSION = "2.0.0-alpha.1"
+var GATESENTRY_VERSION = "2.0.0-alpha.6"
 var GS_BOUND_ADDRESS = ":"
 var R *application.GSRuntime
 
@@ -380,10 +383,12 @@ func RunGateSentry() {
 		return match
 	}
 
-	ngp.RuleBlockPageHandler = func(domain string) []byte {
-		return []byte(gresponder.BuildGeneralResponsePage([]string{
-			"Unable to fulfill your request because <strong>" + domain + "</strong> is blocked by a proxy rule.",
-		}, -1))
+	ngp.RuleBlockPageHandler = func(domain string, ruleName string) []byte {
+		msg := "Unable to fulfill your request because <strong>" + domain + "</strong> is blocked by a proxy rule."
+		if ruleName != "" {
+			msg += "<br/>Rule: <strong>" + ruleName + "</strong>"
+		}
+		return []byte(gresponder.BuildGeneralResponsePage([]string{msg}, -1))
 	}
 
 	ngp.ProxyErrorHandler = func(gafd *gatesentryproxy.GSProxyErrorData) {
@@ -434,6 +439,7 @@ func RunGateSentry() {
 		}
 		<-ttt.C
 	}
+	ttt.Stop()
 
 	// if portavailable {}
 
@@ -817,8 +823,30 @@ func RunGateSentry() {
 
 	server := http.Server{Handler: proxyHandler}
 	log.Printf("Starting up...Listening on = %s", addr)
-	err = server.Serve(tcpKeepAliveListener{proxyListener.(*net.TCPListener)})
-	log.Fatal(err)
+
+	// Start the proxy server in a goroutine so we can handle shutdown signals
+	go func() {
+		if err := server.Serve(tcpKeepAliveListener{proxyListener.(*net.TCPListener)}); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Proxy server error: %v", err)
+		}
+	}()
+
+	// Wait for shutdown signal (SIGTERM from Docker, SIGINT from Ctrl+C)
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGINT)
+	sig := <-sigChan
+	log.Printf("Received signal %v, shutting down gracefully...", sig)
+
+	// Give active connections up to 10 seconds to finish
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer shutdownCancel()
+
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		log.Printf("Proxy server shutdown error: %v", err)
+	}
+
+	application.Stop()
+	log.Println("GateSentry stopped.")
 
 }
 

@@ -82,12 +82,6 @@ func GSApiRuleCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate rule — must have at least one domain matching criterion
-	if rule.Domain == "" && len(rule.DomainPatterns) == 0 && len(rule.DomainLists) == 0 {
-		http.Error(w, "At least one domain pattern or domain list is required", http.StatusBadRequest)
-		return
-	}
-
 	createdRule, err := ruleManager.AddRule(rule)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -117,12 +111,6 @@ func GSApiRuleUpdate(w http.ResponseWriter, r *http.Request) {
 	err := json.NewDecoder(r.Body).Decode(&rule)
 	if err != nil {
 		http.Error(w, "Invalid request body: "+err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	// Validate rule — must have at least one domain matching criterion
-	if rule.Domain == "" && len(rule.DomainPatterns) == 0 && len(rule.DomainLists) == 0 {
-		http.Error(w, "At least one domain pattern or domain list is required", http.StatusBadRequest)
 		return
 	}
 
