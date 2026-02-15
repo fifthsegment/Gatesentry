@@ -497,6 +497,10 @@ func isDomainBlocked(domain string) bool {
 }
 
 func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
+	queryStart := time.Now()
+	dnsMetrics.QueriesTotal.Add(1)
+	defer func() { dnsMetrics.QueryDuration.Observe(time.Since(queryStart)) }()
+
 	// Check if server is running (atomic read - no lock needed)
 	if !serverRunning.Load() {
 		log.Println("DNS server is not running")
@@ -508,6 +512,7 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 	// UPDATE messages have a different structure (zone section, update section)
 	// and are handled entirely separately from standard queries.
 	if r.Opcode == dns.OpcodeUpdate {
+		dnsMetrics.QueriesDDNS.Add(1)
 		handleDDNSUpdate(w, r)
 		return
 	}
@@ -544,6 +549,7 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 			}
 
 			if len(records) > 0 {
+				dnsMetrics.QueriesDevice.Add(1)
 				log.Printf("[DNS] Device store hit: %s %s (%d records)",
 					domain, dns.TypeToString[q.Qtype], len(records))
 				response := new(dns.Msg)
@@ -571,6 +577,7 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 			lowerDomain := strings.ToLower(domain)
 			if lowerDomain == "wpad" || strings.HasPrefix(lowerDomain, "wpad.") {
 				if localIp != "" {
+					dnsMetrics.QueriesWPAD.Add(1)
 					log.Printf("[DNS] WPAD intercept: %s → %s", domain, localIp)
 					response := new(dns.Msg)
 					response.SetRcode(r, dns.RcodeSuccess)
@@ -604,11 +611,13 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 
 		// LogQuery(domain)
 		if isException {
+			dnsMetrics.QueriesException.Add(1)
 			log.Println("Domain is exception : ", domain)
 			logger.LogDNS(domain, "dns", "exception")
 			emitRequestEvent(domain, dns.TypeToString[q.Qtype], "exception", false)
 
 		} else if isInternal {
+			dnsMetrics.QueriesInternal.Add(1)
 			log.Println("Domain is internal : ", domain, " - ", internalIP)
 			response := new(dns.Msg)
 			response.SetRcode(r, dns.RcodeSuccess)
@@ -621,6 +630,7 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 			w.WriteMsg(response)
 			return
 		} else if isBlocked && dnsFilteringEnabled.Load() {
+			dnsMetrics.QueriesBlocked.Add(1)
 			log.Println("[DNS] Domain is blocked : ", domain)
 			response := new(dns.Msg)
 			response.SetRcode(r, dns.RcodeSuccess)
@@ -642,6 +652,7 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 		// Check cache first — avoids upstream round-trip for repeated queries.
 		if dnsResponseCache != nil {
 			if cached := dnsResponseCache.Get(q.Name, q.Qtype); cached != nil {
+				dnsMetrics.QueriesCached.Add(1)
 				cached.SetReply(r)
 				cached.Authoritative = false
 				logger.LogDNS(domain, "dns", "cached")
@@ -660,6 +671,7 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 		useTCP := w.LocalAddr().Network() == "tcp"
 		resp, err := forwardDNSRequest(r, useTCP)
 		if err != nil {
+			dnsMetrics.QueriesError.Add(1)
 			log.Println("[DNS] Error forwarding DNS request:", err)
 			// Send SERVFAIL response instead of silently dropping the request.
 			errMsg := new(dns.Msg)
@@ -673,6 +685,7 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 		if dnsResponseCache != nil {
 			dnsResponseCache.Put(q.Name, q.Qtype, resp)
 		}
+		dnsMetrics.QueriesForwarded.Add(1)
 		emitRequestEvent(domain, dns.TypeToString[q.Qtype], "forwarded", false)
 
 		// Phase 4: Propagate the upstream rcode (NXDOMAIN, NOERROR, etc.)
@@ -703,7 +716,10 @@ func forwardDNSRequest(r *dns.Msg, useTCP bool) (*dns.Msg, error) {
 		c.Net = "tcp"
 	}
 
-	resp, _, err := c.Exchange(r, externalResolver)
+	resp, rtt, err := c.Exchange(r, externalResolver)
+	if rtt > 0 {
+		dnsMetrics.UpstreamDuration.Observe(rtt)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -713,7 +729,10 @@ func forwardDNSRequest(r *dns.Msg, useTCP bool) (*dns.Msg, error) {
 	if resp.Truncated && !useTCP {
 		log.Println("[DNS] Response truncated, retrying with TCP")
 		c.Net = "tcp"
-		tcpResp, _, tcpErr := c.Exchange(r, externalResolver)
+		tcpResp, tcpRTT, tcpErr := c.Exchange(r, externalResolver)
+		if tcpRTT > 0 {
+			dnsMetrics.UpstreamDuration.Observe(tcpRTT)
+		}
 		if tcpErr != nil {
 			// TCP retry failed, return the truncated UDP response
 			log.Println("[DNS] TCP retry failed:", tcpErr)

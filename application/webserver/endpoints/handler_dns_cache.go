@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"time"
 
 	dnscache "bitbucket.org/abdullah_irfan/gatesentryf/dns/cache"
 	gatesentryDnsServer "bitbucket.org/abdullah_irfan/gatesentryf/dns/server"
@@ -118,12 +119,30 @@ func GSApiDNSEvents(w http.ResponseWriter, r *http.Request) {
 	flusher.Flush()
 
 	ctx := r.Context()
+	heartbeat := time.NewTicker(30 * time.Second)
+	defer heartbeat.Stop()
+	maxDuration := time.NewTimer(4 * time.Hour)
+	defer maxDuration.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
 			// Client disconnected.
 			return
+		case <-maxDuration.C:
+			// Force client to reconnect after max duration to re-validate JWT
+			fmt.Fprintf(w, "event: reconnect\ndata: {\"reason\":\"max_duration\"}\n\n")
+			flusher.Flush()
+			return
+		case <-heartbeat.C:
+			// SSE comment heartbeat to detect dead TCP connections.
+			// Without this, idle connections with disconnected clients
+			// block forever as zombie goroutines.
+			_, err := fmt.Fprintf(w, ": heartbeat %d\n\n", time.Now().Unix())
+			if err != nil {
+				return // write failed — client disconnected
+			}
+			flusher.Flush()
 		case evt, ok := <-ch:
 			if !ok {
 				// Channel closed — cache or event bus shutting down.

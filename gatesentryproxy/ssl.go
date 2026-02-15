@@ -126,6 +126,7 @@ func newHijackedConn(w http.ResponseWriter) (*hijackedConn, error) {
 func HandleSSLBump(r *http.Request, w http.ResponseWriter, user string, authUser string, passthru *GSProxyPassthru, gsproxy *GSProxy) {
 	conn, err := newHijackedConn(w)
 	if err != nil {
+		Metrics.ErrorsHijack.Add(1)
 		log.Printf("Error hijacking connection for CONNECT request to %s: %v", r.URL.Host, err)
 		errorData := &GSProxyErrorData{
 			Error: "Error hijacking connection for CONNECT request to " + r.URL.Host + ": " + err.Error(),
@@ -153,8 +154,8 @@ func HandleSSLConnectDirect(r *http.Request, w http.ResponseWriter, user string,
 // ConnectDirect connects to serverAddr and copies data between it and conn.
 // extraData is sent to the server first.
 func ConnectDirect(conn net.Conn, serverAddr string, extraData []byte, gpt *GSProxyPassthru) (uploaded, downloaded int64) {
-	// activeConnections.Add(1)
-	// defer activeConnections.Done()
+	Metrics.ActiveDirect.Add(1)
+	defer Metrics.ActiveDirect.Add(-1)
 	log.Println("Running a CONNECTDIRECT TCP to " + serverAddr)
 	serverConn, err := safeDialContext(context.Background(), "tcp", serverAddr)
 
@@ -241,11 +242,15 @@ func ConnectDirect(conn net.Conn, serverAddr string, extraData []byte, gpt *GSPr
 // If clientHelloData is provided (non-nil), it will be used instead of reading
 // from the connection (used in transparent proxy mode where ClientHello was already read).
 func SSLBump(conn net.Conn, serverAddr, user, authUser string, r *http.Request, gpt *GSProxyPassthru, gsproxy *GSProxy, clientHelloData []byte) {
+	Metrics.ActiveMITM.Add(1)
+	defer Metrics.ActiveMITM.Add(-1)
+
 	if DebugLogging {
 		log.Printf("[SSL] Performing a SSL Bump")
 	}
 	defer func() {
 		if err := recover(); err != nil {
+			Metrics.ErrorsPanic.Add(1)
 			bufPtr := GetSmallBuffer()
 			buf := *bufPtr
 			n := runtime.Stack(buf, false)
@@ -314,6 +319,12 @@ func SSLBump(conn net.Conn, serverAddr, user, authUser string, r *http.Request, 
 	cert, rt := CertCache.Get(serverName, serverAddr)
 	cachedCert := rt != nil
 
+	if cachedCert {
+		Metrics.CertCacheHits.Add(1)
+	} else {
+		Metrics.CertCacheMisses.Add(1)
+	}
+
 	if !cachedCert {
 		serverConn, err := tls.Dial("tcp", serverAddr, &tls.Config{
 			ServerName:         serverName,
@@ -321,6 +332,7 @@ func SSLBump(conn net.Conn, serverAddr, user, authUser string, r *http.Request, 
 			NextProtos:         []string{"h2", "http/1.1"},
 		})
 		if err != nil {
+			Metrics.ErrorsTLS.Add(1)
 			GSLogSSL(user, serverAddr, serverName, err, true)
 			// conf = nil
 			ConnectDirect(conn, serverAddr, clientHello, gpt)
@@ -379,6 +391,7 @@ func SSLBump(conn net.Conn, serverAddr, user, authUser string, r *http.Request, 
 	tlsConn := tls.Server(&insertingConn{conn, clientHello}, tlsConfig)
 	err = tlsConn.Handshake()
 	if err != nil {
+		Metrics.ErrorsTLS.Add(1)
 		GSLogSSL(user, serverAddr, serverName, fmt.Errorf("error in handshake with client: %v", err), cachedCert)
 		conn.Close()
 		return

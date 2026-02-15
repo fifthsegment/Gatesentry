@@ -53,6 +53,8 @@
   let eventSource: EventSource | null = null;
   let connected = false;
   let eventsReceived = 0;
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  let reconnectDelay = 1000; // exponential backoff: 1s → 2s → 4s → ... → 30s max
 
   // ---------- Helpers ----------
 
@@ -541,7 +543,17 @@
   // ---------- SSE ----------
 
   function connectSSE() {
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+
     const jwt = localStorage.getItem("jwt") || "";
+    if (!jwt) {
+      // No token — don't connect, user needs to log in
+      connected = false;
+      return;
+    }
     const basePath = (window as any).__GS_BASE_PATH__ || "";
     const base = basePath === "/" ? "" : basePath;
     const url = `${base}/api/dns/events?token=${encodeURIComponent(jwt)}`;
@@ -550,11 +562,29 @@
 
     eventSource.onopen = () => {
       connected = true;
+      reconnectDelay = 1000; // reset backoff on successful connection
     };
+
+    eventSource.addEventListener("reconnect", () => {
+      // Server is asking us to reconnect (max duration reached)
+      disconnectSSE();
+      reconnectTimer = setTimeout(connectSSE, 500);
+    });
 
     eventSource.onerror = () => {
       connected = false;
-      // EventSource auto-reconnects on its own.
+      // EventSource enters CLOSED state on HTTP error (e.g. 401).
+      // It only auto-reconnects on network errors during an active connection.
+      if (eventSource && eventSource.readyState === EventSource.CLOSED) {
+        // HTTP error (likely 401 expired JWT) — do NOT auto-reconnect
+        // in a tight loop. Use exponential backoff.
+        eventSource.close();
+        eventSource = null;
+        reconnectTimer = setTimeout(connectSSE, reconnectDelay);
+        reconnectDelay = Math.min(reconnectDelay * 2, 30000);
+      }
+      // If readyState is CONNECTING, the browser is auto-reconnecting
+      // from a network error — let it handle it.
     };
 
     eventSource.onmessage = (msg) => {
@@ -612,6 +642,10 @@
       eventSource.close();
       eventSource = null;
       connected = false;
+    }
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
     }
   }
 

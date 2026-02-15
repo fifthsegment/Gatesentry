@@ -295,6 +295,7 @@ type DataPassThru struct {
 func (pt *DataPassThru) Write(p []byte) (int, error) {
 	n, err := pt.Writer.Write(p)
 	if err == nil {
+		Metrics.BytesWritten.Add(int64(n))
 		IProxy.ContentSizeHandler(
 			GSContentSizeFilterData{
 				Url:         "",
@@ -308,6 +309,14 @@ func (pt *DataPassThru) Write(p []byte) (int, error) {
 }
 
 func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	requestStart := time.Now()
+	Metrics.RequestsTotal.Add(1)
+	Metrics.ActiveRequests.Add(1)
+	defer func() {
+		Metrics.ActiveRequests.Add(-1)
+		Metrics.RequestDuration.Observe(time.Since(requestStart))
+	}()
+
 	passthru := NewGSProxyPassthru()
 
 	client := r.RemoteAddr
@@ -344,6 +353,7 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// for the admin port is suspicious (potential SSRF).
 	if requestPort := extractPort(r.URL.Host); requestPort == AdminPort {
 		if hostaddress == "" || isLanAddress(hostaddress) || hostaddress == "localhost" {
+			Metrics.BlocksSSRF.Add(1)
 			log.Printf("[SECURITY] Blocked proxy request to admin UI: %s from %s", r.URL.Host, client)
 			http.Error(w, "Forbidden — proxy access to admin interface denied", http.StatusForbidden)
 			return
@@ -378,6 +388,7 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	user, _, authUser := HandleAuthAndAssignUser(r, passthru, h, authEnabled, client)
 	if authEnabled {
 		if user == "" || user == "127.0.0.1" {
+			Metrics.AuthFailures.Add(1)
 			w.Header().Set("Proxy-Authenticate", "Basic realm="+"gsrealm")
 			http.Error(w, "Proxy authentication required", http.StatusProxyAuthRequired)
 			log.Printf("Missing required proxy authentication from %v to %v", r.RemoteAddr, r.URL)
@@ -392,12 +403,14 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				log.Println("User auth status = ", userAuthStatusString, " For user = ", user)
 			}
 			if userAuthStatusString == ProxyActionUserNotFound {
+				Metrics.AuthFailures.Add(1)
 				w.Header().Set("Proxy-Authenticate", "Basic realm="+"gsrealm")
 				http.Error(w, "Proxy authentication required", http.StatusProxyAuthRequired)
 				log.Printf("Missing required proxy authentication from %v to %v", r.RemoteAddr, r.URL)
 				return
 			}
 			if userAuthStatusString != ProxyActionUserActive && !isHostLanAddress {
+				Metrics.BlocksUser.Add(1)
 				sendBlockMessageBytes(w, r, nil, userAccessFilterData.FilterResponse, nil)
 				return
 			}
@@ -423,6 +436,7 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	timefilterData := GSTimeAccessFilterData{Url: r.URL.String(), User: user}
 	IProxy.TimeAccessHandler(&timefilterData)
 	if timefilterData.FilterResponseAction == string(ProxyActionBlockedTime) {
+		Metrics.BlocksTime.Add(1)
 		passthru.ProxyActionToLog = ProxyActionBlockedTime
 		IProxy.LogHandler(GSLogData{Url: r.URL.String(), User: user, Action: ProxyActionBlockedTime})
 		sendBlockMessageBytes(w, r, nil, timefilterData.FilterResponse, nil)
@@ -447,6 +461,7 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	IProxy.UrlAccessHandler(&urlFilterData)
 
 	if urlFilterData.FilterResponseAction == ProxyActionBlockedUrl {
+		Metrics.BlocksURL.Add(1)
 		passthru.ProxyActionToLog = ProxyActionBlockedUrl
 		IProxy.LogHandler(GSLogData{Url: r.URL.String(), User: user, Action: ProxyActionBlockedUrl})
 		sendBlockMessageBytes(w, r, nil, urlFilterData.FilterResponse, nil)
@@ -504,6 +519,7 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if !canDeferBlock {
+			Metrics.BlocksRule.Add(1)
 			log.Printf("[Proxy] Blocking request to %s by rule", r.URL.String())
 			passthru.ProxyActionToLog = ProxyActionBlockedUrl
 			LogProxyAction(r.URL.String(), user, ProxyActionBlockedUrl)
@@ -566,11 +582,15 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if action == ACTION_SSL_BUMP {
+		Metrics.ConnectTotal.Add(1)
+		Metrics.MITMTotal.Add(1)
 		HandleSSLBump(r, w, user, authUser, passthru, IProxy)
 		return
 	}
 
 	if r.Method == "CONNECT" {
+		Metrics.ConnectTotal.Add(1)
+		Metrics.DirectTotal.Add(1)
 		// requestUrlBytes_log := []byte(r.URL.String())
 		passthru.ProxyActionToLog = ProxyActionSSLDirect
 		// IProxy.RunHandler("log", "", &requestUrlBytes_log, passthru)
@@ -589,6 +609,9 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if r.Header.Get("Upgrade") == "websocket" {
+		Metrics.WebSocketTotal.Add(1)
+		Metrics.ActiveWebSocket.Add(1)
+		defer Metrics.ActiveWebSocket.Add(-1)
 		HandleWebsocketConnection(r, w)
 		return
 	}
@@ -661,8 +684,12 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// and it would also trigger the same nginx gzip issue at upstream.
 	r.Header.Del("Via")
 
+	Metrics.HTTPTotal.Add(1)
+	upstreamStart := time.Now()
 	resp, err := rt.RoundTrip(r)
+	Metrics.UpstreamDuration.Observe(time.Since(upstreamStart))
 	if err != nil {
+		Metrics.ErrorsUpstream.Add(1)
 		log.Printf("error fetching %s: %s", r.URL, err)
 		errorData := &GSProxyErrorData{Error: err.Error()}
 		IProxy.ProxyErrorHandler(errorData)
@@ -775,6 +802,7 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if matchVal.Kind() == reflect.Struct {
 			actionField := matchVal.FieldByName("ShouldBlock")
 			if actionField.IsValid() && actionField.Kind() == reflect.Bool && actionField.Bool() {
+				Metrics.BlocksRule.Add(1)
 				// All match criteria satisfied and action is "block"
 				requestURL := r.URL.String()
 				passthru.ProxyActionToLog = ProxyActionBlockedUrl
@@ -826,6 +854,7 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	switch pipeline {
 	case pipelineStream:
+		Metrics.PipelineStream.Add(1)
 		// PATH A: Stream Passthrough — JS, CSS, fonts, JSON, binary, downloads.
 		//
 		// If upstream already sent Content-Encoding (e.g. gzip), pass it through
@@ -876,6 +905,7 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 	case pipelinePeek:
+		Metrics.PipelinePeek.Add(1)
 		// PATH B: Peek & Stream — images, video, audio.
 		// Read first 4KB for filetype detection and content filter check,
 		// then stream the remainder without full-body buffering.
@@ -915,6 +945,7 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 			IProxy.ContentHandler(&contentFilterData)
 			if contentFilterData.FilterResponseAction == ProxyActionBlockedMediaContent {
+				Metrics.BlocksMedia.Add(1)
 				passthru.ProxyActionToLog = ProxyActionBlockedMediaContent
 				IProxy.LogHandler(GSLogData{Url: r.URL.String(), User: user, Action: ProxyActionBlockedMediaContent})
 				copyResponseHeader(w, resp)
@@ -943,6 +974,7 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 	case pipelineBuffer:
+		Metrics.PipelineBuffer.Add(1)
 		// PATH C: Buffer & Scan — text/html and unknown content types.
 		// Full body buffering (up to MaxContentScanSize) for text scanning.
 		// This preserves the existing scanning behaviour for HTML.
@@ -993,6 +1025,7 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// Run media scanner (handles mislabeled Content-Type → actual image)
 		responseSentMedia, proxyActionTaken := ScanMedia(localCopyData, contentType, r, w, resp, buf, passthru)
 		if responseSentMedia {
+			Metrics.BlocksMedia.Add(1)
 			passthru.ProxyActionToLog = proxyActionTaken
 			IProxy.LogHandler(GSLogData{Url: r.URL.String(), User: user, Action: proxyActionTaken})
 			return
@@ -1003,6 +1036,7 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if isKeywordFilterEnabled(passthru) {
 			responseSentText, proxyActionTaken := ScanText(localCopyData, contentType, r, w, resp, buf, passthru)
 			if responseSentText {
+				Metrics.BlocksKeyword.Add(1)
 				passthru.ProxyActionToLog = proxyActionTaken
 				IProxy.LogHandler(GSLogData{Url: r.URL.String(), User: user, Action: proxyActionTaken})
 				return

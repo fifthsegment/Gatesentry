@@ -47,6 +47,13 @@ func (L *Log) Unsubscribe(ch chan LogEntry) {
 	close(ch)
 }
 
+// SubscriberCount returns the current number of active log stream subscribers.
+func (L *Log) SubscriberCount() int {
+	L.mu.RLock()
+	defer L.mu.RUnlock()
+	return len(L.subscribers)
+}
+
 // broadcast sends a log entry to all active subscribers (non-blocking).
 func (L *Log) broadcast(entry LogEntry) {
 	L.mu.RLock()

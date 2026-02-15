@@ -8,7 +8,9 @@ import (
 	"log"
 	"net"
 	"net/http"
+	netpprof "net/http/pprof"
 	"os"
+	goruntime "runtime"
 	"strings"
 	"time"
 
@@ -19,11 +21,13 @@ import (
 	gatesentryTypes "bitbucket.org/abdullah_irfan/gatesentryf/types"
 	gatesentryWebserverEndpoints "bitbucket.org/abdullah_irfan/gatesentryf/webserver/endpoints"
 	gatesentryWebserverFrontend "bitbucket.org/abdullah_irfan/gatesentryf/webserver/frontend"
+	gatesentryMetrics "bitbucket.org/abdullah_irfan/gatesentryf/webserver/metrics"
 	gatesentryWebserverTypes "bitbucket.org/abdullah_irfan/gatesentryf/webserver/types"
 
 	"github.com/golang-jwt/jwt/v5"
-
 	"github.com/gorilla/mux"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 var hmacSampleSecret = []byte("I7JE72S9XJ48ANXMI78ASDNMQ839")
@@ -198,7 +202,6 @@ var authenticationMiddleware mux.MiddlewareFunc = func(next http.Handler) http.H
 
 		if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
 			ctx := context.WithValue(r.Context(), "username", claims["username"].(string))
-			log.Println("Logged in with username = ", claims["username"])
 			next.ServeHTTP(w, r.WithContext(ctx))
 		} else {
 			SendError(w, err, http.StatusUnauthorized)
@@ -407,8 +410,7 @@ func RegisterEndpointsStartServer(
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Header().Set("Connection", "keep-alive")
-		// Allow CORS for SSE (Origin already handled by corsMiddleware,
-		// but we need to ensure the middleware ran for the preflight).
+		w.Header().Set("X-Accel-Buffering", "no")
 
 		// Subscribe to new log entries
 		ch := logger.Subscribe()
@@ -419,10 +421,29 @@ func RegisterEndpointsStartServer(
 		flusher.Flush()
 
 		ctx := r.Context()
+		heartbeat := time.NewTicker(30 * time.Second)
+		defer heartbeat.Stop()
+		maxDuration := time.NewTimer(4 * time.Hour)
+		defer maxDuration.Stop()
+
 		for {
 			select {
 			case <-ctx.Done():
 				return
+			case <-maxDuration.C:
+				// Force client to reconnect after max duration to re-validate JWT
+				fmt.Fprintf(w, "event: reconnect\ndata: {\"reason\":\"max_duration\"}\n\n")
+				flusher.Flush()
+				return
+			case <-heartbeat.C:
+				// SSE comment heartbeat to detect dead TCP connections.
+				// Without this, idle connections with disconnected clients
+				// block forever as zombie goroutines.
+				_, err := fmt.Fprintf(w, ": heartbeat %d\n\n", time.Now().Unix())
+				if err != nil {
+					return // write failed — client disconnected
+				}
+				flusher.Flush()
 			case entry, ok := <-ch:
 				if !ok {
 					return
@@ -633,6 +654,50 @@ func RegisterEndpointsStartServer(
 	})
 	log.Println("Device API endpoints registered")
 
+	// --- Debug / profiling endpoints (auth-protected) ---
+	// These provide runtime introspection for diagnosing CPU and memory
+	// issues on production servers without requiring a rebuild.
+	internalServer.Get("/api/debug/runtime", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		var mem goruntime.MemStats
+		goruntime.ReadMemStats(&mem)
+
+		logSubs := 0
+		if logger != nil {
+			logSubs = logger.SubscriberCount()
+		}
+
+		info := map[string]interface{}{
+			"goroutines": goruntime.NumGoroutine(),
+			"cpus":       goruntime.NumCPU(),
+			"go_version": goruntime.Version(),
+			"memory": map[string]interface{}{
+				"alloc_mb":          float64(mem.Alloc) / 1024 / 1024,
+				"total_alloc_mb":    float64(mem.TotalAlloc) / 1024 / 1024,
+				"sys_mb":            float64(mem.Sys) / 1024 / 1024,
+				"heap_objects":      mem.HeapObjects,
+				"heap_inuse_mb":     float64(mem.HeapInuse) / 1024 / 1024,
+				"stack_inuse_mb":    float64(mem.StackInuse) / 1024 / 1024,
+				"num_gc":            mem.NumGC,
+				"gc_pause_total_ms": float64(mem.PauseTotalNs) / 1e6,
+			},
+			"sse_subscribers": map[string]interface{}{
+				"log_stream": logSubs,
+			},
+		}
+
+		SendJSON(w, info)
+	})
+
+	// pprof endpoints — standard Go profiling tools behind JWT auth.
+	// Usage: curl -H "Authorization: Bearer <jwt>" http://host:port/api/debug/pprof/
+	// Or:    go tool pprof http://host:port/api/debug/pprof/profile?seconds=30
+	internalServer.sub.HandleFunc("/api/debug/pprof/", authenticationMiddleware(http.HandlerFunc(netpprof.Index)).ServeHTTP).Methods("GET")
+	internalServer.sub.HandleFunc("/api/debug/pprof/cmdline", authenticationMiddleware(http.HandlerFunc(netpprof.Cmdline)).ServeHTTP).Methods("GET")
+	internalServer.sub.HandleFunc("/api/debug/pprof/profile", authenticationMiddleware(http.HandlerFunc(netpprof.Profile)).ServeHTTP).Methods("GET")
+	internalServer.sub.HandleFunc("/api/debug/pprof/symbol", authenticationMiddleware(http.HandlerFunc(netpprof.Symbol)).ServeHTTP).Methods("GET")
+	internalServer.sub.HandleFunc("/api/debug/pprof/trace", authenticationMiddleware(http.HandlerFunc(netpprof.Trace)).ServeHTTP).Methods("GET")
+	log.Println("Debug/profiling endpoints registered")
+
 	// --- WPAD / PAC file endpoint ---
 	// Registered on the ROOT router (not the basePath subrouter) because:
 	// 1. WPAD auto-discovery always fetches http://wpad.<domain>/wpad.dat (root path)
@@ -643,6 +708,23 @@ func RegisterEndpointsStartServer(
 	internalServer.router.HandleFunc("/wpad.dat", wpadHandler).Methods("GET")
 	internalServer.router.HandleFunc("/proxy.pac", wpadHandler).Methods("GET")
 	log.Println("WPAD/PAC endpoints registered: /wpad.dat, /proxy.pac")
+
+	// --- Prometheus metrics endpoint ---
+	// Registered on the ROOT router (not the basePath subrouter) because:
+	// 1. Prometheus scrapers use a fixed path (/metrics) without sending JWT tokens
+	// 2. No authentication — metrics are operational data, not user-sensitive
+	// 3. Must work regardless of GS_BASE_PATH configuration
+	log.Println("Registering Prometheus /metrics endpoint...")
+	metricsRegistry := prometheus.NewRegistry()
+	metricsRegistry.MustRegister(prometheus.NewGoCollector())                                       // Go runtime: goroutines, memory, GC
+	metricsRegistry.MustRegister(prometheus.NewProcessCollector(prometheus.ProcessCollectorOpts{})) // process: CPU, RSS, FDs
+	metricsRegistry.MustRegister(gatesentryMetrics.NewCollector(gatesentryMetrics.Sources{
+		Logger:            logger,
+		DomainListManager: domainListManager,
+		RuleManager:       ruleManager,
+	}))
+	internalServer.router.Handle("/metrics", promhttp.HandlerFor(metricsRegistry, promhttp.HandlerOpts{})).Methods("GET")
+	log.Println("Prometheus /metrics endpoint registered")
 
 	// Authenticated WPAD info endpoint (for admin UI)
 	internalServer.Get("/api/wpad/info", authenticationMiddleware,

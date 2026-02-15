@@ -14,6 +14,8 @@
   let paused = false;
   let tick = 0; // bumped every 10s to refresh "time ago" labels
   let tickTimer: ReturnType<typeof setInterval> | null = null;
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  let reconnectDelay = 1000; // start at 1s, exponential backoff up to 30s
   const MAX_ENTRIES = 200;
 
   function getBasePath(): string {
@@ -54,15 +56,25 @@
     if (eventSource) {
       eventSource.close();
     }
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
 
     const basePath = getBasePath();
     const jwt = localStorage.getItem("jwt") || "";
+    if (!jwt) {
+      // No token — don't connect, user needs to log in
+      connected = false;
+      return;
+    }
     const url = `${basePath}/api/logs/stream?token=${encodeURIComponent(jwt)}`;
 
     eventSource = new EventSource(url);
 
     eventSource.onopen = () => {
       connected = true;
+      reconnectDelay = 1000; // reset backoff on successful connection
     };
 
     eventSource.onmessage = (event) => {
@@ -76,9 +88,30 @@
       }
     };
 
+    eventSource.addEventListener("reconnect", () => {
+      // Server is asking us to reconnect (max duration reached)
+      if (eventSource) {
+        eventSource.close();
+        eventSource = null;
+      }
+      connected = false;
+      reconnectTimer = setTimeout(connectSSE, 500);
+    });
+
     eventSource.onerror = () => {
       connected = false;
-      // EventSource will auto-reconnect; no action needed
+      // EventSource enters CLOSED state on HTTP error (e.g. 401).
+      // It only auto-reconnects on network errors during an active connection.
+      if (eventSource && eventSource.readyState === EventSource.CLOSED) {
+        // HTTP error (likely 401 expired JWT) — do NOT auto-reconnect
+        // in a tight loop. Use exponential backoff.
+        eventSource.close();
+        eventSource = null;
+        reconnectTimer = setTimeout(connectSSE, reconnectDelay);
+        reconnectDelay = Math.min(reconnectDelay * 2, 30000);
+      }
+      // If readyState is CONNECTING, the browser is auto-reconnecting
+      // from a network error — let it handle it.
     };
   }
 
@@ -111,6 +144,10 @@
       eventSource = null;
     }
     if (tickTimer) clearInterval(tickTimer);
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
   });
 
   function tagType(rt: string): string {
