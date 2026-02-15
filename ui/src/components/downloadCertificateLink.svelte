@@ -1,9 +1,10 @@
 <script lang="ts">
   import { _ } from "svelte-i18n";
+  import { getBasePath } from "../lib/navigate";
   import { store } from "../store/apistore";
   import { Download } from "carbon-icons-svelte";
 
-  let link = `/api/files/certificate`;
+  let link = getBasePath() + `/api/files/certificate`;
 </script>
 
 <a href={link} target="_blank"

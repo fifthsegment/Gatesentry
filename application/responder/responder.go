@@ -12,32 +12,22 @@ type GSFilterResponder struct {
 }
 
 func GetTemplate() string {
-	templ := `<html>
-				<head>
-				<meta name="viewport" content="width=device-width, initial-scale=1">
-				<title>_title_</title>
-				<style>
-				 _primarystyle_
-				</style>
-				</head>
-				<body>
-					<div class="mdl-layout__container ">
-					<div style="width:100%;" class=" mdl-layout mdl-layout--fixed-header mdl-js-layout _colorclass_ is-upgraded" >
-					 <main style="width:100%; _mainstyle_" class="mdl-layout__content ">
-				        <div class="mdl-grid" >
-				          <div class="mdl-cell mdl-cell--2-col mdl-cell--hide-tablet mdl-cell--hide-phone"></div>
-				          <div style="padding:20px; " class=" mdl-color--white mdl-shadow--4dp content mdl-color-text--grey-800 mdl-cell mdl-cell--8-col">
-			            
-								_content_
-
-				          </div>
-				        </div>
-		
-				      </main>
-				      </div>
-				    </div>
-				</body>
-			</html>`
+	templ := `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>_title_</title>
+<style>
+_primarystyle_
+</style>
+</head>
+<body>
+<div class="block-card">
+_content_
+</div>
+</body>
+</html>`
 	return templ
 }
 
@@ -47,44 +37,36 @@ func GetBlockImage() string {
 }
 
 func BuildGeneralResponsePage(Reasons []string, Score int) string {
-	content := "<p ><h4 style='text-align:center'>GateSentry Web Filter</h4></p>"
-	content += "<p style='text-align:center'><img src='" + GetBlockImage() + "'></p>"
-	KeywordsFound := "<h5 style='text-align:center'>"
+	content := "<img src='" + GetBlockImage() + "' alt='GateSentry'>"
+	content += "<h1>GateSentry Web Filter</h1>"
+	content += "<div class='divider'></div>"
 	for i := 0; i < len(Reasons); i++ {
-		KeywordsFound += "<span>" + Reasons[i] + "</span>"
+		content += "<p class='msg'>" + Reasons[i] + "</p>"
 	}
-	KeywordsFound += "</h5>"
-	content += KeywordsFound
+	content += "<div class='footer'>GateSentry Proxy</div>"
 	templ := GetTemplate()
 	templ = strings.Replace(templ, "_title_", "Blocked", -1)
 	templ = strings.Replace(templ, "_content_", content, -1)
-	templ = strings.Replace(templ, "_mainstyle_", "margin-top:7% ", -1)
-	templ = strings.Replace(templ, "_colorclass_", "mdl-color--red", -1)
 	templ = strings.Replace(templ, "_primarystyle_", GetCssString(), -1)
 	return templ
 }
 
 func BuildResponsePage(Reasons []string, Score int) string {
-	// KeywordsFound := "";
-	// for i := 0; i < len(Reasons); i++ {
-	// 	KeywordsFound += "<li><b>"+Reasons[i]+"</b></li>"
-	// }
-	content := "<p ><h4 style='text-align:center'>GateSentry Web Filter</h4></p>"
-	content += "<p style='text-align:center'><img src='" + GetBlockImage() + "'></p>"
-	content += `<p>The page you requested has been blocked because it generated a score of
-					<u>` + strconv.Itoa(Score) + `</u> which is above the viewing limits on this network.</p>`
-	content += `<p>Reason(s) this page was blocked was presence of the following:</p>`
-	KeywordsFound := "<ul >"
+	content := "<img src='" + GetBlockImage() + "' alt='GateSentry'>"
+	content += "<h1>GateSentry Web Filter</h1>"
+	content += "<div class='divider'></div>"
+	content += `<p class='msg'>The page you requested has been blocked because it generated a score of
+				<strong>` + strconv.Itoa(Score) + `</strong> which is above the viewing limits on this network.</p>`
+	content += `<p class='msg'>Reason(s) this page was blocked:</p>`
+	content += "<ul>"
 	for i := 0; i < len(Reasons); i++ {
-		KeywordsFound += "<li><strong>" + Reasons[i] + "</strong></li>"
+		content += "<li><strong>" + Reasons[i] + "</strong></li>"
 	}
-	KeywordsFound += "</ul>"
-	content += KeywordsFound
+	content += "</ul>"
+	content += "<div class='footer'>GateSentry Proxy</div>"
 	templ := GetTemplate()
 	templ = strings.Replace(templ, "_title_", "Blocked", -1)
 	templ = strings.Replace(templ, "_content_", content, -1)
-	templ = strings.Replace(templ, "_mainstyle_", "margin-top:7% ", -1)
-	templ = strings.Replace(templ, "_colorclass_", "mdl-color--red", -1)
 	templ = strings.Replace(templ, "_primarystyle_", GetCssString(), -1)
 	return templ
 	// data, err := gatesentry2webserver.Asset("app/material.css")

@@ -3,13 +3,21 @@ package gatesentryproxy
 import (
 	"net/http"
 	"strings"
+	"time"
 )
+
+const userCacheTTL = 5 * time.Minute
 
 func ProxyCredentials(r *http.Request) (user, pass string, ok bool) {
 	auth := r.Header.Get("Proxy-Authorization")
 
-	if val, okP := IProxy.UsersCache[auth]; okP {
-		return val.User, val.Pass, true
+	if val, okP := IProxy.UsersCache.Load(auth); okP {
+		cached := val.(GSUserCached)
+		if time.Now().Unix()-cached.CachedAt < int64(userCacheTTL.Seconds()) {
+			return cached.User, cached.Pass, true
+		}
+		// Expired, remove and re-decode
+		IProxy.UsersCache.Delete(auth)
 	}
 
 	if auth == "" || !strings.HasPrefix(auth, "Basic ") {
@@ -17,8 +25,8 @@ func ProxyCredentials(r *http.Request) (user, pass string, ok bool) {
 	}
 
 	nuser, npass, nok := decodeBase64Credentials(strings.TrimPrefix(auth, "Basic "))
-	gsu := GSUserCached{User: nuser, Pass: npass}
-	IProxy.UsersCache[auth] = gsu
+	gsu := GSUserCached{User: nuser, Pass: npass, CachedAt: time.Now().Unix()}
+	IProxy.UsersCache.Store(auth, gsu)
 	return nuser, npass, nok
 }
 

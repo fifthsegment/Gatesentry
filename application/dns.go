@@ -5,6 +5,7 @@ import (
 	"log"
 
 	gatesentryDnsServer "bitbucket.org/abdullah_irfan/gatesentryf/dns/server"
+	gatesentryDomainList "bitbucket.org/abdullah_irfan/gatesentryf/domainlist"
 	gatesentry2logger "bitbucket.org/abdullah_irfan/gatesentryf/logger"
 	gatesentry2storage "bitbucket.org/abdullah_irfan/gatesentryf/storage"
 	gatesentryTypes "bitbucket.org/abdullah_irfan/gatesentryf/types"
@@ -14,7 +15,7 @@ var (
 	blocklists = []string{}
 )
 
-func DNSServerThread(baseDir string, logger *gatesentry2logger.Log, c <-chan int, settings *gatesentry2storage.MapStore, info *gatesentryTypes.DnsServerInfo) {
+func DNSServerThread(baseDir string, logger *gatesentry2logger.Log, c <-chan int, settings *gatesentry2storage.MapStore, info *gatesentryTypes.DnsServerInfo, dlManager *gatesentryDomainList.DomainListManager) {
 	defer func() {
 		if r := recover(); r != nil {
 			fmt.Println("Recovered from panic:", r)
@@ -27,7 +28,7 @@ func DNSServerThread(baseDir string, logger *gatesentry2logger.Log, c <-chan int
 			log.Println("[DNS.SERVER] Received message:", msg)
 			if msg == 1 {
 				// Start the DNS server
-				go gatesentryDnsServer.StartDNSServer(baseDir, logger, blocklists, settings, R.DnsServerInfo)
+				go gatesentryDnsServer.StartDNSServer(baseDir, logger, blocklists, settings, R.DnsServerInfo, dlManager)
 				log.Println("[DNS.SERVER] started")
 			} else if msg == 2 {
 				log.Println("[DNS.SERVER] Stopping DNS server")

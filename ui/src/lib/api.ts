@@ -3,6 +3,18 @@ import type { UserType } from "../types";
 // const apiBaseUrl = import.meta.env.VITE_APP_API_BASE_URL;
 const env = import.meta.env;
 
+/**
+ * Get the configured base path from the Go server's injection, or "/" for dev.
+ * In production, Go injects: window.__GS_BASE_PATH__ = "/gatesentry"
+ * In dev (vite), it's undefined → default to ""
+ */
+function getBasePath(): string {
+  const bp = (window as any).__GS_BASE_PATH__ || "";
+  // Normalize: strip trailing slash, but "" stays ""
+  if (bp === "/") return "";
+  return bp;
+}
+
 class AppAPI {
   baseURL: string;
   headers: Record<string, string>;
@@ -12,7 +24,8 @@ class AppAPI {
 
   constructor() {
     const jwt = localStorage.getItem("jwt");
-    this.baseURL = "/api";
+    const basePath = getBasePath();
+    this.baseURL = basePath + "/api";
 
     this.headers = {
       Authorization: `Bearer ${jwt}`,
@@ -66,9 +79,9 @@ class AppAPI {
       this.doCall(url).then(function (json) {
         resolve(json);
       })
-      .catch(function (err) {
-        reject(err);
-      });
+        .catch(function (err) {
+          reject(err);
+        });
 
     });
 
@@ -76,14 +89,14 @@ class AppAPI {
 
   deleteUser(username: string): Promise<any> {
     return new Promise(async (resolve, reject) => {
-      const url = "/users/" + username  ;
+      const url = "/users/" + username;
 
       this.doCall(url, "delete").then(function (json) {
         resolve(json);
       })
-      .catch(function (err) {
-        reject(err);
-      });
+        .catch(function (err) {
+          reject(err);
+        });
 
     });
   }
@@ -95,55 +108,55 @@ class AppAPI {
       this.doCall(url).then(function (json) {
         resolve(json);
       })
-      .catch(function (err) {
-        reject(err);
-      });
+        .catch(function (err) {
+          reject(err);
+        });
 
     });
   }
 
-  createUser( userData: UserType ) : Promise<any> {
+  createUser(userData: UserType): Promise<any> {
     return new Promise(async (resolve, reject) => {
       const url = "/users";
-      
+
       this.doCall(url, "post", userData).then(function (json) {
         resolve(json);
       })
-      .catch(function (err) {
-        reject(err);
-      });
+        .catch(function (err) {
+          reject(err);
+        });
 
     });
   }
 
-  updateUser(user : UserType): Promise<any> {
+  updateUser(user: UserType): Promise<any> {
     return new Promise(async (resolve, reject) => {
       const url = "/users";
 
       this.doCall(url, "put", user).then(function (json) {
         resolve(json);
       })
-      .catch(function (err) {
-        reject(err);
-      });
+        .catch(function (err) {
+          reject(err);
+        });
 
     });
   }
 
-  setSetting(settingName, settingValue, mapper? : (data:any) => any): Promise<any> {
+  setSetting(settingName, settingValue, mapper?: (data: any) => any): Promise<any> {
 
     return new Promise(async (resolve, reject) => {
       const url = "/settings/" + settingName;
-      var datatosend = mapper? mapper(settingValue) :{
+      var datatosend = mapper ? mapper(settingValue) : {
         key: settingName,
         value: settingValue,
       };
       this.doCall(url, "post", datatosend).then(function (json) {
         resolve(true);
       })
-      .catch(function (err) {
-        reject(err);
-      });
+        .catch(function (err) {
+          reject(err);
+        });
 
     });
 
@@ -196,7 +209,7 @@ class AppAPI {
         return json;
       }
     } catch (err) {
-      console.error("Gatesentry API error : [Path "+ endpoint + "] [Method "+method+"]", err);
+      console.error("Gatesentry API error : [Path " + endpoint + "] [Method " + method + "]", err);
       throw err;
     }
   }

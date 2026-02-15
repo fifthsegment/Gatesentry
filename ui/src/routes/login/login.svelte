@@ -1,18 +1,14 @@
 <script lang="ts">
   import {
     Button,
-    ButtonSet,
     Checkbox,
-    Column,
     FluidForm,
-    Grid,
     PasswordInput,
-    Row,
     TextInput,
   } from "carbon-components-svelte";
-  import { ChevronRight, Close } from "carbon-icons-svelte";
+  import { ChevronRight, Close, Security } from "carbon-icons-svelte";
   import { store } from "../../store/apistore";
-  import { navigate } from "svelte-routing/src/history";
+  import { gsNavigate } from "../../lib/navigate";
   import { afterUpdate } from "svelte";
   import { notificationstore } from "../../store/notifications";
   import { createNotificationError } from "../../lib/utils";
@@ -74,78 +70,138 @@
 
   afterUpdate(() => {
     if (loggedIn) {
-      navigate("/");
+      gsNavigate("/");
     }
   });
 </script>
 
-<Grid noGutter style="">
-  <Row noGutter style="">
-    <Column>
-      {#if $store.api.loggedIn}
-        Redirecting
-      {:else}
-        <div
-          style=" border: 1px solid; max-width:25rem; background: white; margin: 0 auto; margin-top: 25vh;"
-        >
-          <FluidForm on:submit={handleLogin}>
-            <Column style="text-align:left;">
-              <h2
-                style="margin-bottom: 20px; margin-left:15px; margin-top: 25px;"
-              >
-                Login
-              </h2>
-              <TextInput
-                {invalid}
-                labelText="User name"
-                placeholder="Enter user name..."
-                required
-                bind:value={username}
-                invalidText={invalidMessage}
-              />
-              <PasswordInput
-                {invalid}
-                required
-                type="password"
-                labelText="Password"
-                placeholder="Enter password..."
-                bind:value={password}
-                invalidText={invalidMessage}
-              />
-              <Checkbox
-                id="remember-me"
-                labelText="Remember me"
-                style="margin:1em;"
-                checked={rememberMe}
-                on:change={() => {
-                  rememberMe = !rememberMe;
-                }}
-              />
-              <ButtonSet style="align-items:right ">
-                <Button
-                  size="lg"
-                  kind="secondary"
-                  icon={Close}
-                  style="width:100%"
-                  disabled={!isEnabled}
-                  on:click={onCancel}>Cancel</Button
-                >
-                <Column></Column>
-                <Button
-                  size="lg"
-                  type="submit"
-                  icon={ChevronRight}
-                  style="width:100%">Submit</Button
-                >
-              </ButtonSet>
-            </Column>
-          </FluidForm>
+<div class="login-page">
+  {#if $store.api.loggedIn}
+    <p>Redirecting…</p>
+  {:else}
+    <div class="login-card">
+      <div class="login-header">
+        <Security size={24} />
+        <h2>GateSentry</h2>
+      </div>
+      <p class="login-subtitle">Sign in to your admin panel</p>
+
+      <FluidForm on:submit={handleLogin}>
+        <div class="login-fields">
+          <TextInput
+            {invalid}
+            labelText="User name"
+            placeholder="Enter user name…"
+            required
+            bind:value={username}
+            invalidText={invalidMessage}
+          />
+          <PasswordInput
+            {invalid}
+            required
+            type="password"
+            labelText="Password"
+            placeholder="Enter password…"
+            bind:value={password}
+            invalidText={invalidMessage}
+          />
+          <Checkbox
+            id="remember-me"
+            labelText="Remember me"
+            checked={rememberMe}
+            on:change={() => {
+              rememberMe = !rememberMe;
+            }}
+          />
         </div>
-        <div class="text-center">
-          <br />
-          <DownloadCertificateLink />
+        <div class="login-buttons">
+          <Button
+            kind="secondary"
+            icon={Close}
+            disabled={!isEnabled}
+            on:click={onCancel}>Cancel</Button
+          >
+          <Button type="submit" icon={ChevronRight}>Submit</Button>
         </div>
-      {/if}
-    </Column>
-  </Row>
-</Grid>
+      </FluidForm>
+    </div>
+    <div class="login-footer">
+      <DownloadCertificateLink />
+    </div>
+  {/if}
+</div>
+
+<style>
+  .login-page {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+    padding: 15vh 1rem 2rem;
+    min-height: 100vh;
+    background: #f0f0f0;
+  }
+
+  .login-card {
+    border: 1px solid #e0e0e0;
+    border-radius: 6px;
+    max-width: 24rem;
+    width: 100%;
+    background: #fff;
+    padding: 2rem 1.5rem 1.5rem;
+  }
+
+  .login-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.25rem;
+  }
+  .login-header h2 {
+    margin: 0;
+    font-size: 1.5rem;
+  }
+
+  .login-subtitle {
+    font-size: 0.875rem;
+    color: #6f6f6f;
+    margin: 0 0 1.5rem;
+  }
+
+  .login-fields {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  .login-buttons {
+    display: flex;
+    gap: 0.75rem;
+    margin-top: 1.5rem;
+  }
+  .login-buttons :global(.bx--btn) {
+    flex: 1;
+    max-width: none;
+    justify-content: center;
+  }
+
+  .login-footer {
+    margin-top: 1.25rem;
+    text-align: center;
+    font-size: 0.875rem;
+  }
+
+  @media (max-width: 671px) {
+    .login-page {
+      padding: 3rem 1rem 2rem;
+    }
+    .login-card {
+      max-width: 100%;
+      padding: 1.5rem 1rem 1.25rem;
+      border-radius: 4px;
+    }
+    .login-header h2 {
+      font-size: 1.25rem;
+    }
+  }
+</style>

@@ -25,7 +25,7 @@ func GSApiSettingsGET(requestedId string, settings *gatesentry2storage.MapStore)
 			value = string(valueJson)
 		}
 		return struct{ Value string }{Value: value}
-	case "blocktimes", "strictness", "timezone", "idemail", "enable_https_filtering", "capem", "keypem", "enable_dns_server", "dns_custom_entries", "ai_scanner_url", "enable_ai_image_filtering", "EnableUsers", "dns_resolver":
+	case "blocktimes", "strictness", "timezone", "idemail", "enable_https_filtering", "capem", "keypem", "enable_dns_server", "enable_dns_filtering", "dns_custom_entries", "dns_domain_lists", "dns_whitelist_domain_lists", "ai_scanner_url", "enable_ai_image_filtering", "EnableUsers", "dns_resolver", "wpad_enabled", "wpad_proxy_host", "wpad_proxy_port":
 		value := settings.Get(requestedId)
 		return struct {
 			Key   string
@@ -79,7 +79,10 @@ func GSApiSettingsPOST(requestedId string, settings *gatesentry2storage.MapStore
 	}
 
 	if requestedId == "dns_custom_entries" ||
+		requestedId == "dns_domain_lists" ||
+		requestedId == "dns_whitelist_domain_lists" ||
 		requestedId == "enable_dns_server" ||
+		requestedId == "enable_dns_filtering" ||
 		requestedId == "enable_https_filtering" ||
 		requestedId == "enable_ai_image_filtering" ||
 		requestedId == "ai_scanner_url" ||
@@ -87,10 +90,25 @@ func GSApiSettingsPOST(requestedId string, settings *gatesentry2storage.MapStore
 		requestedId == "strictness" ||
 		requestedId == "capem" ||
 		requestedId == "keypem" ||
-		requestedId == "dns_resolver" {
+		requestedId == "dns_resolver" ||
+		requestedId == "wpad_enabled" ||
+		requestedId == "wpad_proxy_host" ||
+		requestedId == "wpad_proxy_port" {
 		settings.Update(requestedId, temp.Value)
 		if requestedId == "dns_resolver" {
 			gatesentryDnsServer.SetExternalResolver(temp.Value)
+		}
+		// Immediately reload the proxy certificate when either PEM is updated
+		if requestedId == "capem" || requestedId == "keypem" {
+			ReloadProxyCertificate(settings)
+		}
+		// Sync WPAD DNS interception with the setting
+		if requestedId == "wpad_enabled" {
+			gatesentryDnsServer.SetWPADEnabled(temp.Value == "true")
+		}
+		// Sync DNS domain filtering with the setting
+		if requestedId == "enable_dns_filtering" {
+			gatesentryDnsServer.SetDNSFilteringEnabled(temp.Value == "true")
 		}
 	}
 

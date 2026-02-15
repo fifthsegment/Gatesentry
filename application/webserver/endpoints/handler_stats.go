@@ -1,12 +1,30 @@
 package gatesentryWebserverEndpoints
 
 import (
+	"net/http"
 	"sort"
 	"strconv"
 
 	gatesentryLogger "bitbucket.org/abdullah_irfan/gatesentryf/logger"
 	gatesentryproxy "bitbucket.org/abdullah_irfan/gatesentryproxy"
 )
+
+// ParseStatsQuery extracts seconds and group from the request query string.
+// Defaults: seconds=604800 (7 days), group="day".
+func ParseStatsQuery(r *http.Request) (seconds int, group string) {
+	seconds = 604800 // 7 days
+	group = "day"
+
+	if s := r.URL.Query().Get("seconds"); s != "" {
+		if v, err := strconv.Atoi(s); err == nil && v > 0 {
+			seconds = v
+		}
+	}
+	if g := r.URL.Query().Get("group"); g != "" {
+		group = g
+	}
+	return
+}
 
 type URLGroup struct {
 	URL   string `json:"host"`
@@ -37,7 +55,7 @@ func ApiGetStats(fromTimeParam string, logger *gatesentryLogger.Log) interface{}
 		}{Error: "Invalid fromTime parameter"}
 	}
 
-	logEntriesInterface, err := logger.GetLastXSecondsDNSLogs(int64(fromTimeInt), false)
+	logEntriesInterface, err := logger.GetLastXSecondsDNSLogs(int64(fromTimeInt), "")
 	if err != nil {
 		// ctx.StatusCode(iris.StatusInternalServerError)
 		// ctx.JSON(iris.Map{"error": "Failed to retrieve logs"})
@@ -108,10 +126,32 @@ func SliceEntries(logs map[string][]gatesentryLogger.LogEntry, responseType stri
 	return outputData
 }
 
-func ApiGetStatsByURL(logger *gatesentryLogger.Log) interface{} {
-	//DAY := 86400
-	WEEK := 604800
-	logEntriesInterface, err := logger.GetLastXSecondsDNSLogs(int64(WEEK), true)
+// ApiGetStatsByURL returns DNS/proxy stats grouped by time bucket.
+//
+// Query parameters (all optional):
+//
+//	seconds  – time window in seconds (default 604800 = 7 days)
+//	group    – bucket granularity: "day" (default), "hour", or "minute"
+//
+// The bucket keys are LOCAL-time strings so the frontend can display
+// them without any UTC ↔ local conversion:
+//
+//	day    → "2006-01-02"        (matches the existing 7-day format)
+//	hour   → "2006-01-02T15"     (for 24-hour view)
+//	minute → "2006-01-02T15:04"  (for 1-hour view)
+func ApiGetStatsByURL(logger *gatesentryLogger.Log, seconds int, group string) interface{} {
+	// Map human-readable group names to Go time format strings.
+	var groupFormat string
+	switch group {
+	case "hour":
+		groupFormat = "2006-01-02T15"
+	case "minute":
+		groupFormat = "2006-01-02T15:04"
+	default: // "day" or anything else
+		groupFormat = "2006-01-02"
+	}
+
+	logEntriesInterface, err := logger.GetLastXSecondsDNSLogs(int64(seconds), groupFormat)
 	if err != nil {
 		return struct {
 			Error string `json:"error"`
@@ -119,61 +159,22 @@ func ApiGetStatsByURL(logger *gatesentryLogger.Log) interface{} {
 	}
 
 	if logEntriesInterface == nil {
-		// ctx.StatusCode(iris.StatusInternalServerError)
-		// ctx.JSON(iris.Map{"error": "Failed to retrieve logs"})
-		return struct {
-			Error string `json:"error"`
-		}{Error: "Failed to retrieve logs"}
+		return HostGroupResponse{
+			ItemsBlocked: make(HostGroupSet),
+			All:          make(HostGroupSet),
+		}
 	}
 
-	var logEntries []gatesentryLogger.LogEntry
 	switch logs := logEntriesInterface.(type) {
-	case []gatesentryLogger.LogEntry:
-		logEntries = logs
 	case map[string][]gatesentryLogger.LogEntry:
-		// ctx.JSON(HostGroupResponse{
-		// 	ItemsBlocked: SliceEntries(logs, "blocked"),
-		// 	All:          SliceEntries(logs, "all"),
-		// })
 		return HostGroupResponse{
 			ItemsBlocked: SliceEntries(logs, "blocked"),
 			All:          SliceEntries(logs, "all"),
 		}
 	default:
-		// ctx.StatusCode(iris.StatusInternalServerError)
-		// ctx.JSON(iris.Map{"error": "Invalid logs format"})
-		return struct {
-			Error string `json:"error"`
-		}{Error: "Invalid logs format"}
-	}
-	if err != nil {
-		// ctx.StatusCode(iris.StatusInternalServerError)
-		// ctx.JSON(iris.Map{"error": "Failed to retrieve logs"})
-		return struct {
-			Error string `json:"error"`
-		}{Error: "Failed to retrieve logs"}
-	}
-
-	// Group log entries by URL and count occurrences
-	urlCounts := make(map[string]int)
-	for _, entry := range logEntries {
-		if entry.Type == "dns" {
-			urlCounts[entry.URL]++
+		return HostGroupResponse{
+			ItemsBlocked: make(HostGroupSet),
+			All:          make(HostGroupSet),
 		}
 	}
-
-	// Convert grouped data into URLGroup slice
-	groupedURLs := make([]URLGroup, 0, len(urlCounts))
-	for url, count := range urlCounts {
-		groupedURLs = append(groupedURLs, URLGroup{URL: url, Count: count})
-	}
-
-	response := struct {
-		URLGroups []URLGroup `json:"items"`
-	}{
-		URLGroups: groupedURLs,
-	}
-
-	// ctx.JSON(response)
-	return response
 }
