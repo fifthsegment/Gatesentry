@@ -72,6 +72,24 @@ func (R *GSRuntime) LoadUsers() {
 	users := []GatesentryTypes.GSUser{}
 	json.Unmarshal([]byte(usersString), &users)
 
+	// Preserve in-memory DataConsumed values that may be ahead of what's
+	// persisted on disk (the data saver only writes every 5 minutes).
+	// Without this, any Reload() (settings change, user CRUD, etc.) would
+	// reset byte counters to their last-saved values.
+	if len(R.AuthUsers) > 0 {
+		live := make(map[string]uint64, len(R.AuthUsers))
+		for _, u := range R.AuthUsers {
+			if u.DataConsumed > 0 {
+				live[u.User] = u.DataConsumed
+			}
+		}
+		for i := range users {
+			if liveBytes, ok := live[users[i].User]; ok && liveBytes > users[i].DataConsumed {
+				users[i].DataConsumed = liveBytes
+			}
+		}
+	}
+
 	R.AuthUsers = users
 }
 

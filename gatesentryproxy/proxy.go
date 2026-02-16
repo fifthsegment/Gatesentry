@@ -522,22 +522,10 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			Metrics.BlocksRule.Add(1)
 			log.Printf("[Proxy] Blocking request to %s by rule", r.URL.String())
 			passthru.ProxyActionToLog = ProxyActionBlockedUrl
-			LogProxyAction(r.URL.String(), user, ProxyActionBlockedUrl)
+			ruleName := extractRuleName(ruleMatch)
+			LogProxyActionWithRule(r.URL.String(), user, ProxyActionBlockedUrl, ruleName)
 			var blockContent []byte
 			if IProxy.RuleBlockPageHandler != nil {
-				ruleName := ""
-				if ruleMatch != nil {
-					mv := reflect.ValueOf(ruleMatch)
-					if mv.Kind() == reflect.Struct {
-						ruleField := mv.FieldByName("Rule")
-						if ruleField.IsValid() && !ruleField.IsNil() {
-							nameField := ruleField.Elem().FieldByName("Name")
-							if nameField.IsValid() && nameField.Kind() == reflect.String {
-								ruleName = nameField.String()
-							}
-						}
-					}
-				}
 				blockContent = IProxy.RuleBlockPageHandler(requestHost, ruleName)
 			}
 			if blockContent == nil {
@@ -806,17 +794,8 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				// All match criteria satisfied and action is "block"
 				requestURL := r.URL.String()
 				passthru.ProxyActionToLog = ProxyActionBlockedUrl
-				IProxy.LogHandler(GSLogData{Url: requestURL, User: user, Action: ProxyActionBlockedUrl})
-
-				// Get rule name for block page
-				ruleName := ""
-				ruleField := matchVal.FieldByName("Rule")
-				if ruleField.IsValid() && !ruleField.IsNil() {
-					nameField := ruleField.Elem().FieldByName("Name")
-					if nameField.IsValid() && nameField.Kind() == reflect.String {
-						ruleName = nameField.String()
-					}
-				}
+				ruleName := extractRuleName(ruleMatch)
+				IProxy.LogHandler(GSLogData{Url: requestURL, User: user, Action: ProxyActionBlockedUrl, RuleName: ruleName})
 
 				var blockContent []byte
 				if IProxy.RuleBlockPageHandler != nil {
@@ -947,7 +926,7 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if contentFilterData.FilterResponseAction == ProxyActionBlockedMediaContent {
 				Metrics.BlocksMedia.Add(1)
 				passthru.ProxyActionToLog = ProxyActionBlockedMediaContent
-				IProxy.LogHandler(GSLogData{Url: r.URL.String(), User: user, Action: ProxyActionBlockedMediaContent})
+				IProxy.LogHandler(GSLogData{Url: r.URL.String(), User: user, Action: ProxyActionBlockedMediaContent, RuleName: extractRuleName(passthru.UserData)})
 				copyResponseHeader(w, resp)
 				dest := &DataPassThru{Writer: w, Contenttype: peekContentType, Passthru: passthru}
 				var reasonForBlockArray []string
@@ -1027,7 +1006,7 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if responseSentMedia {
 			Metrics.BlocksMedia.Add(1)
 			passthru.ProxyActionToLog = proxyActionTaken
-			IProxy.LogHandler(GSLogData{Url: r.URL.String(), User: user, Action: proxyActionTaken})
+			IProxy.LogHandler(GSLogData{Url: r.URL.String(), User: user, Action: proxyActionTaken, RuleName: extractRuleName(passthru.UserData)})
 			return
 		}
 
@@ -1038,7 +1017,7 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if responseSentText {
 				Metrics.BlocksKeyword.Add(1)
 				passthru.ProxyActionToLog = proxyActionTaken
-				IProxy.LogHandler(GSLogData{Url: r.URL.String(), User: user, Action: proxyActionTaken})
+				IProxy.LogHandler(GSLogData{Url: r.URL.String(), User: user, Action: proxyActionTaken, RuleName: extractRuleName(passthru.UserData)})
 				return
 			}
 		}
@@ -1195,9 +1174,34 @@ func CheckProxyRules(host string, user string) (bool, interface{}, bool) {
 
 // LogProxyAction logs a proxy action with the given URL, user, and action
 func LogProxyAction(url string, user string, action ProxyAction) {
+	LogProxyActionWithRule(url, user, action, "")
+}
+
+// LogProxyActionWithRule logs a proxy action including the name of the matched rule
+func LogProxyActionWithRule(url string, user string, action ProxyAction, ruleName string) {
 	if IProxy != nil && IProxy.LogHandler != nil {
-		IProxy.LogHandler(GSLogData{Url: url, User: user, Action: action})
+		IProxy.LogHandler(GSLogData{Url: url, User: user, Action: action, RuleName: ruleName})
 	}
+}
+
+// extractRuleName extracts the rule name from a RuleMatch interface{} via reflection
+func extractRuleName(ruleMatch interface{}) string {
+	if ruleMatch == nil {
+		return ""
+	}
+	mv := reflect.ValueOf(ruleMatch)
+	if mv.Kind() != reflect.Struct {
+		return ""
+	}
+	ruleField := mv.FieldByName("Rule")
+	if !ruleField.IsValid() || ruleField.IsNil() {
+		return ""
+	}
+	nameField := ruleField.Elem().FieldByName("Name")
+	if nameField.IsValid() && nameField.Kind() == reflect.String {
+		return nameField.String()
+	}
+	return ""
 }
 
 // ViaIdentifier is the token used in Via headers for loop detection.

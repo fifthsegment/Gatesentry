@@ -78,6 +78,7 @@ type GSLogData struct {
 	ContentType string
 	User        string
 	Action      ProxyAction
+	RuleName    string
 }
 
 type GSUrlFilterData struct {

@@ -7,16 +7,45 @@
   import _ from "lodash";
   import { onDestroy, onMount } from "svelte";
 
+  // ── Types ──
+  interface LogItem {
+    id: string;
+    ip: string;
+    timeRaw: number;
+    url: string;
+    urlShort: string;
+    entryType: string;
+    action: string;
+    actionLabel: string;
+    ruleName: string;
+  }
+
+  // ── State ──
   let search = "";
-  let logs: any[] = [];
+  let logs: LogItem[] = [];
   let eventSource: EventSource | null = null;
   let connected = false;
   let paused = false;
-  let tick = 0; // bumped every 10s to refresh "time ago" labels
+  let tick = 0;
   let tickTimer: ReturnType<typeof setInterval> | null = null;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-  let reconnectDelay = 1000; // start at 1s, exponential backoff up to 30s
-  const MAX_ENTRIES = 200;
+  let reconnectDelay = 1000;
+  let loading = false;
+  let totalAll = 0;
+
+  // Filter state
+  let typeFilter: "all" | "dns" | "proxy" = "all";
+  let actionFilter: "all" | "blocked" | "allowed" = "all";
+  let timeRange = 300;
+
+  const MAX_ENTRIES = 500;
+
+  const TIME_OPTIONS = [
+    { label: "5 min", value: 300 },
+    { label: "1 hour", value: 3600 },
+    { label: "24 hours", value: 86400 },
+    { label: "7 days", value: 604800 },
+  ];
 
   function getBasePath(): string {
     const bp = (window as any).__GS_BASE_PATH__ || "";
@@ -24,34 +53,119 @@
     return bp;
   }
 
-  /** Format a unix-seconds timestamp to relative time. `_tick` forces Svelte reactivity. */
   function timeAgo(unix: number, _tick: number): string {
     if (!unix) return "";
     return format(unix * 1000);
   }
 
-  /** Build a display-friendly item from a raw log entry */
-  const toDisplayItem = (item: any, index: number) => ({
-    id: (item.ip || "") + (item.time || "") + index + (item.url || ""),
-    ip: item.ip || "",
-    timeRaw: item.time || item.Time || 0,
-    url: item.url || "",
-    urlShort: _.truncate(item.url || "", { length: 60 }),
-    responseType:
-      item.type === "dns"
+  function proxyActionLabel(action: string): string {
+    const labels: Record<string, string> = {
+      blocked_url: "Blocked (Domain/URL)",
+      blocked_text_content: "Blocked (Keywords)",
+      blocked_media_content: "Blocked (Media)",
+      blocked_file_type: "Blocked (File Type)",
+      blocked_time: "Blocked (Time)",
+      blocked_internet_for_user: "Blocked (User)",
+      "ssl-bump": "MITM",
+      ssldirect: "Passthrough",
+      filternone: "Allowed",
+      filtererror: "Error",
+    };
+    return labels[action] || action;
+  }
+
+  function dnsActionLabel(action: string): string {
+    const labels: Record<string, string> = {
+      blocked: "Blocked",
+      cached: "Cached",
+      forward: "Forwarded",
+    };
+    return labels[action] || action;
+  }
+
+  function isBlockedAction(entryType: string, action: string): boolean {
+    if (entryType === "dns") return action === "blocked";
+    return action.startsWith("blocked_");
+  }
+
+  function tagType(entryType: string, action: string): string {
+    if (isBlockedAction(entryType, action)) return "red";
+    if (entryType === "dns") {
+      if (action === "cached") return "teal";
+      if (action === "forward") return "blue";
+      return "gray";
+    }
+    if (action === "ssl-bump") return "purple";
+    if (action === "ssldirect") return "blue";
+    if (action === "filternone") return "green";
+    return "gray";
+  }
+
+  function typeTagColor(t: string): string {
+    return t === "dns" ? "blue" : "purple";
+  }
+
+  function toDisplayItem(item: any, index: number): LogItem {
+    const entryType = item.type || "";
+    const action =
+      entryType === "dns"
         ? item.dnsResponseType || item.DNSResponseType || "dns"
-        : item.proxyResponseType || item.ProxyResponseType || "",
-  });
+        : item.proxyResponseType || item.ProxyResponseType || "";
+    const label =
+      entryType === "dns" ? dnsActionLabel(action) : proxyActionLabel(action);
+    const url = item.url || "";
+    return {
+      id: (item.ip || "") + (item.time || "") + index + url,
+      ip: item.ip || "",
+      timeRaw: item.time || item.Time || 0,
+      url,
+      urlShort: _.truncate(url, { length: 120 }),
+      entryType,
+      action,
+      actionLabel: label,
+      ruleName: item.ruleName || item.rule_name || "",
+    };
+  }
 
-  /** Load recent entries via the existing REST endpoint (initial backfill) */
-  const loadInitialData = () => {
-    $store.api.doCall("/logs/viewlive").then(function (json: any) {
-      const items = JSON.parse(json.Items) as Array<any>;
-      logs = items.slice(0, MAX_ENTRIES).map(toDisplayItem);
-    });
-  };
+  function fromQueryEntry(e: any): LogItem {
+    const url = e.url || "";
+    return {
+      id: (e.ip || "") + (e.time || "") + url + Math.random(),
+      ip: e.ip || "",
+      timeRaw: e.time || 0,
+      url,
+      urlShort: _.truncate(url, { length: 120 }),
+      entryType: e.type || "",
+      action: e.action || "",
+      actionLabel: e.action_label || e.action || "",
+      ruleName: e.rule_name || "",
+    };
+  }
 
-  /** Connect to the SSE stream */
+  async function fetchFilteredLogs() {
+    loading = true;
+    try {
+      const params = new URLSearchParams();
+      params.set("seconds", String(timeRange));
+      params.set("limit", String(MAX_ENTRIES));
+      if (typeFilter !== "all") params.set("type", typeFilter);
+      if (actionFilter !== "all") params.set("filter", actionFilter);
+      if (search) params.set("search", search);
+
+      const data = await $store.api.doCall(`/logs/query?${params.toString()}`);
+      if (data && data.entries) {
+        logs = data.entries.map(fromQueryEntry);
+        totalAll = data.total_all || 0;
+      }
+    } catch (e) {
+      console.error("Failed to fetch logs:", e);
+    } finally {
+      loading = false;
+    }
+  }
+
+  const debouncedFetch = _.debounce(fetchFilteredLogs, 400);
+
   function connectSSE() {
     if (eventSource) {
       eventSource.close();
@@ -64,17 +178,15 @@
     const basePath = getBasePath();
     const jwt = localStorage.getItem("jwt") || "";
     if (!jwt) {
-      // No token — don't connect, user needs to log in
       connected = false;
       return;
     }
     const url = `${basePath}/api/logs/stream?token=${encodeURIComponent(jwt)}`;
-
     eventSource = new EventSource(url);
 
     eventSource.onopen = () => {
       connected = true;
-      reconnectDelay = 1000; // reset backoff on successful connection
+      reconnectDelay = 1000;
     };
 
     eventSource.onmessage = (event) => {
@@ -82,14 +194,36 @@
       try {
         const entry = JSON.parse(event.data);
         const item = toDisplayItem(entry, Date.now());
+
+        if (typeFilter !== "all" && item.entryType !== typeFilter) return;
+        if (
+          actionFilter === "blocked" &&
+          !isBlockedAction(item.entryType, item.action)
+        )
+          return;
+        if (
+          actionFilter === "allowed" &&
+          isBlockedAction(item.entryType, item.action)
+        )
+          return;
+        if (search) {
+          const s = search.toLowerCase();
+          if (
+            !item.url.toLowerCase().includes(s) &&
+            !item.ip.toLowerCase().includes(s) &&
+            !item.action.toLowerCase().includes(s) &&
+            !item.ruleName.toLowerCase().includes(s)
+          )
+            return;
+        }
+
         logs = [item, ...logs].slice(0, MAX_ENTRIES);
       } catch (e) {
-        // ignore malformed messages
+        // ignore
       }
     };
 
     eventSource.addEventListener("reconnect", () => {
-      // Server is asking us to reconnect (max duration reached)
       if (eventSource) {
         eventSource.close();
         eventSource = null;
@@ -100,18 +234,12 @@
 
     eventSource.onerror = () => {
       connected = false;
-      // EventSource enters CLOSED state on HTTP error (e.g. 401).
-      // It only auto-reconnects on network errors during an active connection.
       if (eventSource && eventSource.readyState === EventSource.CLOSED) {
-        // HTTP error (likely 401 expired JWT) — do NOT auto-reconnect
-        // in a tight loop. Use exponential backoff.
         eventSource.close();
         eventSource = null;
         reconnectTimer = setTimeout(connectSSE, reconnectDelay);
         reconnectDelay = Math.min(reconnectDelay * 2, 30000);
       }
-      // If readyState is CONNECTING, the browser is auto-reconnecting
-      // from a network error — let it handle it.
     };
   }
 
@@ -119,20 +247,28 @@
     paused = !paused;
   }
 
-  $: filteredLogs =
-    search.length > 0
-      ? logs.filter(
-          (item) =>
-            item.url.toLowerCase().includes(search.toLowerCase()) ||
-            item.ip.includes(search) ||
-            item.responseType.toLowerCase().includes(search.toLowerCase()),
-        )
-      : logs;
+  function setTypeFilter(t: "all" | "dns" | "proxy") {
+    typeFilter = t;
+    fetchFilteredLogs();
+  }
+
+  function setActionFilter(a: "all" | "blocked" | "allowed") {
+    actionFilter = a;
+    fetchFilteredLogs();
+  }
+
+  function setTimeRange(s: number) {
+    timeRange = s;
+    fetchFilteredLogs();
+  }
+
+  $: if (search !== undefined) {
+    debouncedFetch();
+  }
 
   onMount(() => {
-    loadInitialData();
+    fetchFilteredLogs();
     connectSSE();
-    // Refresh "time ago" labels every 10 seconds
     tickTimer = setInterval(() => {
       tick++;
     }, 10000);
@@ -149,13 +285,6 @@
       reconnectTimer = null;
     }
   });
-
-  function tagType(rt: string): string {
-    if (rt === "blocked") return "red";
-    if (rt === "cached") return "teal";
-    if (rt === "forward") return "blue";
-    return "gray";
-  }
 </script>
 
 <div class="gs-page-title">
@@ -163,30 +292,91 @@
   <h2>Log viewer</h2>
 </div>
 
-<p class="log-desc">Shows the past few requests to GateSentry.</p>
+<p class="log-desc">
+  Real-time and historical log entries. Use filters to find blocked requests.
+</p>
 
 <div class="log-notice">
   <InlineNotification
     kind="info"
     lowContrast
     title="Raspberry Pi / SD Card users:"
-    subtitle="To reduce SD card wear, change the log file location to RAM by going to Settings and setting the log location to &quot;/tmp/log.db&quot;. Logs in RAM will not survive a reboot."
+    subtitle={'To reduce SD card wear, change the log file location to RAM by going to Settings and setting the log location to "/tmp/log.db". Logs in RAM will not survive a reboot.'}
     hideCloseButton
   />
 </div>
 
+<!-- Filter bar -->
+<div class="log-filters">
+  <div class="filter-group">
+    <span class="filter-label">Type</span>
+    <div class="filter-pills">
+      <button
+        class="filter-pill"
+        class:filter-pill--active={typeFilter === "all"}
+        on:click={() => setTypeFilter("all")}>All</button
+      >
+      <button
+        class="filter-pill"
+        class:filter-pill--active={typeFilter === "dns"}
+        on:click={() => setTypeFilter("dns")}>DNS</button
+      >
+      <button
+        class="filter-pill"
+        class:filter-pill--active={typeFilter === "proxy"}
+        on:click={() => setTypeFilter("proxy")}>Proxy</button
+      >
+    </div>
+  </div>
+
+  <div class="filter-group">
+    <span class="filter-label">Action</span>
+    <div class="filter-pills">
+      <button
+        class="filter-pill"
+        class:filter-pill--active={actionFilter === "all"}
+        on:click={() => setActionFilter("all")}>All</button
+      >
+      <button
+        class="filter-pill filter-pill--blocked"
+        class:filter-pill--active={actionFilter === "blocked"}
+        on:click={() => setActionFilter("blocked")}>Blocked</button
+      >
+      <button
+        class="filter-pill"
+        class:filter-pill--active={actionFilter === "allowed"}
+        on:click={() => setActionFilter("allowed")}>Allowed</button
+      >
+    </div>
+  </div>
+
+  <div class="filter-group">
+    <span class="filter-label">Window</span>
+    <div class="filter-pills">
+      {#each TIME_OPTIONS as opt}
+        <button
+          class="filter-pill"
+          class:filter-pill--active={timeRange === opt.value}
+          on:click={() => setTimeRange(opt.value)}>{opt.label}</button
+        >
+      {/each}
+    </div>
+  </div>
+</div>
+
+<!-- Search + controls -->
 <div class="log-toolbar">
   <div class="log-search">
     <Search
       bind:value={search}
-      placeholder="Filter by IP, URL, or type…"
+      placeholder="Filter by IP, URL, action, or rule name…"
       size="sm"
     />
   </div>
   <button
     class="log-pause"
     on:click={togglePause}
-    title={paused ? "Resume" : "Pause"}
+    title={paused ? "Resume live updates" : "Pause live updates"}
   >
     {#if paused}
       <Play size={20} />
@@ -197,61 +387,87 @@
   <span class="log-status" class:log-status--connected={connected}>
     {connected ? "Live" : "Connecting…"}
   </span>
+  <span class="log-count">
+    {#if loading}
+      Loading…
+    {:else}
+      {logs.length}{totalAll > logs.length ? ` of ${totalAll}` : ""} entries
+    {/if}
+  </span>
 </div>
 
 <div class="gs-card-flush">
-  <!-- Header row (desktop only) -->
   <div class="log-header">
-    <span class="log-col-ip">IP</span>
+    <span class="log-col-type-badge">Type</span>
+    <span class="log-col-ip">User / IP</span>
     <span class="log-col-time">Time</span>
-    <span class="log-col-url">URL</span>
-    <span class="log-col-type">Type</span>
+    <span class="log-col-url">URL / Domain</span>
+    <span class="log-col-action">Action</span>
   </div>
 
   <div class="gs-row-list" style="border:none;border-radius:0;">
-    {#if filteredLogs.length === 0}
+    {#if logs.length === 0 && !loading}
       <div class="gs-row-item">
         <span class="gs-empty">
-          {search ? "No matching entries" : "Waiting for log entries…"}
+          {search || typeFilter !== "all" || actionFilter !== "all"
+            ? "No matching entries"
+            : "Waiting for log entries…"}
         </span>
       </div>
     {/if}
-    {#each filteredLogs as item (item.id)}
-      <div class="gs-row-item log-row">
-        <!-- Desktop: single horizontal row -->
+    {#each logs as item (item.id)}
+      <div
+        class="gs-row-item log-row"
+        class:log-row--blocked={isBlockedAction(item.entryType, item.action)}
+      >
+        <!-- Desktop layout -->
         <div class="log-row-main">
+          <span class="log-col-type-badge">
+            <Tag type={typeTagColor(item.entryType)} size="sm"
+              >{item.entryType.toUpperCase()}</Tag
+            >
+          </span>
           <span class="log-col-ip log-ip">{item.ip}</span>
           <span class="log-col-time log-time"
             >{timeAgo(item.timeRaw, tick)}</span
           >
-          <span class="log-col-url log-url" title={item.url}
-            >{item.urlShort}</span
-          >
-        </div>
-        <!-- Mobile: top row with time + tag -->
-        <div class="log-row-top">
-          <span class="log-time">{timeAgo(item.timeRaw, tick)}</span>
-          <span class="log-tag-slot">
-            {#if item.responseType}
-              <Tag type={tagType(item.responseType)} size="sm"
-                >{item.responseType}</Tag
+          <span class="log-col-url log-url" title={item.url}>
+            {item.urlShort}
+            {#if item.ruleName}
+              <span class="log-rule" title="Matched rule: {item.ruleName}"
+                >⤷ {item.ruleName}</span
               >
             {/if}
           </span>
         </div>
-        <!-- Mobile: URL -->
+        <!-- Mobile layout -->
+        <div class="log-row-top">
+          <span class="log-time">{timeAgo(item.timeRaw, tick)}</span>
+          <span class="log-tag-slot">
+            <Tag type={typeTagColor(item.entryType)} size="sm"
+              >{item.entryType.toUpperCase()}</Tag
+            >
+            {#if item.action}
+              <Tag type={tagType(item.entryType, item.action)} size="sm"
+                >{item.actionLabel}</Tag
+              >
+            {/if}
+          </span>
+        </div>
         <div class="log-row-url">
           <span class="log-url" title={item.url}>{item.urlShort}</span>
+          {#if item.ruleName}
+            <span class="log-rule">⤷ Rule: {item.ruleName}</span>
+          {/if}
         </div>
-        <!-- Mobile: IP -->
         <div class="log-row-ip">
           <span class="log-ip">{item.ip}</span>
         </div>
-        <!-- Desktop: tag in its column -->
-        <div class="log-col-type">
-          {#if item.responseType}
-            <Tag type={tagType(item.responseType)} size="sm"
-              >{item.responseType}</Tag
+        <!-- Desktop action column -->
+        <div class="log-col-action">
+          {#if item.action}
+            <Tag type={tagType(item.entryType, item.action)} size="sm"
+              >{item.actionLabel}</Tag
             >
           {/if}
         </div>
@@ -266,15 +482,69 @@
     color: #525252;
     margin: 0 0 0.75rem 0;
   }
-
   .log-notice {
     margin-bottom: 0.75rem;
   }
-  /* Force the Carbon notification to fill its container */
   .log-notice :global(.bx--inline-notification) {
     max-width: 100%;
   }
 
+  /* ── Filter bar ── */
+  .log-filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    margin-bottom: 0.75rem;
+    padding: 12px 16px;
+    background: #f4f4f4;
+    border-radius: 4px;
+  }
+  .filter-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .filter-label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #525252;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+  .filter-pills {
+    display: flex;
+    gap: 4px;
+  }
+  .filter-pill {
+    padding: 4px 12px;
+    font-size: 0.8125rem;
+    border: 1px solid #c6c6c6;
+    border-radius: 16px;
+    background: #fff;
+    color: #525252;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .filter-pill:hover {
+    background: #e5e5e5;
+  }
+  .filter-pill--active {
+    background: #0f62fe;
+    color: #fff;
+    border-color: #0f62fe;
+  }
+  .filter-pill--active:hover {
+    background: #0353e9;
+  }
+  .filter-pill--blocked.filter-pill--active {
+    background: #da1e28;
+    border-color: #da1e28;
+  }
+  .filter-pill--blocked.filter-pill--active:hover {
+    background: #ba1b23;
+  }
+
+  /* ── Toolbar ── */
   .log-toolbar {
     display: flex;
     align-items: center;
@@ -283,7 +553,7 @@
   }
   .log-search {
     flex: 1;
-    max-width: 360px;
+    max-width: 400px;
   }
   .log-pause {
     display: flex;
@@ -309,8 +579,14 @@
   .log-status--connected {
     color: #198038;
   }
+  .log-count {
+    font-size: 0.75rem;
+    color: #6f6f6f;
+    white-space: nowrap;
+    margin-left: auto;
+  }
 
-  /* Desktop header row */
+  /* ── Table ── */
   .log-header {
     display: flex;
     align-items: center;
@@ -323,10 +599,12 @@
     text-transform: uppercase;
     letter-spacing: 0.02em;
   }
-
-  /* Column widths (desktop) */
+  .log-col-type-badge {
+    width: 64px;
+    flex-shrink: 0;
+  }
   .log-col-ip {
-    width: 120px;
+    width: 140px;
     flex-shrink: 0;
   }
   .log-col-time {
@@ -337,19 +615,22 @@
     flex: 1;
     min-width: 0;
   }
-  .log-col-type {
-    width: 90px;
+  .log-col-action {
+    width: 170px;
     flex-shrink: 0;
     text-align: right;
   }
 
-  /* Each log row */
   .log-row-main {
     display: flex;
     align-items: center;
     gap: 8px;
     flex: 1;
     min-width: 0;
+  }
+  .log-row--blocked {
+    background: #fff1f1;
+    border-left: 3px solid #da1e28;
   }
   .log-ip {
     font-family: "IBM Plex Mono", monospace;
@@ -367,14 +648,20 @@
     overflow: hidden;
     text-overflow: ellipsis;
   }
+  .log-rule {
+    display: block;
+    font-size: 0.6875rem;
+    color: #da1e28;
+    font-style: italic;
+    margin-top: 1px;
+  }
 
-  /* Mobile-only card rows — hidden on desktop */
+  /* Mobile-only rows */
   .log-row-top,
   .log-row-url,
   .log-row-ip {
     display: none;
   }
-
   .log-row-top {
     align-items: center;
     justify-content: space-between;
@@ -382,8 +669,9 @@
   }
   .log-tag-slot {
     flex-shrink: 0;
+    display: flex;
+    gap: 4px;
   }
-
   .log-row-url {
     width: 100%;
   }
@@ -395,20 +683,21 @@
     width: 100%;
   }
 
-  /* ── Mobile ── */
   @media (max-width: 671px) {
     .log-search {
       max-width: none;
     }
+    .log-filters {
+      flex-direction: column;
+      gap: 8px;
+    }
     .log-header {
       display: none;
     }
-    /* Hide desktop row parts */
     .log-row-main,
-    .log-col-type {
+    .log-col-action {
       display: none;
     }
-    /* Show mobile card parts */
     .log-row-top,
     .log-row-url,
     .log-row-ip {

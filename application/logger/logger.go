@@ -74,7 +74,7 @@ type LogEntry struct {
 	Type              string `json:"type"`
 	DNSResponseType   string `json:"dnsResponseType"`
 	ProxyResponseType string `json:"proxyResponseType"`
-	// Add more fields if needed
+	RuleName          string `json:"ruleName,omitempty"`
 }
 
 func (L *Log) Commit(tx *buntdb.Tx) {
@@ -181,26 +181,25 @@ func (L *Log) LogDNS(domain string, user string, responseType string) {
 	}()
 }
 
-func (L *Log) LogProxy(url string, user string, actionType string) {
+func (L *Log) LogProxy(url string, user string, actionType string, ruleName string) {
 	ip := user
-	// url:=url;
 	go func() {
 		now := time.Now()
 		secs := now.Unix()
-		_ = secs
-		// logitem := "[GS-Logger] " + ctx.Req.RemoteAddr + " - " + ctx.Req.URL.String();
 
 		timestring := gatesentry2utils.Int64toString(secs)
-		logJson := `{"time": ` + timestring + `, "ip":"` + ip + `","url":"` + url + `", "type":"proxy", "proxyResponseType":"` + actionType + `"}`
+		ruleField := ""
+		if ruleName != "" {
+			ruleField = `, "ruleName":"` + ruleName + `"`
+		}
+		logJson := `{"time": ` + timestring + `, "ip":"` + ip + `","url":"` + url + `", "type":"proxy", "proxyResponseType":"` + actionType + `"` + ruleField + `}`
 		key := gatesentry2utils.RandomString(25) + timestring
-		// fmt.Println( logJson );
 
 		err := L.Database.Update(func(tx *buntdb.Tx) error {
 			_, _, err := tx.Set(key, logJson, &buntdb.SetOptions{Expires: true, TTL: Log_Entry_Expires})
 			L.Commit(tx)
 			return err
 		})
-		// fmt.Println( err );
 		_ = err
 
 		// Broadcast to SSE subscribers
@@ -210,9 +209,9 @@ func (L *Log) LogProxy(url string, user string, actionType string) {
 			URL:               url,
 			Type:              "proxy",
 			ProxyResponseType: actionType,
+			RuleName:          ruleName,
 		})
 	}()
-
 }
 
 func (L *Log) GetLog() string {

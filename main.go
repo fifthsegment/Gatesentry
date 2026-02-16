@@ -32,7 +32,7 @@ var GSPROXYPORT = "10413"
 var GSWEBADMINPORT = "80"
 var GSBASEDIR = ""
 var Baseendpointv2 = "https://www.gatesentryfilter.com/api/"
-var GATESENTRY_VERSION = "2.0.0-alpha.8"
+var GATESENTRY_VERSION = "2.0.0-alpha.10"
 var GS_BOUND_ADDRESS = ":"
 var R *application.GSRuntime
 
@@ -371,7 +371,7 @@ func RunGateSentry() {
 		url := gafd.Url
 		user := gafd.User
 		actionTaken := string(gafd.Action)
-		R.Logger.LogProxy(url, user, actionTaken)
+		R.Logger.LogProxy(url, user, actionTaken, gafd.RuleName)
 	}
 
 	ngp.RuleMatchHandler = func(domain string, user string) interface{} {

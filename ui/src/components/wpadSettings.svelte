@@ -10,13 +10,22 @@
     TextInput,
     Button,
     Tag,
+    DataTable,
+    ComposedModal,
+    ModalHeader,
+    ModalBody,
+    ModalFooter,
+    Toolbar,
+    ToolbarContent,
+    InlineLoading,
   } from "carbon-components-svelte";
-  import { Save, WarningAlt } from "carbon-icons-svelte";
+  import { Save, WarningAlt, AddAlt, RowDelete } from "carbon-icons-svelte";
   import { notificationstore } from "../store/notifications";
   import {
     createNotificationSuccess,
     createNotificationError,
   } from "../lib/utils";
+  import { getBasePath } from "../lib/navigate";
 
   let proxyHost = "";
   let proxyPort = "10413";
@@ -140,6 +149,121 @@
   }
 
   onMount(loadSettings);
+
+  // ── Proxy Bypass Lists ──
+  let allLists: any[] = [];
+  let bypassListIds: string[] = [];
+  let bypassLoaded = false;
+  let showBypassPicker = false;
+
+  function getHeaders() {
+    const token = localStorage.getItem("jwt");
+    return {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    };
+  }
+
+  async function loadAllDomainLists() {
+    try {
+      const res = await fetch(getBasePath() + "/api/domainlists", {
+        headers: getHeaders(),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        allLists = data.lists || [];
+      }
+    } catch (e) {
+      console.error("Failed to load domain lists:", e);
+    }
+  }
+
+  async function loadBypassListIds() {
+    try {
+      const resp = await $store.api.getSetting("wpad_bypass_domain_lists");
+      if (resp && resp.Value) {
+        bypassListIds = JSON.parse(resp.Value);
+      } else {
+        bypassListIds = [];
+      }
+    } catch {
+      bypassListIds = [];
+    }
+  }
+
+  async function saveBypassListIds() {
+    try {
+      await $store.api.setSetting(
+        "wpad_bypass_domain_lists",
+        JSON.stringify(bypassListIds),
+      );
+      notificationstore.add(
+        createNotificationSuccess(
+          {
+            title: $_("Success"),
+            subtitle: $_(
+              "Proxy bypass list updated. PAC file will reflect changes on next client refresh.",
+            ),
+          },
+          $_,
+        ),
+      );
+      // Refresh PAC preview to show updated bypass domains
+      await refreshPreview();
+    } catch {
+      notificationstore.add(
+        createNotificationError(
+          { title: $_("Error"), subtitle: $_("Unable to save bypass list") },
+          $_,
+        ),
+      );
+    }
+  }
+
+  function findList(id: string) {
+    return allLists.find((l: any) => l.id === id);
+  }
+
+  function buildBypassRows(ids: string[]) {
+    return ids.map((id) => {
+      const list = findList(id);
+      return {
+        id: id,
+        name: list ? list.name : id,
+        source: list ? list.source : "—",
+        category: list ? list.category || "—" : "—",
+        entry_count: list ? list.entry_count || 0 : 0,
+        actions: "",
+      };
+    });
+  }
+
+  function getAvailableForBypass() {
+    return allLists.filter((l: any) => !bypassListIds.includes(l.id));
+  }
+
+  async function addBypassList(listId: string) {
+    bypassListIds = [...bypassListIds, listId];
+    await saveBypassListIds();
+    showBypassPicker = false;
+  }
+
+  async function removeBypassList(id: string) {
+    bypassListIds = bypassListIds.filter((i) => i !== id);
+    await saveBypassListIds();
+  }
+
+  // Load bypass lists alongside other settings
+  async function loadBypassData() {
+    await Promise.all([loadAllDomainLists(), loadBypassListIds()]);
+    bypassLoaded = true;
+  }
+
+  // Trigger bypass data load on mount alongside settings
+  onMount(() => {
+    loadSettings();
+    loadBypassData();
+  });
 </script>
 
 <div class="wpad-section">
@@ -274,6 +398,153 @@
         </ol>
       </div>
     </InlineNotification>
+
+    <!-- ── Proxy Bypass Lists ── -->
+    <Tile class="wpad-bypass-tile">
+      <div class="wpad-config-header">
+        <strong>{$_("Proxy Bypass Lists")}</strong>
+        {#if bypassListIds.length > 0}
+          <Tag type="cyan" size="sm">
+            {bypassListIds.length}
+            {bypassListIds.length === 1 ? $_("list") : $_("lists")}
+          </Tag>
+        {/if}
+      </div>
+      <p class="wpad-config-desc">
+        {$_(
+          "Domains in these lists will bypass the proxy entirely (connect DIRECT). Use this for applications that don't support proxy authentication, such as 1Password, GitHub Copilot, or apps with certificate pinning. The PAC file served to clients will include these domains as bypass entries.",
+        )}
+      </p>
+
+      {#if !bypassLoaded}
+        <InlineLoading description="Loading bypass lists..." />
+      {:else}
+        <DataTable
+          size="medium"
+          headers={[
+            { key: "name", value: $_("Name") },
+            { key: "source", value: $_("Source") },
+            { key: "category", value: $_("Category") },
+            { key: "entry_count", value: $_("Domains") },
+            { key: "actions", value: "" },
+          ]}
+          rows={buildBypassRows(bypassListIds)}
+        >
+          <Toolbar size="sm">
+            <ToolbarContent>
+              <Button
+                size="small"
+                kind="primary"
+                icon={AddAlt}
+                on:click={() => {
+                  showBypassPicker = true;
+                }}
+              >
+                {$_("Add Bypass List")}
+              </Button>
+            </ToolbarContent>
+          </Toolbar>
+          <svelte:fragment slot="cell" let:row let:cell>
+            {#if cell.key === "actions"}
+              <div style="float: right;">
+                <Button
+                  size="small"
+                  kind="danger-ghost"
+                  icon={RowDelete}
+                  iconDescription={$_("Remove")}
+                  on:click={() => removeBypassList(row.id)}
+                />
+              </div>
+            {:else if cell.key === "source"}
+              <Tag size="sm" type={cell.value === "url" ? "blue" : "green"}>
+                {cell.value === "url" ? "URL" : "Local"}
+              </Tag>
+            {:else if cell.key === "entry_count"}
+              <strong>{cell.value.toLocaleString()}</strong>
+            {:else}
+              {cell.value}
+            {/if}
+          </svelte:fragment>
+        </DataTable>
+
+        {#if bypassListIds.length === 0}
+          <p class="wpad-bypass-empty">
+            {$_(
+              "No bypass lists configured. All traffic will be routed through the proxy as defined by the PAC file above.",
+            )}
+          </p>
+        {/if}
+      {/if}
+    </Tile>
+
+    {#if showBypassPicker}
+      <ComposedModal
+        open
+        on:close={() => {
+          showBypassPicker = false;
+        }}
+      >
+        <ModalHeader title={$_("Add Domain List to Proxy Bypass")} />
+        <ModalBody>
+          <p style="margin-bottom: 1rem; color: #525252; font-size: 0.85rem;">
+            {$_(
+              "Select a domain list. All domains in the list will bypass the proxy (DIRECT connection) — useful for apps that don't support proxy authentication or use certificate pinning.",
+            )}
+          </p>
+          {#if getAvailableForBypass().length === 0}
+            <p style="padding: 16px 0; color: #525252;">
+              {$_(
+                "No domain lists available. Create one on the Domain Lists page first.",
+              )}
+            </p>
+          {:else}
+            <DataTable
+              size="compact"
+              headers={[
+                { key: "name", value: $_("Name") },
+                { key: "source", value: $_("Source") },
+                { key: "category", value: $_("Category") },
+                { key: "entry_count", value: $_("Domains") },
+                { key: "pick", value: "" },
+              ]}
+              rows={getAvailableForBypass().map((l) => ({
+                id: l.id,
+                name: l.name,
+                source: l.source,
+                category: l.category || "—",
+                entry_count: l.entry_count || 0,
+                pick: "",
+              }))}
+            >
+              <svelte:fragment slot="cell" let:row let:cell>
+                {#if cell.key === "pick"}
+                  <Button
+                    size="small"
+                    kind="primary"
+                    icon={AddAlt}
+                    iconDescription={$_("Add")}
+                    on:click={() => addBypassList(row.id)}
+                  />
+                {:else if cell.key === "source"}
+                  <Tag size="sm" type={cell.value === "url" ? "blue" : "green"}>
+                    {cell.value === "url" ? "URL" : "Local"}
+                  </Tag>
+                {:else if cell.key === "entry_count"}
+                  <strong>{cell.value.toLocaleString()}</strong>
+                {:else}
+                  {cell.value}
+                {/if}
+              </svelte:fragment>
+            </DataTable>
+          {/if}
+        </ModalBody>
+        <ModalFooter>
+          <Button kind="secondary" on:click={() => (showBypassPicker = false)}>
+            {$_("Cancel")}
+          </Button>
+        </ModalFooter>
+      </ComposedModal>
+    {/if}
   {/if}
 </div>
 
@@ -313,6 +584,16 @@
   }
   :global(.wpad-info-tile) {
     margin-bottom: 1rem;
+  }
+  :global(.wpad-bypass-tile) {
+    margin-top: 1rem;
+    margin-bottom: 1rem;
+  }
+  .wpad-bypass-empty {
+    padding: 1rem 0 0.5rem;
+    color: #525252;
+    font-size: 0.85rem;
+    font-style: italic;
   }
   .wpad-info-grid {
     display: grid;

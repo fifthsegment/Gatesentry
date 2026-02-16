@@ -7,6 +7,7 @@ import (
 	"time"
 
 	gatesentry2storage "bitbucket.org/abdullah_irfan/gatesentryf/storage"
+	GatesentryTypes "bitbucket.org/abdullah_irfan/gatesentryf/types"
 	gatesentryWebserver "bitbucket.org/abdullah_irfan/gatesentryf/webserver"
 	gatesentryWebserverTypes "bitbucket.org/abdullah_irfan/gatesentryf/webserver/types"
 )
@@ -40,6 +41,7 @@ func GSwebserverStart(port int) {
 
 	runtimeArgs := gatesentryWebserverTypes.InputArgs{
 		GetUserGetJSON:          R.GSUserGetDataJSON,
+		GetAuthUsers:            func() []GatesentryTypes.GSUser { return R.AuthUsers },
 		AuthUsers:               R.AuthUsers,
 		RemoveUser:              R.RemoveUser,
 		UpdateUser:              R.UpdateUser,

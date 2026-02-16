@@ -19,17 +19,87 @@ var validHostnameOrIP = regexp.MustCompile(`^[a-zA-Z0-9._:\[\]-]+$`)
 // validPort matches a numeric port (1–65535 range checked separately).
 var validPort = regexp.MustCompile(`^[0-9]{1,5}$`)
 
+// validDomain matches domain names: alphanumeric, dots, hyphens only.
+// Used to sanitize bypass domain entries before interpolating into PAC JS.
+var validDomain = regexp.MustCompile(`^[a-zA-Z0-9.-]+$`)
+
+// maxBypassDomains limits how many bypass domains can be included in the PAC file.
+// PAC files are evaluated by the browser on every request, so too many entries
+// will degrade performance.
+const maxBypassDomains = 1000
+
+// loadBypassDomains reads the wpad_bypass_domain_lists setting (JSON array of
+// domain list IDs), fetches all domains from those lists via the DomainListManager,
+// and returns a deduplicated, sanitized slice of domain names.
+func loadBypassDomains(settings *gatesentry2storage.MapStore) []string {
+	raw := settings.Get("wpad_bypass_domain_lists")
+	if raw == "" {
+		return nil
+	}
+
+	var listIDs []string
+	if err := json.Unmarshal([]byte(raw), &listIDs); err != nil {
+		log.Printf("[WPAD] WARNING: failed to parse wpad_bypass_domain_lists: %v", err)
+		return nil
+	}
+
+	dlm := GetDomainListManager()
+	if dlm == nil {
+		log.Printf("[WPAD] WARNING: domain list manager not initialized, cannot load bypass domains")
+		return nil
+	}
+
+	seen := make(map[string]bool)
+	var domains []string
+
+	for _, listID := range listIDs {
+		listDomains, err := dlm.GetDomainsForList(listID)
+		if err != nil {
+			log.Printf("[WPAD] WARNING: failed to load domains for list %s: %v", listID, err)
+			continue
+		}
+		for _, d := range listDomains {
+			d = strings.TrimRight(strings.TrimSpace(strings.ToLower(d)), ".")
+			if d == "" || seen[d] {
+				continue
+			}
+			// Sanitize: only allow safe domain characters (defense-in-depth
+			// against JS injection even though these come from admin-managed lists)
+			if !validDomain.MatchString(d) {
+				log.Printf("[WPAD] WARNING: skipping invalid bypass domain %q", d)
+				continue
+			}
+			seen[d] = true
+			domains = append(domains, d)
+			if len(domains) >= maxBypassDomains {
+				log.Printf("[WPAD] WARNING: bypass domain limit reached (%d), truncating", maxBypassDomains)
+				break
+			}
+		}
+		if len(domains) >= maxBypassDomains {
+			break
+		}
+	}
+
+	return domains
+}
+
 // GeneratePACFile generates a Proxy Auto-Config (PAC) file.
 //
 // The PAC file tells browsers:
 //   - Bypass the proxy for local/private addresses (RFC 1918)
 //   - Bypass the proxy for the GateSentry admin UI itself
+//   - Bypass the proxy for admin-configured bypass domains (e.g. 1Password, Copilot)
 //   - Route all other traffic through the GateSentry proxy
 //
 // proxyHost and proxyPort come from admin-configured settings —
 // they are NOT auto-detected, because only the admin knows how
 // clients on their network can reach the proxy.
-func GeneratePACFile(proxyHost, proxyPort string) string {
+//
+// bypassDomains is an optional list of domains that should connect DIRECT,
+// bypassing the proxy entirely. Useful for apps that don't support proxy
+// authentication (certificate pinning, etc.).
+func GeneratePACFile(proxyHost, proxyPort string, bypassDomains []string) string {
 	// Validate inputs to prevent JavaScript injection in the PAC file.
 	// These values come from admin-configured settings, but defense-in-depth
 	// requires we never interpolate unvalidated strings into JS.
@@ -40,6 +110,42 @@ func GeneratePACFile(proxyHost, proxyPort string) string {
 	if !validPort.MatchString(proxyPort) {
 		log.Printf("[WPAD] WARNING: invalid proxyPort %q — refusing to generate PAC", proxyPort)
 		return "function FindProxyForURL(url, host) { return \"DIRECT\"; }\n"
+	}
+
+	// Build the optional bypass domains section
+	var bypassSection string
+	if len(bypassDomains) > 0 {
+		var sb strings.Builder
+		sb.WriteString("\n    // --- Admin-configured proxy bypass domains ---\n")
+		sb.WriteString("    // These domains connect DIRECTLY without going through the proxy.\n")
+		sb.WriteString("    // Configured via Settings > WPAD > Proxy Bypass Lists.\n")
+		sb.WriteString("    // Useful for apps that don't support proxy auth (1Password, Copilot, etc.)\n")
+
+		if len(bypassDomains) <= 15 {
+			// Small list: use a single if-statement with || for readability
+			sb.WriteString("    if (")
+			for i, d := range bypassDomains {
+				if i > 0 {
+					sb.WriteString(" ||\n        ")
+				}
+				sb.WriteString(fmt.Sprintf("dnsDomainIs(host, \"%s\")", d))
+			}
+			sb.WriteString(") {\n        return \"DIRECT\";\n    }\n")
+		} else {
+			// Large list: use an array + loop for a smaller, faster PAC file
+			sb.WriteString("    var bypassDomains = [\n")
+			for i, d := range bypassDomains {
+				if i > 0 {
+					sb.WriteString(",\n")
+				}
+				sb.WriteString(fmt.Sprintf("        \"%s\"", d))
+			}
+			sb.WriteString("\n    ];\n")
+			sb.WriteString("    for (var i = 0; i < bypassDomains.length; i++) {\n")
+			sb.WriteString("        if (dnsDomainIs(host, bypassDomains[i])) return \"DIRECT\";\n")
+			sb.WriteString("    }\n")
+		}
+		bypassSection = sb.String()
 	}
 
 	return fmt.Sprintf(`function FindProxyForURL(url, host) {
@@ -89,13 +195,13 @@ func GeneratePACFile(proxyHost, proxyPort string) string {
     if (shExpMatch(host, "%s")) {
         return "DIRECT";
     }
-
+%s
     // --- Everything else goes through GateSentry proxy ---
     // PROXY = HTTP proxying;  HTTPS = HTTPS proxying (CONNECT tunnelling)
     // Both are needed so clients set both HTTP_PROXY and HTTPS_PROXY.
     return "PROXY %s:%s; HTTPS %s:%s; DIRECT";
 }
-`, proxyHost, proxyHost, proxyPort, proxyHost, proxyPort)
+`, proxyHost, bypassSection, proxyHost, proxyPort, proxyHost, proxyPort)
 }
 
 // GSApiWPADHandler serves the WPAD/PAC file.
@@ -123,9 +229,10 @@ func GSApiWPADHandler(settings *gatesentry2storage.MapStore) http.HandlerFunc {
 			log.Printf("[WPAD] Served UNCONFIGURED PAC file to %s (wpad_proxy_host not set)",
 				clientIP(r))
 		} else {
-			pac = GeneratePACFile(proxyHost, proxyPort)
-			log.Printf("[WPAD] Served PAC file to %s (proxy=%s:%s)",
-				clientIP(r), proxyHost, proxyPort)
+			bypassDomains := loadBypassDomains(settings)
+			pac = GeneratePACFile(proxyHost, proxyPort, bypassDomains)
+			log.Printf("[WPAD] Served PAC file to %s (proxy=%s:%s, bypass_domains=%d)",
+				clientIP(r), proxyHost, proxyPort, len(bypassDomains))
 		}
 
 		w.Header().Set("Content-Type", "application/x-ns-proxy-autoconfig")
@@ -163,25 +270,33 @@ func GSApiWPADInfoHandler(settings *gatesentry2storage.MapStore, adminPort strin
 			}
 		}
 
+		// Load bypass domains for the PAC preview
+		var bypassDomains []string
+		if configured {
+			bypassDomains = loadBypassDomains(settings)
+		}
+
 		result := struct {
-			Enabled    bool   `json:"enabled"`
-			Configured bool   `json:"configured"`
-			ProxyHost  string `json:"proxyHost"`
-			ProxyPort  string `json:"proxyPort"`
-			AdminPort  string `json:"adminPort"`
-			PACURL     string `json:"pacUrl"`
-			PACFile    string `json:"pacFile"`
+			Enabled       bool   `json:"enabled"`
+			Configured    bool   `json:"configured"`
+			ProxyHost     string `json:"proxyHost"`
+			ProxyPort     string `json:"proxyPort"`
+			AdminPort     string `json:"adminPort"`
+			PACURL        string `json:"pacUrl"`
+			PACFile       string `json:"pacFile"`
+			BypassDomains int    `json:"bypassDomains"`
 		}{
-			Enabled:    settings.Get("wpad_enabled") != "false",
-			Configured: configured,
-			ProxyHost:  proxyHost,
-			ProxyPort:  proxyPort,
-			AdminPort:  adminPort,
-			PACURL:     pacURL,
+			Enabled:       settings.Get("wpad_enabled") != "false",
+			Configured:    configured,
+			ProxyHost:     proxyHost,
+			ProxyPort:     proxyPort,
+			AdminPort:     adminPort,
+			PACURL:        pacURL,
+			BypassDomains: len(bypassDomains),
 		}
 
 		if configured {
-			result.PACFile = GeneratePACFile(proxyHost, proxyPort)
+			result.PACFile = GeneratePACFile(proxyHost, proxyPort, bypassDomains)
 		}
 
 		w.Header().Set("Content-Type", "application/json")

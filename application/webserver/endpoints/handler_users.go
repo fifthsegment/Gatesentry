@@ -8,8 +8,6 @@ import (
 
 	gatesentry2storage "bitbucket.org/abdullah_irfan/gatesentryf/storage"
 	GatesentryTypes "bitbucket.org/abdullah_irfan/gatesentryf/types"
-
-	gatesentryWebserverTypes "bitbucket.org/abdullah_irfan/gatesentryf/webserver/types"
 )
 
 const ERROR_FAILED_VALIDATION = "Username or password too short. Username must be at least 3 characters and password must be at least 10 characters"
@@ -40,10 +38,10 @@ func ValidateUserInputJsonSingle(userJson UserInputJsonSingle) bool {
 	return true
 }
 
-func GSApiUsersGET(runtime *gatesentryWebserverTypes.TemporaryRuntime, usersString string) interface{} {
-	users := []GatesentryTypes.GSUser{}
-	json.Unmarshal([]byte(usersString), &users)
-
+func GSApiUsersGET(users []GatesentryTypes.GSUser) interface{} {
+	if users == nil {
+		users = []GatesentryTypes.GSUser{}
+	}
 	return UserEndpointJson{Users: users}
 }
 

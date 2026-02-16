@@ -346,7 +346,7 @@ func RegisterEndpointsStartServer(
 	})
 
 	internalServer.Get("/api/users", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
-		jsonResponse := gatesentryWebserverEndpoints.GSApiUsersGET(runtime, internalSettings.Get("authusers"))
+		jsonResponse := gatesentryWebserverEndpoints.GSApiUsersGET(runtime.GetAuthUsers())
 		SendJSON(w, jsonResponse)
 	})
 
@@ -456,6 +456,11 @@ func RegisterEndpointsStartServer(
 				flusher.Flush()
 			}
 		}
+	})
+
+	// Queryable log endpoint with filters (type, action, search, user, time range)
+	internalServer.Get("/api/logs/query", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.ApiLogsQuery(w, r, logger)
 	})
 
 	internalServer.Get("/api/logs/{id}", HttpHandlerFunc(func(w http.ResponseWriter, r *http.Request) {
