@@ -391,7 +391,7 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			Metrics.AuthFailures.Add(1)
 			w.Header().Set("Proxy-Authenticate", "Basic realm="+"gsrealm")
 			http.Error(w, "Proxy authentication required", http.StatusProxyAuthRequired)
-			log.Printf("Missing required proxy authentication from %v to %v", r.RemoteAddr, r.URL)
+			LogProxyAction(r.URL.String(), client, ProxyActionAuthFailure)
 			return
 		} else {
 			// _, userAuthStatus := IProxy.RunHandler("isaccessactive", "", &EMPTY_BYTES, passthru)
@@ -406,7 +406,7 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				Metrics.AuthFailures.Add(1)
 				w.Header().Set("Proxy-Authenticate", "Basic realm="+"gsrealm")
 				http.Error(w, "Proxy authentication required", http.StatusProxyAuthRequired)
-				log.Printf("Missing required proxy authentication from %v to %v", r.RemoteAddr, r.URL)
+				LogProxyAction(r.URL.String(), client, ProxyActionAuthFailure)
 				return
 			}
 			if userAuthStatusString != ProxyActionUserActive && !isHostLanAddress {

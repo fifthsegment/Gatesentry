@@ -66,6 +66,7 @@
       blocked_file_type: "Blocked (File Type)",
       blocked_time: "Blocked (Time)",
       blocked_internet_for_user: "Blocked (User)",
+      auth_failure: "Auth Failure",
       "ssl-bump": "MITM",
       ssldirect: "Passthrough",
       filternone: "Allowed",
@@ -85,10 +86,11 @@
 
   function isBlockedAction(entryType: string, action: string): boolean {
     if (entryType === "dns") return action === "blocked";
-    return action.startsWith("blocked_");
+    return action.startsWith("blocked_") || action === "auth_failure";
   }
 
   function tagType(entryType: string, action: string): string {
+    if (action === "auth_failure") return "magenta";
     if (isBlockedAction(entryType, action)) return "red";
     if (entryType === "dns") {
       if (action === "cached") return "teal";

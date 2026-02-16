@@ -17,6 +17,7 @@ const (
 	ProxyActionUserNotFound           ProxyAction = "user_not_found"
 	ProxyActionUserActive             ProxyAction = "user_active"
 	ProxyActionBlockedUrl             ProxyAction = "blocked_url"
+	ProxyActionAuthFailure            ProxyAction = "auth_failure"
 	ProxyActionSSLDirect              ProxyAction = "ssldirect"
 	ProxyActionSSLBump                ProxyAction = "ssl-bump"
 	ProxyActionFilterError            ProxyAction = "filtererror"

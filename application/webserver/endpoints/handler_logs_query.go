@@ -47,6 +47,8 @@ func proxyActionLabel(action string) string {
 		return "Blocked (Time)"
 	case string(gatesentryproxy.ProxyActionBlockedInternetForUser):
 		return "Blocked (User)"
+	case string(gatesentryproxy.ProxyActionAuthFailure):
+		return "Auth Failure"
 	case string(gatesentryproxy.ProxyActionSSLBump):
 		return "Allowed (MITM)"
 	case string(gatesentryproxy.ProxyActionSSLDirect):
@@ -82,7 +84,8 @@ func isProxyBlocked(action string) bool {
 		string(gatesentryproxy.ProxyActionBlockedFileType),
 		string(gatesentryproxy.ProxyActionBlockedTime),
 		string(gatesentryproxy.ProxyActionBlockedInternetForUser),
-		string(gatesentryproxy.ProxyActionBlockedUrl):
+		string(gatesentryproxy.ProxyActionBlockedUrl),
+		string(gatesentryproxy.ProxyActionAuthFailure):
 		return true
 	}
 	return false
