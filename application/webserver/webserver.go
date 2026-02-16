@@ -527,6 +527,11 @@ func RegisterEndpointsStartServer(
 		SendJSON(w, output)
 	})
 
+	// Proxy-only traffic stats (filterable by user and time window)
+	internalServer.Get("/api/stats/proxy", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.ApiGetProxyStats(w, r, logger)
+	})
+
 	internalServer.Get("/api/toggleServer/{id}", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
 		params := mux.Vars(r)
 		id := params["id"]

@@ -1,0 +1,142 @@
+# GateSentry — golangci-lint configuration
+# Covers the categories of issues caught by GitHub Copilot PR reviews:
+#   - Security (XSS, injection, credential exposure, header leaking)
+#   - Correctness (loop variable capture, nil derefs, unchecked errors)
+#   - Code quality (dead code, unused params, verbose logging patterns)
+#
+# Run:  golangci-lint run ./...
+# Or:   make lint
+
+version: "2"
+
+run:
+  # Multi-module workspace: lint each module
+  go: "1.24"
+  timeout: 5m
+
+linters:
+  default: none
+  enable:
+    # --- Security ---
+    - gosec # Finds security problems: XSS (G203), SQL injection, hardcoded creds (G101), weak crypto
+    - govet # Reports suspicious constructs (printf format mismatches, struct tag issues, etc.)
+
+    # --- Correctness ---
+    - staticcheck # Advanced static analysis (SA* checks): nil derefs, impossible conditions, deprecated APIs
+    - errcheck # Unchecked error returns — critical for a proxy/DNS server
+    - bodyclose # Unclosed HTTP response bodies (resource leaks)
+    - copyloopvar # Loop variable captured by pointer/closure (the exact range-loop bug Copilot caught)
+    - nilerr # Returning nil when err is non-nil (swallowed errors)
+    - durationcheck # Detects incorrect time.Duration multiplication
+    - intrange # Suggests integer range loops (Go 1.22+)
+
+    # --- Code Quality ---
+    - ineffassign # Detects useless assignments
+    - unconvert # Unnecessary type conversions
+    - unused # Unused code (functions, variables, types)
+    - gocritic # Opinionated linter: code simplification, performance, style
+    - misspell # Catches common typos in comments and strings
+
+    # --- Style (lightweight) ---
+    - revive # Fast, extensible linter (subset of golint successor)
+
+formatters:
+  enable:
+    - gofmt # Enforces standard formatting
+
+linters-settings:
+  gosec:
+    includes:
+      - G101 # Hardcoded credentials
+      - G103 # Unsafe package usage
+      - G201 # SQL string formatting
+      - G202 # SQL string concatenation
+      - G203 # Unescaped data in HTML templates ← catches XSS in block pages, PAC files
+      - G301 # Poor file permissions
+      - G302 # Poor file permissions on creation
+      - G304 # File path from tainted input
+      - G401 # Weak cryptographic primitive
+      - G501 # Importing blocklisted crypto package
+      - G601 # Implicit memory aliasing in for loop (pre-Go-1.22)
+
+  gocritic:
+    enabled-checks:
+      - appendAssign
+      - argOrder
+      - badCall
+      - badCond
+      - badRegexp
+      - dupArg
+      - dupBranchBody
+      - dupCase
+      - dupSubExpr
+      - exitAfterDefer
+      - flagDeref
+      - nilValReturn
+      - rangeExprCopy
+      - sloppyLen
+      - truncateCmp
+      - unnecessaryBlock
+
+  revive:
+    rules:
+      - name: blank-imports
+      - name: context-as-argument
+      - name: context-keys-type
+      - name: error-return
+      - name: error-strings
+      - name: exported
+        disabled: true # Too noisy for this codebase
+      - name: increment-decrement
+      - name: indent-error-flow
+      - name: range
+      - name: receiver-naming
+      - name: redefines-builtin-id
+      - name: superfluous-else
+      - name: unreachable-code
+      - name: unused-parameter
+
+  staticcheck:
+    checks:
+      - "all"
+      - "-ST1000" # Package comments — not enforced yet
+      - "-ST1003" # Naming conventions — too noisy for existing code
+      - "-ST1016" # Method receiver names — too noisy
+
+  misspell:
+    locale: US
+
+issues:
+  # Don't limit the number of issues per linter
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+  exclude-rules:
+    # Test files get relaxed rules
+    - path: _test\.go
+      linters:
+        - errcheck # Tests often intentionally ignore errors
+        - gosec # Test fixtures may have "hardcoded" test credentials
+        - bodyclose # Test HTTP clients don't always close bodies
+
+    # The proxy module is Go 1.17 — skip linters that need newer Go
+    - path: gatesentryproxy/
+      linters:
+        - copyloopvar # Needs Go 1.22+
+        - intrange # Needs Go 1.22+
+
+    # Shell/script-generated code
+    - path: ".*generated.*"
+      linters:
+        - all
+
+output:
+  formats:
+    text:
+      path: stdout
+      format: colored-line-number
+  sort-results: true
+  sort-order:
+    - linter
+    - severity
+    - file

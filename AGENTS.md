@@ -150,6 +150,62 @@ The rule form (`ui/src/routes/rules/rform.svelte`) is organized to match this pi
 3. **Rule Selection Criteria** — Domain patterns, domain lists, URL patterns, content-type. URL patterns and content-type show an informational "HTTPS requires MITM" badge when MITM is off (fields remain editable since they always work on HTTP).
 4. **Matching Results** — Keyword filter toggle (shows "HTTPS requires MITM" badge when MITM is off, remains editable) and final action (Allow / Block).
 
+## Code Quality & Common Pitfalls
+
+These rules are derived from recurring issues caught during PR code reviews. **Always** check new code against these before committing.
+
+### Linting
+
+- **Run `make lint`** before committing Go changes. The project uses `golangci-lint` (config: `.golangci.yml`).
+- **Run `shellcheck`** on any modified `.sh` files.
+- Pre-commit hooks (`.pre-commit-config.yaml`) automate both — install with `pre-commit install`.
+
+### Security — HTML/JS/Template Injection
+
+- **Never interpolate user-controlled or config values directly into HTML or JavaScript strings** with `fmt.Sprintf`. This includes:
+  - The `host` from `r.Host` in block pages → use `html.EscapeString(host)`
+  - `basePath` injected into `<script>` tags → JSON-encode for JS, HTML-escape for `href`
+  - `proxyHost`/`proxyPort` in PAC file JS → validate as hostname/IP and numeric port first
+- When generating HTML, prefer `html/template` over `fmt.Sprintf` whenever possible.
+
+### Security — Proxy Header Hygiene
+
+- **Strip hop-by-hop and proxy-only headers** before forwarding requests upstream, especially in WebSocket tunnels. The following headers must NOT be forwarded:
+  - `Proxy-Authorization`, `Proxy-Authenticate`, `Proxy-Connection`
+  - Hop-by-hop headers listed in `Connection:` header values
+  - `TE`, `Transfer-Encoding`, `Upgrade` (unless specifically needed for the tunnel)
+
+### Security — Secrets & Credentials
+
+- **Never commit real private keys or credentials**, even for tests. Use `tests/fixtures/gen_test_certs.sh` to generate ephemeral test certs.
+- **Never pass passwords via CLI flags** (e.g., `docker login -p`). Use `--password-stdin` or environment variables.
+- Test fixture keys in `.gitignore` are OK; anything in tracked files must be obviously synthetic.
+
+### Correctness — Go-Specific
+
+- **Range loop variable pointers**: In Go < 1.22, `&item` inside `for _, item := range` returns the address of the *reused* loop variable. Use `for i := range items` and `&items[i]` instead, or assign to a local variable first. The `gatesentryproxy` module is Go 1.17 — this is especially critical there.
+- **DNS FQDN trailing dots**: DNS-derived hostnames may include a trailing `.` (e.g., `example.com.`). Always normalize with `strings.TrimRight(domain, ".")` before comparing against domain lists or patterns.
+- **DNS cache keys**: `dns.TypeToString[qtype]` returns empty string for unknown qtypes. Always fall back to a numeric string (e.g., `strconv.Itoa(int(qtype))`) to prevent cache key collisions.
+- **`http.Error` with JSON bodies**: `http.Error` sets `Content-Type: text/plain`. If the body is JSON, manually set `Content-Type: application/json` and use `w.WriteHeader()` + `json.NewEncoder(w).Encode()`.
+
+### Correctness — Configuration
+
+- **Never hardcode ports or addresses**. Always read from environment variables or settings:
+  - Admin port → `GS_ADMIN_PORT` (default `8080`)
+  - DNS port → `GATESENTRY_DNS_PORT` (default `10053`)
+  - Proxy port → configured in settings
+- **Normalize `basePath`**: Ensure it starts with `/` and does NOT end with `/` to avoid double-slash redirects.
+- **Test scripts**: Default to `localhost` / `127.0.0.1`, not private LAN IPs. Use environment variables for non-default addresses.
+
+### Code Quality
+
+- **No verbose logging in hot paths**. Functions called on every request (e.g., `GetHistory`, proxy handlers) should not log per-invocation unless behind a debug flag. Use `log.Printf` sparingly in:
+  - Request-level proxy handling
+  - DNS query resolution
+  - Cache operations called from API handlers
+- **No no-op tests**. Every test function must contain at least one assertion. A test that only calls `_ = rm` gives false coverage.
+- **Documentation consistency**: When changing default ports, paths, or URLs, grep for the old value across README.md, AGENTS.md, Makefile, Dockerfile, docker-compose.yml, and run.sh/restart.sh. Update all occurrences.
+
 ## Current Work In Progress
 
 We are implementing the **Domain List & Rules Enhancement Plan** (`DOMAIN_LIST_RULES_PLAN.md`). This is a multi-phase effort to unify DNS blocklists, proxy filters, and per-user rules around reusable "Domain Lists."

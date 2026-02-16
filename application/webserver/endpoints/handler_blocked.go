@@ -2,6 +2,7 @@ package gatesentryWebserverEndpoints
 
 import (
 	"fmt"
+	"html"
 	"net/http"
 )
 
@@ -10,6 +11,9 @@ import (
 // The DNS server resolves blocked domains to GateSentry's own IP, so the browser
 // connects to GateSentry and receives this page instead of a connection error.
 func BlockedPageHTML(host string) string {
+	// Escape host to prevent XSS — host comes from the HTTP Host header
+	// which is attacker-controlled.
+	host = html.EscapeString(host)
 	return fmt.Sprintf(`<!DOCTYPE html>
 <html lang="en">
 <head>

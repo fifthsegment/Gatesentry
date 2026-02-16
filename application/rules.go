@@ -156,8 +156,8 @@ func (rm *RuleManager) GetRule(ruleID string) (*GatesentryTypes.Rule, error) {
 
 // MatchDomain checks if a domain matches a rule's domain pattern
 func matchDomain(pattern, domain string) bool {
-	pattern = strings.ToLower(pattern)
-	domain = strings.ToLower(domain)
+	pattern = strings.ToLower(strings.TrimRight(pattern, "."))
+	domain = strings.ToLower(strings.TrimRight(domain, "."))
 
 	// Universal wildcard — matches every domain
 	if pattern == "*" {
@@ -254,6 +254,9 @@ func checkTimeRestriction(restriction *GatesentryTypes.TimeRestriction) bool {
 
 // MatchRule finds the first matching rule for a given domain and user
 func (rm *RuleManager) MatchRule(domain, user string) GatesentryTypes.RuleMatch {
+	// Normalize FQDN trailing dot — DNS-derived hostnames may include it
+	domain = strings.TrimRight(domain, ".")
+
 	rules, err := rm.GetRules()
 	if err != nil {
 		log.Printf("Error getting rules: %v", err)

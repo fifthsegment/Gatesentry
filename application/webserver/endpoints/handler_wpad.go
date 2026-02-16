@@ -6,10 +6,18 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"regexp"
 	"strings"
 
 	gatesentry2storage "bitbucket.org/abdullah_irfan/gatesentryf/storage"
 )
+
+// validHostnameOrIP matches hostnames, IPv4 addresses, and bracketed IPv6.
+// Rejects strings containing JS-special characters (quotes, backslashes, semicolons).
+var validHostnameOrIP = regexp.MustCompile(`^[a-zA-Z0-9._:\[\]-]+$`)
+
+// validPort matches a numeric port (1–65535 range checked separately).
+var validPort = regexp.MustCompile(`^[0-9]{1,5}$`)
 
 // GeneratePACFile generates a Proxy Auto-Config (PAC) file.
 //
@@ -22,6 +30,18 @@ import (
 // they are NOT auto-detected, because only the admin knows how
 // clients on their network can reach the proxy.
 func GeneratePACFile(proxyHost, proxyPort string) string {
+	// Validate inputs to prevent JavaScript injection in the PAC file.
+	// These values come from admin-configured settings, but defense-in-depth
+	// requires we never interpolate unvalidated strings into JS.
+	if !validHostnameOrIP.MatchString(proxyHost) {
+		log.Printf("[WPAD] WARNING: invalid proxyHost %q — refusing to generate PAC", proxyHost)
+		return "function FindProxyForURL(url, host) { return \"DIRECT\"; }\n"
+	}
+	if !validPort.MatchString(proxyPort) {
+		log.Printf("[WPAD] WARNING: invalid proxyPort %q — refusing to generate PAC", proxyPort)
+		return "function FindProxyForURL(url, host) { return \"DIRECT\"; }\n"
+	}
+
 	return fmt.Sprintf(`function FindProxyForURL(url, host) {
     // --- Direct connections (bypass proxy) ---
     // These correspond to the NO_PROXY / no_proxy environment variable.

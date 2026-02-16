@@ -136,19 +136,13 @@ func (r *Recorder) GetHistory(minutes int) []TimestampedSnapshot {
 	cutoff := time.Now().Add(-time.Duration(minutes) * time.Minute)
 	cutoffKey := keyPrefix + cutoff.Local().Format("2006-01-02T15:04")
 
-	log.Printf("[Cache Recorder] GetHistory: looking for snapshots >= %s (last %d min)", cutoffKey, minutes)
-
 	var results []TimestampedSnapshot
 
 	err := r.db.View(func(tx *buntdb.Tx) error {
-		count := 0
 		return tx.AscendGreaterOrEqual("", cutoffKey, func(key, value string) bool {
-			count++
 			if !strings.HasPrefix(key, keyPrefix) {
 				return true // skip non-snapshot keys
 			}
-
-			log.Printf("[Cache Recorder] Found snapshot key: %s", key)
 
 			timeStr := strings.TrimPrefix(key, keyPrefix)
 
@@ -182,6 +176,5 @@ func (r *Recorder) GetHistory(minutes int) []TimestampedSnapshot {
 		return results[i].Time < results[j].Time
 	})
 
-	log.Printf("[Cache Recorder] GetHistory: returning %d snapshots for last %d minutes", len(results), minutes)
 	return results
 }

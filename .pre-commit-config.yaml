@@ -1,0 +1,45 @@
+# GateSentry — pre-commit hooks
+# Runs security, correctness, and quality checks before each commit.
+#
+# Setup:
+#   pip install pre-commit   (or: brew install pre-commit)
+#   pre-commit install
+#
+# Manual run:
+#   pre-commit run --all-files
+
+repos:
+  # --- Go linting (golangci-lint) ---
+  - repo: https://github.com/golangci/golangci-lint
+    rev: v2.1.6
+    hooks:
+      - id: golangci-lint
+        name: golangci-lint
+        args: ["run", "--timeout=5m"]
+
+  # --- Secret detection ---
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.24.3
+    hooks:
+      - id: gitleaks
+        name: gitleaks (secret detection)
+
+  # --- Shell script linting ---
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.10.0.1
+    hooks:
+      - id: shellcheck
+        name: shellcheck
+        args: ["--severity=warning"]
+        files: \.(sh|bash)$
+
+  # --- Trailing whitespace & file hygiene ---
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+        args: [--markdown-linebreak-ext=md]
+      - id: end-of-file-fixer
+      - id: check-merge-conflict
+      - id: check-yaml
+      - id: check-json

@@ -300,20 +300,20 @@ func TestMatchRuleDomain_CaseInsensitive(t *testing.T) {
 }
 
 // --- MatchRule integration tests ---
+// Note: MatchRule requires a MapStore to call GetRules, which makes it
+// difficult to unit test without a mock. The domain matching logic is
+// thoroughly tested via TestMatchRuleDomain_* above. Full MatchRule
+// integration is covered by proxy_deep_tests.sh.
 
-func TestMatchRule_UsesMatchRuleDomain(t *testing.T) {
-	rm := &RuleManager{
-		domainListMgr: helperIndex(map[string][]string{
-			"blocklist": {"blocked.com"},
-		}),
+func TestMatchRule_FQDNTrailingDotNormalized(t *testing.T) {
+	// Verify that matchDomain handles FQDN trailing dots correctly
+	// (MatchRule strips them at the entry point, matchDomain strips as defense-in-depth)
+	if !matchDomain("example.com", "example.com.") {
+		t.Error("matchDomain should match example.com against example.com. (trailing dot)")
 	}
-
-	// We need to supply rules via storage. Since we don't have a real
-	// MapStore in unit tests, we test matchRuleDomain directly above.
-	// This test verifies the integration by checking the result struct.
-	// (MatchRule calls GetRules which requires storage — tested via
-	// matchRuleDomain above for the domain matching logic.)
-	_ = rm
+	if !matchDomain("*.example.com.", "sub.example.com") {
+		t.Error("matchDomain should match *.example.com. against sub.example.com")
+	}
 }
 
 func TestCheckContentTypeBlocked(t *testing.T) {

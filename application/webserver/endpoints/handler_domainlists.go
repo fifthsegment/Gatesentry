@@ -323,9 +323,6 @@ func GSApiDomainListCheck(w http.ResponseWriter, r *http.Request) {
 	id := vars["id"]
 	domain := vars["domain"]
 
-	// We need access to the index — get it from the concrete manager.
-	// The interface doesn't expose the index directly, but we can check
-	// by trying to get the list and checking membership.
 	dl, err := domainListManager.GetList(id)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -336,17 +333,10 @@ func GSApiDomainListCheck(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// For local lists, check the domains array directly
-	found := false
-	if dl.Source == "local" {
-		domain = normalizeForCheck(domain)
-		for _, d := range dl.Domains {
-			if normalizeForCheck(d) == domain {
-				found = true
-				break
-			}
-		}
-	}
+	// Use the index-based lookup which works for both local and URL-sourced lists.
+	// The DomainListIndex is populated for all list types when they are loaded.
+	domain = normalizeForCheck(domain)
+	found := domainListManager.IsDomainInList(domain, id)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{

@@ -12,11 +12,19 @@ import (
 	gatesentryDnsServer "bitbucket.org/abdullah_irfan/gatesentryf/dns/server"
 )
 
+// jsonError writes a JSON error response with the correct Content-Type header.
+// Unlike http.Error which sets text/plain, this properly sets application/json.
+func jsonError(w http.ResponseWriter, message string, code int) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	json.NewEncoder(w).Encode(map[string]string{"error": message})
+}
+
 // dnsCacheOrError returns the DNS cache or writes a 503 error.
 func dnsCacheOrError(w http.ResponseWriter) *dnscache.DNSCache {
 	c := gatesentryDnsServer.GetDNSCache()
 	if c == nil {
-		http.Error(w, `{"error":"DNS cache not initialized — DNS server may not be running"}`, http.StatusServiceUnavailable)
+		jsonError(w, "DNS cache not initialized — DNS server may not be running", http.StatusServiceUnavailable)
 		return nil
 	}
 	return c
@@ -58,7 +66,7 @@ func GSApiDNSCacheFlush(w http.ResponseWriter, r *http.Request) {
 func GSApiDNSCacheHistory(w http.ResponseWriter, r *http.Request) {
 	rec := gatesentryDnsServer.GetCacheRecorder()
 	if rec == nil {
-		http.Error(w, `{"error":"Cache recorder not available"}`, http.StatusServiceUnavailable)
+		jsonError(w, "Cache recorder not available", http.StatusServiceUnavailable)
 		return
 	}
 
@@ -93,14 +101,14 @@ func GSApiDNSEvents(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if c.Events == nil {
-		http.Error(w, `{"error":"Event bus not available"}`, http.StatusServiceUnavailable)
+		jsonError(w, "Event bus not available", http.StatusServiceUnavailable)
 		return
 	}
 
 	// Ensure the ResponseWriter supports flushing (required for SSE).
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		http.Error(w, `{"error":"Streaming not supported"}`, http.StatusInternalServerError)
+		jsonError(w, "Streaming not supported", http.StatusInternalServerError)
 		return
 	}
 

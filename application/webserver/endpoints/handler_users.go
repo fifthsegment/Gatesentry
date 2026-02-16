@@ -3,7 +3,6 @@ package gatesentryWebserverEndpoints
 import (
 	"encoding/base64"
 	"encoding/json"
-	"fmt"
 	"log"
 	"strings"
 
@@ -41,11 +40,6 @@ func ValidateUserInputJsonSingle(userJson UserInputJsonSingle) bool {
 	return true
 }
 
-// func HandleError(ctx iris.Context, errorMessage string) {
-// 	ctx.JSON(UserEndpointJsonError{Ok: false, Error: errorMessage})
-// 	ctx.StatusCode(iris.StatusBadRequest)
-// }
-
 func GSApiUsersGET(runtime *gatesentryWebserverTypes.TemporaryRuntime, usersString string) interface{} {
 	users := []GatesentryTypes.GSUser{}
 	json.Unmarshal([]byte(usersString), &users)
@@ -56,22 +50,16 @@ func GSApiUsersGET(runtime *gatesentryWebserverTypes.TemporaryRuntime, usersStri
 func GSApiUserCreate(userJson UserInputJsonSingle, settingsStore *gatesentry2storage.MapStore) interface{} {
 
 	// check if username and password are greater than 3 characters
-	if ValidateUserInputJsonSingle(userJson) == false {
-		// HandleError(ctx, ERROR_FAILED_VALIDATION)
-		// return
-		return struct{ Error string }{Error: ERROR_FAILED_VALIDATION}
+	if !ValidateUserInputJsonSingle(userJson) {
+		return UserEndpointJsonError{Ok: false, Error: ERROR_FAILED_VALIDATION}
 	}
 
-	// if err != nil {
-	// 	HandleError(ctx, err.Error())
-	// 	return
-	// }
+	normalizedUsername := strings.ToLower(userJson.Username)
 
 	var newUser = GatesentryTypes.GSUser{
-		// make the username lowercase
-		User:         strings.ToLower(userJson.Username),
+		User:         normalizedUsername,
 		Pass:         "",
-		Base64String: base64.StdEncoding.EncodeToString([]byte(userJson.Username + ":" + userJson.Password)),
+		Base64String: base64.StdEncoding.EncodeToString([]byte(normalizedUsername + ":" + userJson.Password)),
 		AllowAccess:  userJson.AllowAccess,
 	}
 
@@ -82,54 +70,56 @@ func GSApiUserCreate(userJson UserInputJsonSingle, settingsStore *gatesentry2sto
 	// check if user exists
 	for _, user := range existingUsers {
 		if user.User == newUser.User {
-			// HandleError(ctx, "User already exists")
-			// return
-			return struct{ Error string }{Error: "User already exists"}
+			return UserEndpointJsonError{Ok: false, Error: "User already exists"}
 		}
 	}
 
 	var newUsers = append(existingUsers, newUser)
 
 	usersString, err := json.Marshal(newUsers)
-
 	if err != nil {
-		// HandleError(ctx, err.Error())
-		// return
-		return struct{ Error string }{Error: err.Error()}
+		return UserEndpointJsonError{Ok: false, Error: err.Error()}
 	}
 
-	log.Println(fmt.Sprintf("Users: %s", usersString))
+	log.Printf("Users: %s", usersString)
 	settingsStore.Update("authusers", string(usersString))
-	// ctx.JSON(UserEndpointJsonOk{Ok: true})
 	return UserEndpointJsonOk{Ok: true}
 }
 
 func GSApiUserPUT(settingsStore *gatesentry2storage.MapStore, userJson UserInputJsonSingle) interface{} {
 
-	if len(userJson.Password) > 0 && ValidateUserInputJsonSingle(userJson) == false {
-		return struct{ Error string }{Error: ERROR_FAILED_VALIDATION}
+	if len(userJson.Password) > 0 && !ValidateUserInputJsonSingle(userJson) {
+		return UserEndpointJsonError{Ok: false, Error: ERROR_FAILED_VALIDATION}
 	}
+
+	normalizedUsername := strings.ToLower(userJson.Username)
 
 	var existingJson = settingsStore.Get("authusers")
 	var existingUsers []GatesentryTypes.GSUser
 	json.Unmarshal([]byte(existingJson), &existingUsers)
 
 	// update the user in existing users
+	found := false
 	var users []GatesentryTypes.GSUser
 	for _, user := range existingUsers {
-		if user.User == userJson.Username {
+		if user.User == normalizedUsername {
+			found = true
 			user.AllowAccess = userJson.AllowAccess
 			if len(userJson.Password) > 0 {
-				user.Base64String = base64.StdEncoding.EncodeToString([]byte(userJson.Username + ":" + userJson.Password))
+				user.Base64String = base64.StdEncoding.EncodeToString([]byte(normalizedUsername + ":" + userJson.Password))
 			}
 		}
 		users = append(users, user)
 	}
 
+	if !found {
+		return UserEndpointJsonError{Ok: false, Error: "User not found"}
+	}
+
 	usersString, err := json.Marshal(users)
 	if err != nil {
-		log.Println(fmt.Sprintf("Error marshalling users: %s", err.Error()))
-		return struct{ Error string }{Error: err.Error()}
+		log.Printf("Error marshalling users: %s", err.Error())
+		return UserEndpointJsonError{Ok: false, Error: err.Error()}
 	}
 	log.Printf("Users: %s", usersString)
 	settingsStore.Update("authusers", string(usersString))
@@ -139,26 +129,32 @@ func GSApiUserPUT(settingsStore *gatesentry2storage.MapStore, userJson UserInput
 
 func GSApiUserDELETE(username string, settingsStore *gatesentry2storage.MapStore) interface{} {
 
+	normalizedUsername := strings.ToLower(username)
+
 	var existingJson = settingsStore.Get("authusers")
 	var existingUsers []GatesentryTypes.GSUser
 	json.Unmarshal([]byte(existingJson), &existingUsers)
 
-	// update the user in existing users
+	// remove the user from existing users
+	found := false
 	var users []GatesentryTypes.GSUser
 	for _, user := range existingUsers {
-		if user.User != username {
+		if user.User != normalizedUsername {
 			users = append(users, user)
+		} else {
+			found = true
 		}
+	}
+
+	if !found {
+		return UserEndpointJsonError{Ok: false, Error: "User not found"}
 	}
 
 	usersString, err := json.Marshal(users)
 	if err != nil {
-		// HandleError(ctx, err.Error())
-		// return
-		return struct{ Error string }{Error: err.Error()}
+		return UserEndpointJsonError{Ok: false, Error: err.Error()}
 	}
 
 	settingsStore.Update("authusers", string(usersString))
-	// ctx.JSON(UserEndpointJsonOk{Ok: true})
 	return UserEndpointJsonOk{Ok: true}
 }

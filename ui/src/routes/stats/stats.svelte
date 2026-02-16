@@ -207,6 +207,208 @@
     return { chartData, topAll, topBlocked };
   }
 
+  // ========== PROXY TRAFFIC TAB STATE ==========
+
+  interface ProxyStatsSummary {
+    total_requests: number;
+    allowed: number;
+    blocked: number;
+    ssl_bumped: number;
+    ssl_direct: number;
+  }
+
+  interface ProxyBucket {
+    allowed: number;
+    blocked: number;
+  }
+
+  interface ProxyTopSite {
+    host: string;
+    count: number;
+    action?: string;
+  }
+
+  interface ProxyActionBreakdown {
+    action: string;
+    label: string;
+    count: number;
+  }
+
+  interface ProxyUserSummary {
+    user: string;
+    total: number;
+    allowed: number;
+    blocked: number;
+  }
+
+  interface ProxyStatsResponse {
+    summary: ProxyStatsSummary;
+    time_series: { [key: string]: ProxyBucket };
+    top_blocked: ProxyTopSite[];
+    top_allowed: ProxyTopSite[];
+    actions: ProxyActionBreakdown[];
+    users: ProxyUserSummary[];
+  }
+
+  const proxyScaleOptions = [
+    { id: "7d", text: "Past 7 days" },
+    { id: "24h", text: "Past 24 hours" },
+    { id: "1h", text: "Past hour" },
+  ];
+  let proxySelectedScale = "24h";
+  let proxySelectedUser = "";
+
+  let proxyData: ProxyStatsResponse | null = null;
+  let proxyChart: any = null;
+  let proxyChartHolder: HTMLElement;
+  let proxyLoading = false;
+
+  /** Fetch proxy stats from the API */
+  async function fetchProxyStats(
+    scale: string,
+    user: string,
+  ): Promise<ProxyStatsResponse | null> {
+    try {
+      proxyLoading = true;
+      const { seconds, group } = scaleToApiParams(scale);
+      let url = `/stats/proxy?seconds=${seconds}&group=${group}`;
+      if (user) url += `&user=${encodeURIComponent(user)}`;
+      const json = (await $store.api.doCall(url)) as ProxyStatsResponse;
+      return json || null;
+    } catch (err) {
+      console.error("Error fetching proxy stats:", err);
+      return null;
+    } finally {
+      proxyLoading = false;
+    }
+  }
+
+  /** Build chart data from proxy time_series */
+  function buildProxyChartData(
+    data: ProxyStatsResponse | null,
+    scale: string,
+  ): { group: string; date: Date; value: number }[] {
+    if (!data || !data.time_series) return [];
+
+    const chartData: { group: string; date: Date; value: number }[] = [];
+    const keys = Object.keys(data.time_series).sort();
+
+    for (const key of keys) {
+      const d = bucketToDate(key, scale);
+      const bucket = data.time_series[key];
+      chartData.push({ group: "Allowed", date: d, value: bucket.allowed });
+      chartData.push({ group: "Blocked", date: d, value: bucket.blocked });
+    }
+
+    return chartData;
+  }
+
+  function makeProxyChartOptions(scale: string) {
+    const locale = navigator.language || "en-US";
+    const now = new Date();
+    let domain: [Date, Date];
+    if (scale === "1h") {
+      domain = [new Date(now.getTime() - 3_600_000), now];
+    } else if (scale === "24h") {
+      domain = [new Date(now.getTime() - 86_400_000), now];
+    } else {
+      domain = [new Date(now.getTime() - 7 * 86_400_000), now];
+    }
+
+    return {
+      title: "Proxy traffic — allowed vs blocked",
+      axes: {
+        bottom: {
+          title:
+            scale === "7d"
+              ? "Past 7 days"
+              : scale === "24h"
+              ? "Past 24 hours"
+              : "Past hour",
+          mapsTo: "date",
+          scaleType: "time",
+          domain,
+          ticks: {
+            formatter: (d: Date) => {
+              if (!(d instanceof Date) || isNaN(d.getTime())) return "";
+              if (scale === "1h" || scale === "24h") {
+                return d.toLocaleTimeString(locale, {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                });
+              }
+              return d.toLocaleDateString(locale, {
+                weekday: "short",
+                month: "short",
+                day: "numeric",
+              });
+            },
+          },
+        },
+        left: {
+          title: "Requests",
+          mapsTo: "value",
+          scaleType: "linear",
+        },
+      },
+      height: "400px",
+      toolbar: { enabled: false },
+      color: {
+        scale: {
+          Allowed: "#198038",
+          Blocked: "#da1e28",
+        },
+      },
+      legend: { alignment: "center" },
+      points: { radius: 3 },
+      curve: "curveMonotoneX",
+    };
+  }
+
+  async function refreshProxyTab() {
+    proxyData = await fetchProxyStats(proxySelectedScale, proxySelectedUser);
+    if (proxyChart && proxyData) {
+      proxyChart.model.setOptions(makeProxyChartOptions(proxySelectedScale));
+      proxyChart.model.setData(
+        buildProxyChartData(proxyData, proxySelectedScale),
+      );
+    }
+  }
+
+  async function onProxyScaleChange(e: CustomEvent) {
+    proxySelectedScale = e.detail.selectedId;
+    await refreshProxyTab();
+  }
+
+  async function onProxyUserChange(e: CustomEvent) {
+    proxySelectedUser = e.detail.selectedId;
+    await refreshProxyTab();
+  }
+
+  // Proxy data rows for DataTables (reactive)
+  $: proxyTopBlockedRows = (proxyData?.top_blocked || []).map((s, i) => ({
+    id: `pb-${i}`,
+    host: s.host,
+    count: s.count,
+  }));
+  $: proxyTopAllowedRows = (proxyData?.top_allowed || []).map((s, i) => ({
+    id: `pa-${i}`,
+    host: s.host,
+    count: s.count,
+  }));
+  $: proxyActionRows = (proxyData?.actions || []).map((a, i) => ({
+    id: `act-${i}`,
+    action: a.label,
+    count: a.count,
+  }));
+  $: proxyUserOptions = [
+    { id: "", text: "All users" },
+    ...(proxyData?.users || []).map((u) => ({
+      id: u.user,
+      text: `${u.user} (${u.total})`,
+    })),
+  ];
+
   // ========== DNS CACHE TAB STATE ==========
 
   interface CacheSnapshot {
@@ -779,6 +981,19 @@
       });
     }
 
+    // ---------- Proxy traffic chart ----------
+    proxyChartHolder = document.getElementById("proxychart") as HTMLElement;
+    if (proxyChartHolder) {
+      // @ts-ignore
+      proxyChart = new AreaChart(proxyChartHolder, {
+        data: [],
+        // @ts-ignore
+        options: makeProxyChartOptions(proxySelectedScale),
+      });
+    }
+    // Fetch proxy data for the default scale
+    await refreshProxyTab();
+
     // 3. Open SSE stream for real-time events (shared by both tabs)
     connectSSE();
 
@@ -799,6 +1014,7 @@
     if (pruneTimer) clearInterval(pruneTimer);
     if (chart) chart.destroy();
     if (cacheChart) cacheChart.destroy();
+    if (proxyChart) proxyChart.destroy();
   });
 </script>
 
@@ -829,6 +1045,11 @@
         class="gs-tab"
         class:gs-tab--active={activeTab === "traffic"}
         on:click={() => (activeTab = "traffic")}>Traffic</button
+      >
+      <button
+        class="gs-tab"
+        class:gs-tab--active={activeTab === "proxy"}
+        on:click={() => (activeTab = "proxy")}>Proxy Traffic</button
       >
       <button
         class="gs-tab"
@@ -894,6 +1115,188 @@
 
       {#if !chart}
         <InlineLoading description="Loading chart..." />
+      {/if}
+    </div>
+
+    <!-- ==================== TAB: PROXY TRAFFIC ==================== -->
+    <div class:gs-tab-hidden={activeTab !== "proxy"}>
+      <!-- Filters row -->
+      <div
+        style="display: flex; justify-content: flex-end; gap: 0.75rem; margin-bottom: 1rem; flex-wrap: wrap;"
+      >
+        <Dropdown
+          size="sm"
+          style="width: 200px;"
+          titleText=""
+          label="Filter by user"
+          items={proxyUserOptions}
+          selectedId={proxySelectedUser}
+          on:select={onProxyUserChange}
+        />
+        <Dropdown
+          size="sm"
+          style="width: 180px;"
+          items={proxyScaleOptions}
+          selectedId={proxySelectedScale}
+          on:select={onProxyScaleChange}
+        />
+      </div>
+
+      {#if proxyLoading}
+        <InlineLoading description="Loading proxy stats..." />
+      {/if}
+
+      <!-- Summary tiles -->
+      {#if proxyData}
+        <div class="cache-tiles">
+          <Tile class="cache-tile">
+            <div class="tile-label">Total Requests</div>
+            <div class="tile-value">
+              {proxyData.summary.total_requests.toLocaleString()}
+            </div>
+            <div class="tile-sub">in the selected time window</div>
+          </Tile>
+
+          <Tile class="cache-tile">
+            <div class="tile-label">Allowed</div>
+            <div class="tile-value tile-green">
+              {proxyData.summary.allowed.toLocaleString()}
+            </div>
+            <div class="tile-sub">
+              {#if proxyData.summary.total_requests > 0}
+                {(
+                  (proxyData.summary.allowed /
+                    proxyData.summary.total_requests) *
+                  100
+                ).toFixed(1)}% of traffic
+              {:else}
+                —
+              {/if}
+            </div>
+          </Tile>
+
+          <Tile class="cache-tile">
+            <div class="tile-label">Blocked</div>
+            <div class="tile-value tile-red">
+              {proxyData.summary.blocked.toLocaleString()}
+            </div>
+            <div class="tile-sub">
+              {#if proxyData.summary.total_requests > 0}
+                {(
+                  (proxyData.summary.blocked /
+                    proxyData.summary.total_requests) *
+                  100
+                ).toFixed(1)}% of traffic
+              {:else}
+                —
+              {/if}
+            </div>
+          </Tile>
+
+          <Tile class="cache-tile">
+            <div class="tile-label">SSL Inspection</div>
+            <div class="tile-value">
+              {proxyData.summary.ssl_bumped.toLocaleString()}
+              <span class="tile-max">MITM</span>
+            </div>
+            <div class="tile-sub">
+              {proxyData.summary.ssl_direct.toLocaleString()} direct (pass-through)
+            </div>
+          </Tile>
+        </div>
+      {/if}
+
+      <!-- Area chart: allowed vs blocked over time -->
+      <div id="proxychart"></div>
+
+      {#if proxyData}
+        <!-- Action breakdown table -->
+        {#if proxyActionRows.length > 0}
+          <h4 style="margin-top: 1.5rem;">Block Reason Breakdown</h4>
+          <p
+            style="font-size: 0.75rem; color: var(--cds-text-02); margin-bottom: 0.5rem;"
+          >
+            Shows what types of filtering are being triggered
+          </p>
+          <DataTable
+            size="short"
+            headers={[
+              { key: "action", value: "Reason" },
+              { key: "count", value: "Count" },
+            ]}
+            rows={proxyActionRows}
+          />
+        {/if}
+
+        <Row style="margin-top: 1.5rem;">
+          <Column sm={4} md={4} lg={8}>
+            <h4>Top Blocked Sites</h4>
+            <p
+              style="font-size: 0.75rem; color: var(--cds-text-02); margin-bottom: 0.5rem;"
+            >
+              Most frequently blocked domains in the selected period
+            </p>
+            {#if proxyTopBlockedRows.length > 0}
+              <DataTable
+                size="short"
+                headers={[
+                  { key: "host", value: "Domain" },
+                  { key: "count", value: "Blocked" },
+                ]}
+                rows={proxyTopBlockedRows}
+              />
+            {:else}
+              <p><i>No blocked sites in this period.</i></p>
+            {/if}
+          </Column>
+          <Column sm={4} md={4} lg={8}>
+            <h4>Top Allowed Sites</h4>
+            <p
+              style="font-size: 0.75rem; color: var(--cds-text-02); margin-bottom: 0.5rem;"
+            >
+              Most frequently accessed domains in the selected period
+            </p>
+            {#if proxyTopAllowedRows.length > 0}
+              <DataTable
+                size="short"
+                headers={[
+                  { key: "host", value: "Domain" },
+                  { key: "count", value: "Requests" },
+                ]}
+                rows={proxyTopAllowedRows}
+              />
+            {:else}
+              <p><i>No proxy traffic in this period.</i></p>
+            {/if}
+          </Column>
+        </Row>
+
+        <!-- Per-user breakdown -->
+        {#if proxyData.users && proxyData.users.length > 1 && !proxySelectedUser}
+          <h4 style="margin-top: 1.5rem;">Traffic by User</h4>
+          <p
+            style="font-size: 0.75rem; color: var(--cds-text-02); margin-bottom: 0.5rem;"
+          >
+            Per-user request counts — click a user in the dropdown above to
+            filter
+          </p>
+          <DataTable
+            size="short"
+            headers={[
+              { key: "user", value: "User / IP" },
+              { key: "total", value: "Total" },
+              { key: "allowed", value: "Allowed" },
+              { key: "blocked", value: "Blocked" },
+            ]}
+            rows={proxyData.users.map((u, i) => ({
+              id: `usr-${i}`,
+              user: u.user,
+              total: u.total,
+              allowed: u.allowed,
+              blocked: u.blocked,
+            }))}
+          />
+        {/if}
       {/if}
     </div>
 

@@ -105,7 +105,7 @@ The Gatesentry User Interface will load, providing access to various functionali
 
 Use the above credentials to log in to the Gatesentry system for the first time. For security reasons, it is highly recommended to change the default password after the initial login.
 
-Note:Ensure your system's firewall and security settings allow traffic on ports 53, 80, and 10413 to ensure seamless operation and access to the Gatesentry server and user interface.
+Note: Ensure your system's firewall and security settings allow traffic on ports 53 (DNS), 8080 (admin UI), and 10413 (proxy) to ensure seamless operation and access to the Gatesentry server and user interface.
 
 This guide now specifically refers to the Gatesentry software and uses the `gatesentry-{platform}` filename convention for clarity.
 

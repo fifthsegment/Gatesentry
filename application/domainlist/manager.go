@@ -78,9 +78,9 @@ func (m *DomainListManager) GetList(id string) (*DomainList, error) {
 	if err != nil {
 		return nil, err
 	}
-	for _, dl := range lists {
-		if dl.ID == id {
-			return &dl, nil
+	for i := range lists {
+		if lists[i].ID == id {
+			return &lists[i], nil
 		}
 	}
 	return nil, nil

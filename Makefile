@@ -1,10 +1,36 @@
-.PHONY: test build run clean-test
+.PHONY: test build run clean-test lint lint-security tests
 
 clean-test:
 	@echo "Cleaning up test artifacts..."
 	@-kill `cat /tmp/gatesentry.pid 2>/dev/null` 2>/dev/null || true
 	@-rm -f /tmp/gatesentry.pid /tmp/gatesentry.log
 	@-rm -rf /tmp/gatesentry
+
+# Run all linters (golangci-lint + shellcheck)
+lint:
+	@echo "=== Linting application module ==="
+	golangci-lint run ./application/...
+	@echo "=== Linting gatesentryproxy module ==="
+	golangci-lint run ./gatesentryproxy/...
+	@echo "=== Linting root module ==="
+	golangci-lint run .
+	@echo "=== Linting shell scripts ==="
+	shellcheck -S warning build.sh run.sh restart.sh docker-publish.sh scripts/*.sh || true
+	@echo "=== All linting complete ==="
+
+# Run only security-focused linters (fast, good pre-commit check)
+lint-security:
+	@echo "=== Security scan (gosec) ==="
+	golangci-lint run --enable-only gosec ./application/... ./gatesentryproxy/... .
+	@echo "=== Secret detection (gitleaks) ==="
+	gitleaks git --staged --verbose || true
+
+# Run all unit tests across all modules
+tests:
+	@echo "=== Running unit tests ==="
+	cd application && go test -v -count=1 ./...
+	cd gatesentryproxy && go test -v -count=1 ./...
+	go test -v -count=1 ./...
 
 build: clean-test
 	go build -o /tmp/gatesentry-bin .
