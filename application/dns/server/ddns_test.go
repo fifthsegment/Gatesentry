@@ -159,6 +159,71 @@ func TestIsAuthorizedZone_MultiZone(t *testing.T) {
 }
 
 // ==========================================================================
+// Unit tests — reverse zone auto-accept (PTR is auto-generated)
+// ==========================================================================
+
+func TestHandleDDNSUpdate_ReverseZoneIPv4_AcceptedNoOp(t *testing.T) {
+	cleanup := setupDDNSTestServer(t)
+	defer cleanup()
+
+	w := newDDNSMockWriter()
+	m := makeUpdateMsg("1.168.192.in-addr.arpa")
+	// Simulate pfSense sending a PTR update for the reverse zone
+	addUpdateRR(m, "100.1.168.192.in-addr.arpa. 300 IN PTR macmini.local.")
+
+	handleDDNSUpdate(w, m)
+
+	if w.msg == nil {
+		t.Fatal("Expected response")
+	}
+	if w.msg.Rcode != dns.RcodeSuccess {
+		t.Fatalf("Expected NOERROR for reverse zone, got %s", dns.RcodeToString[w.msg.Rcode])
+	}
+
+	// No device should be created — reverse zone updates are no-ops
+	devices := deviceStore.GetAllDevices()
+	if len(devices) != 0 {
+		t.Errorf("Expected 0 devices (reverse zone is no-op), got %d", len(devices))
+	}
+}
+
+func TestHandleDDNSUpdate_ReverseZoneIPv6_AcceptedNoOp(t *testing.T) {
+	cleanup := setupDDNSTestServer(t)
+	defer cleanup()
+
+	w := newDDNSMockWriter()
+	m := makeUpdateMsg("0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.ip6.arpa")
+
+	handleDDNSUpdate(w, m)
+
+	if w.msg == nil {
+		t.Fatal("Expected response")
+	}
+	if w.msg.Rcode != dns.RcodeSuccess {
+		t.Fatalf("Expected NOERROR for ip6.arpa reverse zone, got %s", dns.RcodeToString[w.msg.Rcode])
+	}
+}
+
+func TestHandleDDNSUpdate_ReverseZone_StillRejectWhenDisabled(t *testing.T) {
+	cleanup := setupDDNSTestServer(t)
+	defer cleanup()
+
+	ddnsEnabled = false
+
+	w := newDDNSMockWriter()
+	m := makeUpdateMsg("1.168.192.in-addr.arpa")
+
+	handleDDNSUpdate(w, m)
+
+	if w.msg == nil {
+		t.Fatal("Expected response")
+	}
+	if w.msg.Rcode != dns.RcodeRefused {
+		t.Fatalf("Expected REFUSED when DDNS disabled, got %s", dns.RcodeToString[w.msg.Rcode])
+	}
+}
+
+// ==========================================================================
 // Unit tests — parseDDNSUpdates
 // ==========================================================================
 

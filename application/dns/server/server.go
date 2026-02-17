@@ -6,6 +6,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -239,6 +240,43 @@ func GetMDNSBrowser() *discovery.MDNSBrowser {
 
 const BLOCKLIST_HOURLY_UPDATE_INTERVAL = 10
 
+// SetDNSZones updates the DNS zones at runtime. Parses a comma-separated
+// zone string, ensures "local" is always included (required for mDNS/Bonjour),
+// and rebuilds all device DNS records for the new zone set.
+func SetDNSZones(zoneSetting string) {
+	if deviceStore == nil {
+		return
+	}
+	zones := parseDNSZones(zoneSetting)
+	deviceStore.SetZones(zones)
+	log.Printf("[DNS] Zones updated: %v (primary: %s)", zones, zones[0])
+}
+
+// parseDNSZones splits a comma-separated zone string into a slice,
+// ensuring "local" is always present. The first user-specified zone
+// becomes the primary; "local" is appended if not already listed.
+func parseDNSZones(zoneSetting string) []string {
+	var zones []string
+	hasLocal := false
+	for _, z := range strings.Split(zoneSetting, ",") {
+		z = strings.TrimSpace(z)
+		if z == "" {
+			continue
+		}
+		if strings.EqualFold(z, "local") {
+			hasLocal = true
+		}
+		zones = append(zones, z)
+	}
+	if !hasLocal {
+		zones = append(zones, "local")
+	}
+	if len(zones) == 0 {
+		zones = []string{"local"}
+	}
+	return zones
+}
+
 func StartDNSServer(basePath string, ilogger *gatesentryLogger.Log, blockedLists []string, settings *gatesentry2storage.MapStore, dnsinfo *gatesentryTypes.DnsServerInfo, dlManager *gatesentryDomainList.DomainListManager) {
 
 	if server != nil || serverRunning.Load() {
@@ -262,22 +300,15 @@ func StartDNSServer(basePath string, ilogger *gatesentryLogger.Log, blockedLists
 	// Example: "jvj28.com,local" → devices resolve as both
 	//   macmini.jvj28.com AND macmini.local
 	// The first zone is the primary (used for PTR targets).
+	// "local" is always included for mDNS/Bonjour compatibility.
 	zoneSetting := settings.Get("dns_local_zone")
 	if zoneSetting == "" {
 		zoneSetting = "local"
+		settings.Update("dns_local_zone", zoneSetting)
 	}
-	// Parse comma-separated zones
-	var zones []string
-	for _, z := range strings.Split(zoneSetting, ",") {
-		z = strings.TrimSpace(z)
-		if z != "" {
-			zones = append(zones, z)
-		}
-	}
-	if len(zones) == 0 {
-		zones = []string{"local"}
-	}
+	zones := parseDNSZones(zoneSetting)
 	deviceStore = discovery.NewDeviceStoreMultiZone(zones...)
+	deviceStore.SetPersistPath(filepath.Join(basePath, "devices.json"))
 	log.Printf("[DNS] Device store initialized with zones: %v (primary: %s)", zones, zones[0])
 
 	// Initialise the DNS response cache with environment-tuneable limits.
@@ -315,18 +346,20 @@ func StartDNSServer(basePath string, ilogger *gatesentryLogger.Log, blockedLists
 	// Settings: ddns_enabled, ddns_tsig_required, ddns_tsig_key_name,
 	//           ddns_tsig_key_secret, ddns_tsig_algorithm
 	ddnsEnabledStr := settings.Get("ddns_enabled")
-	if ddnsEnabledStr == "false" {
-		ddnsEnabled = false
-	} else {
-		ddnsEnabled = true
+	if ddnsEnabledStr == "" {
+		// Seed default: DDNS enabled out of the box
+		ddnsEnabledStr = "true"
+		settings.Update("ddns_enabled", ddnsEnabledStr)
 	}
+	ddnsEnabled = ddnsEnabledStr == "true"
 
 	ddnsTSIGRequiredStr := settings.Get("ddns_tsig_required")
-	if ddnsTSIGRequiredStr == "true" {
-		ddnsTSIGRequired = true
-	} else {
-		ddnsTSIGRequired = false
+	if ddnsTSIGRequiredStr == "" {
+		// Seed default: TSIG not required
+		ddnsTSIGRequiredStr = "false"
+		settings.Update("ddns_tsig_required", ddnsTSIGRequiredStr)
 	}
+	ddnsTSIGRequired = ddnsTSIGRequiredStr == "true"
 
 	// Build TSIG secret map for server-level TSIG verification.
 	// The miekg/dns server automatically verifies TSIG on incoming messages
@@ -411,6 +444,13 @@ func StopDNSServer() {
 	if server == nil || !serverRunning.Load() {
 		fmt.Println("DNS server is already stopped")
 		return
+	}
+
+	// Persist device store to disk before shutdown
+	if deviceStore != nil {
+		if err := deviceStore.SaveNow(); err != nil {
+			log.Printf("[DNS] Error persisting device store: %v", err)
+		}
 	}
 
 	// Stop DNS response cache (stops reaper goroutine)

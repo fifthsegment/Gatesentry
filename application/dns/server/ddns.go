@@ -2,6 +2,7 @@ package gatesentryDnsServer
 
 import (
 	"log"
+	"net"
 	"strings"
 	"time"
 
@@ -21,6 +22,53 @@ var (
 	// Default: false (simple setups don't need TSIG; enable for security).
 	ddnsTSIGRequired = false
 )
+
+// SetDDNSEnabled enables or disables acceptance of DDNS UPDATE messages at runtime.
+func SetDDNSEnabled(enabled bool) {
+	ddnsEnabled = enabled
+	if enabled {
+		log.Println("[DDNS] Dynamic DNS updates enabled")
+	} else {
+		log.Println("[DDNS] Dynamic DNS updates disabled")
+	}
+}
+
+// SetDDNSTSIGRequired enables or disables mandatory TSIG authentication for DDNS.
+func SetDDNSTSIGRequired(required bool) {
+	ddnsTSIGRequired = required
+	if required {
+		log.Println("[DDNS] TSIG authentication required for updates")
+	} else {
+		log.Println("[DDNS] TSIG authentication not required (updates accepted without TSIG)")
+	}
+}
+
+// UpdateTSIGKey updates the TSIG secret map on both DNS servers (UDP and TCP)
+// at runtime. If keyName or keySecret is empty, TSIG verification is removed.
+func UpdateTSIGKey(keyName, keySecret string) {
+	if keyName == "" || keySecret == "" {
+		// Remove TSIG configuration
+		if server != nil {
+			server.TsigSecret = nil
+		}
+		if tcpServer != nil {
+			tcpServer.TsigSecret = nil
+		}
+		log.Println("[DDNS] TSIG key removed")
+		return
+	}
+	if !strings.HasSuffix(keyName, ".") {
+		keyName += "."
+	}
+	secrets := map[string]string{keyName: keySecret}
+	if server != nil {
+		server.TsigSecret = secrets
+	}
+	if tcpServer != nil {
+		tcpServer.TsigSecret = secrets
+	}
+	log.Printf("[DDNS] TSIG key updated: %s", strings.TrimSuffix(keyName, "."))
+}
 
 // ddnsMsgAcceptFunc extends the default miekg/dns message acceptance to also
 // accept DNS UPDATE (opcode 5) messages. The default MsgAcceptFunc rejects
@@ -45,9 +93,27 @@ func ddnsMsgAcceptFunc(dh dns.Header) dns.MsgAcceptAction {
 //
 // Reference: Python DDNS implementation in DDNS/ project
 func handleDDNSUpdate(w dns.ResponseWriter, r *dns.Msg) {
+	// Extract client IP for logging
+	clientIP := ""
+	if addr := w.RemoteAddr(); addr != nil {
+		clientIP = addr.String()
+		if host, _, err := net.SplitHostPort(clientIP); err == nil {
+			clientIP = host
+		}
+	}
+
+	// Extract zone name for logging (best-effort, before validation)
+	requestZone := ""
+	if len(r.Question) > 0 {
+		requestZone = strings.ToLower(strings.TrimSuffix(r.Question[0].Name, "."))
+	}
+
 	// 1. Check if DDNS is enabled
 	if !ddnsEnabled {
 		log.Println("[DDNS] UPDATE rejected: DDNS is disabled")
+		if logger != nil {
+			logger.LogDNS(requestZone, clientIP, "ddns-rejected")
+		}
 		sendDDNSResponse(w, r, dns.RcodeRefused)
 		return
 	}
@@ -57,11 +123,17 @@ func handleDDNSUpdate(w dns.ResponseWriter, r *dns.Msg) {
 		tsig := r.IsTsig()
 		if tsig == nil {
 			log.Println("[DDNS] UPDATE rejected: TSIG required but not present")
+			if logger != nil {
+				logger.LogDNS(requestZone, clientIP, "ddns-rejected")
+			}
 			sendDDNSResponse(w, r, dns.RcodeRefused)
 			return
 		}
 		if w.TsigStatus() != nil {
 			log.Printf("[DDNS] UPDATE rejected: TSIG verification failed: %v", w.TsigStatus())
+			if logger != nil {
+				logger.LogDNS(requestZone, clientIP, "ddns-rejected")
+			}
 			sendDDNSResponse(w, r, dns.RcodeRefused)
 			return
 		}
@@ -69,6 +141,9 @@ func handleDDNSUpdate(w dns.ResponseWriter, r *dns.Msg) {
 		// TSIG not required but present — still validate it
 		if w.TsigStatus() != nil {
 			log.Printf("[DDNS] UPDATE rejected: TSIG present but invalid: %v", w.TsigStatus())
+			if logger != nil {
+				logger.LogDNS(requestZone, clientIP, "ddns-rejected")
+			}
 			sendDDNSResponse(w, r, dns.RcodeRefused)
 			return
 		}
@@ -77,12 +152,34 @@ func handleDDNSUpdate(w dns.ResponseWriter, r *dns.Msg) {
 	// 3. Validate zone section
 	if len(r.Question) == 0 {
 		log.Println("[DDNS] UPDATE rejected: empty zone section")
+		if logger != nil {
+			logger.LogDNS("", clientIP, "ddns-rejected")
+		}
 		sendDDNSResponse(w, r, dns.RcodeFormatError)
 		return
 	}
 	updateZone := strings.ToLower(strings.TrimSuffix(r.Question[0].Name, "."))
+
+	// 3a. Reverse zones (in-addr.arpa / ip6.arpa): accept and succeed immediately.
+	// GateSentry auto-generates PTR records from forward A/AAAA records stored in
+	// the device store (see rebuildIndexes), so we don't need to process reverse
+	// zone UPDATEs. Returning success prevents DHCP servers (e.g., pfSense) from
+	// logging errors and endlessly retrying.
+	if strings.HasSuffix(updateZone, ".in-addr.arpa") || strings.HasSuffix(updateZone, ".ip6.arpa") {
+		log.Printf("[DDNS] UPDATE accepted (reverse zone, no-op): zone=%s (from %s)",
+			updateZone, clientIP)
+		if logger != nil {
+			logger.LogDNS(updateZone, clientIP, "ddns-ptr")
+		}
+		sendDDNSResponse(w, r, dns.RcodeSuccess)
+		return
+	}
+
 	if !isAuthorizedZone(updateZone) {
 		log.Printf("[DDNS] UPDATE rejected: zone %q not authorized", updateZone)
+		if logger != nil {
+			logger.LogDNS(updateZone, clientIP, "ddns-rejected")
+		}
 		sendDDNSResponse(w, r, dns.RcodeNotZone)
 		return
 	}
@@ -95,12 +192,18 @@ func handleDDNSUpdate(w dns.ResponseWriter, r *dns.Msg) {
 	for _, del := range deletes {
 		applyDDNSDelete(del)
 		appliedDeletes++
+		if logger != nil {
+			logger.LogDNS(del.name, clientIP, "ddns-delete")
+		}
 	}
 
 	appliedAdds := 0
 	for _, add := range adds {
 		applyDDNSAdd(add, updateZone)
 		appliedAdds++
+		if logger != nil {
+			logger.LogDNS(add.name, clientIP, "ddns-add")
+		}
 	}
 
 	// 6. Clean up non-persistent devices with no remaining addresses.
@@ -111,10 +214,6 @@ func handleDDNSUpdate(w dns.ResponseWriter, r *dns.Msg) {
 
 	log.Printf("[DDNS] UPDATE applied: zone=%s adds=%d deletes=%d (from %s)",
 		updateZone, appliedAdds, appliedDeletes, w.RemoteAddr())
-
-	if logger != nil {
-		logger.LogDNS(updateZone, "ddns", "update")
-	}
 
 	sendDDNSResponse(w, r, dns.RcodeSuccess)
 }

@@ -71,6 +71,14 @@ func dnsActionLabel(action string) string {
 		return "Cached"
 	case "forward":
 		return "Forwarded"
+	case "ddns-add":
+		return "DDNS Add"
+	case "ddns-delete":
+		return "DDNS Delete"
+	case "ddns-rejected":
+		return "DDNS Rejected"
+	case "ddns-ptr":
+		return "DDNS PTR (auto)"
 	default:
 		return action
 	}

@@ -80,6 +80,10 @@
       blocked: "Blocked",
       cached: "Cached",
       forward: "Forwarded",
+      "ddns-add": "DDNS Add",
+      "ddns-delete": "DDNS Delete",
+      "ddns-rejected": "DDNS Rejected",
+      "ddns-ptr": "DDNS PTR (auto)",
     };
     return labels[action] || action;
   }
@@ -91,10 +95,17 @@
 
   function tagType(entryType: string, action: string): string {
     if (action === "auth_failure") return "magenta";
+    if (action === "ddns-rejected") return "magenta";
     if (isBlockedAction(entryType, action)) return "red";
     if (entryType === "dns") {
       if (action === "cached") return "teal";
       if (action === "forward") return "blue";
+      if (
+        action === "ddns-add" ||
+        action === "ddns-delete" ||
+        action === "ddns-ptr"
+      )
+        return "cyan";
       return "gray";
     }
     if (action === "ssl-bump") return "purple";

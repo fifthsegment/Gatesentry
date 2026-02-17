@@ -1240,3 +1240,192 @@ func TestPTR_NoDuplicates_MultiZone(t *testing.T) {
 		t.Errorf("PTR should target primary 'macmini.jvj28.com', got %q", ptr4[0].Value)
 	}
 }
+
+// ==========================================================================
+// IP Conflict Eviction tests
+// ==========================================================================
+
+func TestUpsertDevice_EvictsIPv4FromOtherDevice(t *testing.T) {
+	ds := NewDeviceStore("local")
+
+	// Device A gets 192.168.1.100
+	idA := ds.UpsertDevice(&Device{
+		Hostnames: []string{"device-a"},
+		IPv4:      "192.168.1.100",
+		Source:    SourcePassive,
+		Sources:   []DiscoverySource{SourcePassive},
+	})
+
+	// Verify A has the IP
+	a := ds.FindDeviceByIP("192.168.1.100")
+	if a == nil || a.ID != idA {
+		t.Fatal("Expected device A to own 192.168.1.100")
+	}
+
+	// Device B gets the SAME IP (DHCP reassigned it)
+	idB := ds.UpsertDevice(&Device{
+		Hostnames: []string{"device-b"},
+		IPv4:      "192.168.1.100",
+		Source:    SourceDDNS,
+		Sources:   []DiscoverySource{SourceDDNS},
+	})
+
+	// B now owns the IP
+	b := ds.FindDeviceByIP("192.168.1.100")
+	if b == nil || b.ID != idB {
+		t.Fatalf("Expected device B to own 192.168.1.100, got %+v", b)
+	}
+
+	// A should have lost the IP
+	aAfter := ds.GetDevice(idA)
+	if aAfter == nil {
+		t.Fatal("Device A should still exist")
+	}
+	if aAfter.IPv4 != "" {
+		t.Errorf("Device A should have empty IPv4 after eviction, got %q", aAfter.IPv4)
+	}
+
+	// A should have no DNS records
+	recsA := ds.LookupName("device-a.local", dns.TypeA)
+	if len(recsA) != 0 {
+		t.Errorf("Expected 0 A records for device-a after eviction, got %d", len(recsA))
+	}
+
+	// B should have DNS records
+	recsB := ds.LookupName("device-b.local", dns.TypeA)
+	if len(recsB) != 1 {
+		t.Errorf("Expected 1 A record for device-b, got %d", len(recsB))
+	}
+}
+
+func TestUpsertDevice_EvictsIPv6FromOtherDevice(t *testing.T) {
+	ds := NewDeviceStore("local")
+
+	idA := ds.UpsertDevice(&Device{
+		Hostnames: []string{"device-a"},
+		IPv6:      "fd00::100",
+		Source:    SourcePassive,
+		Sources:   []DiscoverySource{SourcePassive},
+	})
+
+	idB := ds.UpsertDevice(&Device{
+		Hostnames: []string{"device-b"},
+		IPv6:      "fd00::100",
+		Source:    SourceDDNS,
+		Sources:   []DiscoverySource{SourceDDNS},
+	})
+
+	// B owns it
+	b := ds.FindDeviceByIP("fd00::100")
+	if b == nil || b.ID != idB {
+		t.Fatalf("Expected device B to own fd00::100")
+	}
+
+	// A lost it
+	aAfter := ds.GetDevice(idA)
+	if aAfter.IPv6 != "" {
+		t.Errorf("Device A should have empty IPv6, got %q", aAfter.IPv6)
+	}
+}
+
+func TestUpsertDevice_SameDeviceSameIP_NoEviction(t *testing.T) {
+	ds := NewDeviceStore("local")
+
+	id := ds.UpsertDevice(&Device{
+		Hostnames: []string{"device-a"},
+		IPv4:      "192.168.1.50",
+		Source:    SourceDDNS,
+		Sources:   []DiscoverySource{SourceDDNS},
+	})
+
+	// Re-upsert same device with same IP
+	ds.UpsertDevice(&Device{
+		ID:        id,
+		Hostnames: []string{"device-a"},
+		IPv4:      "192.168.1.50",
+		Source:    SourceDDNS,
+		Sources:   []DiscoverySource{SourceDDNS},
+	})
+
+	d := ds.GetDevice(id)
+	if d.IPv4 != "192.168.1.50" {
+		t.Errorf("Expected IP preserved on same-device upsert, got %q", d.IPv4)
+	}
+}
+
+func TestUpdateDeviceIP_EvictsFromOtherDevice(t *testing.T) {
+	ds := NewDeviceStore("local")
+
+	idA := ds.UpsertDevice(&Device{
+		Hostnames: []string{"device-a"},
+		IPv4:      "192.168.1.100",
+		Source:    SourcePassive,
+		Sources:   []DiscoverySource{SourcePassive},
+	})
+
+	idB := ds.UpsertDevice(&Device{
+		Hostnames: []string{"device-b"},
+		IPv4:      "192.168.1.200",
+		Source:    SourcePassive,
+		Sources:   []DiscoverySource{SourcePassive},
+	})
+
+	// B takes A's IP via UpdateDeviceIP
+	ds.UpdateDeviceIP(idB, "192.168.1.100", "")
+
+	bAfter := ds.GetDevice(idB)
+	if bAfter.IPv4 != "192.168.1.100" {
+		t.Errorf("Expected B to have 192.168.1.100, got %q", bAfter.IPv4)
+	}
+
+	aAfter := ds.GetDevice(idA)
+	if aAfter.IPv4 != "" {
+		t.Errorf("Expected A to lose 192.168.1.100 after eviction, got %q", aAfter.IPv4)
+	}
+
+	// DNS records should reflect the new state
+	recsB := ds.LookupName("device-b.local", dns.TypeA)
+	if len(recsB) != 1 || recsB[0].Value != "192.168.1.100" {
+		t.Errorf("Expected B to have A record for 192.168.1.100, got %+v", recsB)
+	}
+	recsA := ds.LookupName("device-a.local", dns.TypeA)
+	if len(recsA) != 0 {
+		t.Errorf("Expected A to have no A records after eviction, got %d", len(recsA))
+	}
+}
+
+func TestUpsertDevice_EvictionPreservesDeviceIdentity(t *testing.T) {
+	ds := NewDeviceStore("local")
+
+	// Device A: has hostname, MAC, and IP
+	idA := ds.UpsertDevice(&Device{
+		Hostnames: []string{"printer"},
+		MACs:      []string{"aa:bb:cc:dd:ee:ff"},
+		IPv4:      "192.168.1.100",
+		Source:    SourceMDNS,
+		Sources:   []DiscoverySource{SourceMDNS},
+	})
+
+	// Device B steals A's IP
+	ds.UpsertDevice(&Device{
+		Hostnames: []string{"laptop"},
+		IPv4:      "192.168.1.100",
+		Source:    SourceDDNS,
+		Sources:   []DiscoverySource{SourceDDNS},
+	})
+
+	// A should still exist with hostname and MAC, just no IP
+	aAfter := ds.GetDevice(idA)
+	if aAfter == nil {
+		t.Fatal("Device A should still exist after IP eviction")
+	}
+	if len(aAfter.Hostnames) == 0 || aAfter.Hostnames[0] != "printer" {
+		t.Errorf("Expected hostname 'printer' preserved, got %v", aAfter.Hostnames)
+	}
+	if len(aAfter.MACs) == 0 || aAfter.MACs[0] != "aa:bb:cc:dd:ee:ff" {
+		t.Errorf("Expected MAC preserved, got %v", aAfter.MACs)
+	}
+	if aAfter.IPv4 != "" {
+		t.Errorf("Expected empty IPv4 after eviction, got %q", aAfter.IPv4)
+	}
+}

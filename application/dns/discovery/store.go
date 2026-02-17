@@ -105,6 +105,10 @@ type DeviceStore struct {
 	// and "macmini.jvj28.com" resolve to the same device.
 	// Default: ["local"]
 	zones []string
+
+	// persist holds the debounce state for automatic disk persistence.
+	// nil when persistence is not enabled (e.g., in tests).
+	persist *persistState
 }
 
 // NewDeviceStore creates an empty DeviceStore with the given zone suffix.
@@ -355,6 +359,13 @@ func (ds *DeviceStore) FindDeviceByIP(ip string) *Device {
 
 // UpsertDevice adds or updates a device in the store and regenerates
 // its DNS records. The device is matched by ID if it already exists.
+//
+// IP conflict eviction: if the device being upserted carries an IPv4 or
+// IPv6 address that is currently assigned to a DIFFERENT device, that
+// address is cleared from the other device first. This ensures IP→device
+// uniqueness — the most recent authoritative source (DDNS, DHCP lease,
+// passive observation) always wins.
+//
 // Returns the device ID.
 func (ds *DeviceStore) UpsertDevice(device *Device) string {
 	ds.mu.Lock()
@@ -363,6 +374,11 @@ func (ds *DeviceStore) UpsertDevice(device *Device) string {
 	if device.ID == "" {
 		device.ID = generateID()
 	}
+
+	// Evict conflicting IPs from other devices before merge.
+	// This must happen before we read 'existing' so that the evicted
+	// device's fields are already cleared.
+	ds.evictConflictingIP(device.ID, device.IPv4, device.IPv6)
 
 	now := time.Now()
 	existing := ds.devices[device.ID]
@@ -421,6 +437,7 @@ func (ds *DeviceStore) UpsertDevice(device *Device) string {
 
 	ds.devices[device.ID] = device
 	ds.rebuildIndexes()
+	ds.scheduleSave()
 
 	return device.ID
 }
@@ -432,10 +449,14 @@ func (ds *DeviceStore) RemoveDevice(id string) {
 
 	delete(ds.devices, id)
 	ds.rebuildIndexes()
+	ds.scheduleSave()
 }
 
 // UpdateDeviceIP updates a device's IP address (v4 or v6) and regenerates
 // DNS records. This is the hot path for DHCP renewals and DDNS updates.
+//
+// Evicts the given IPs from any other device that currently holds them,
+// ensuring IP→device uniqueness (the most recent update wins).
 func (ds *DeviceStore) UpdateDeviceIP(id string, ipv4 string, ipv6 string) {
 	ds.mu.Lock()
 	defer ds.mu.Unlock()
@@ -444,6 +465,9 @@ func (ds *DeviceStore) UpdateDeviceIP(id string, ipv4 string, ipv6 string) {
 	if device == nil {
 		return
 	}
+
+	// Evict conflicting IPs from other devices first
+	ds.evictConflictingIP(id, ipv4, ipv6)
 
 	changed := false
 	if ipv4 != "" && ipv4 != device.IPv4 {
@@ -458,6 +482,7 @@ func (ds *DeviceStore) UpdateDeviceIP(id string, ipv4 string, ipv6 string) {
 		device.LastSeen = time.Now()
 		device.Online = true
 		ds.rebuildIndexes()
+		ds.scheduleSave()
 	}
 }
 
@@ -480,6 +505,7 @@ func (ds *DeviceStore) ClearDeviceAddress(id string, clearIPv4, clearIPv6 bool) 
 		device.IPv6 = ""
 	}
 	ds.rebuildIndexes()
+	ds.scheduleSave()
 }
 
 // TouchDevice updates the LastSeen timestamp for a device.
@@ -530,8 +556,10 @@ func (ds *DeviceStore) ImportLegacyRecords(records map[string]string) int {
 			device := ds.devices[existingID]
 			if device != nil {
 				if net.ParseIP(ip).To4() != nil {
+					ds.evictConflictingIP(existingID, ip, "")
 					device.IPv4 = ip
 				} else {
+					ds.evictConflictingIP(existingID, "", ip)
 					device.IPv6 = ip
 				}
 				device.AddSource(SourceManual)
@@ -550,8 +578,10 @@ func (ds *DeviceStore) ImportLegacyRecords(records map[string]string) int {
 				Persistent: true,
 			}
 			if net.ParseIP(ip) != nil && net.ParseIP(ip).To4() != nil {
+				ds.evictConflictingIP(device.ID, ip, "")
 				device.IPv4 = ip
 			} else {
+				ds.evictConflictingIP(device.ID, "", ip)
 				device.IPv6 = ip
 			}
 			device.DisplayName = device.GetDisplayName()
@@ -560,6 +590,7 @@ func (ds *DeviceStore) ImportLegacyRecords(records map[string]string) int {
 		imported++
 	}
 	ds.rebuildIndexes()
+	ds.scheduleSave()
 	log.Printf("[Discovery] Imported %d legacy internal records", imported)
 	return imported
 }
@@ -590,6 +621,35 @@ func (ds *DeviceStore) deriveDNSName(device *Device) string {
 
 // rebuildIndexes regenerates all lookup maps and DNS records from devices.
 // MUST be called with ds.mu held for writing.
+// evictConflictingIP clears IPv4/IPv6 addresses from any device that
+// currently holds them, EXCEPT the device identified by 'keepID'.
+//
+// This enforces IP→device uniqueness: when a DHCP server, DDNS update,
+// or passive observation assigns an IP to a device, the old holder loses
+// it. Empty strings are skipped (no-op).
+//
+// MUST be called while ds.mu is held (caller holds Lock).
+func (ds *DeviceStore) evictConflictingIP(keepID string, ipv4, ipv6 string) {
+	if ipv4 != "" {
+		if otherID := ds.deviceByIP[ipv4]; otherID != "" && otherID != keepID {
+			if other := ds.devices[otherID]; other != nil {
+				log.Printf("[Discovery] IP conflict: evicting %s from device %s (%s) — reassigned to %s",
+					ipv4, other.GetDisplayName(), otherID, keepID)
+				other.IPv4 = ""
+			}
+		}
+	}
+	if ipv6 != "" {
+		if otherID := ds.deviceByIP[ipv6]; otherID != "" && otherID != keepID {
+			if other := ds.devices[otherID]; other != nil {
+				log.Printf("[Discovery] IP conflict: evicting %s from device %s (%s) — reassigned to %s",
+					ipv6, other.GetDisplayName(), otherID, keepID)
+				other.IPv6 = ""
+			}
+		}
+	}
+}
+
 func (ds *DeviceStore) rebuildIndexes() {
 	// Clear indexes
 	ds.recordsByName = make(map[string][]DnsRecord)

@@ -14,6 +14,7 @@
   } from "carbon-components-svelte";
   import {
     AddAlt,
+    Copy,
     Edit,
     Restart,
     RowDelete,
@@ -69,6 +70,25 @@
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
     };
+  }
+
+  let copyTooltip = "";
+  async function copySecret() {
+    try {
+      const json = await $store.api.getSetting("ddns_tsig_key_secret");
+      const val = json?.Value || "";
+      if (!val) {
+        copyTooltip = "Nothing to copy";
+        setTimeout(() => (copyTooltip = ""), 1500);
+        return;
+      }
+      await navigator.clipboard.writeText(val);
+      copyTooltip = "Copied!";
+      setTimeout(() => (copyTooltip = ""), 1500);
+    } catch {
+      copyTooltip = "Copy failed";
+      setTimeout(() => (copyTooltip = ""), 1500);
+    }
   }
 
   async function loadAllLists() {
@@ -704,6 +724,105 @@
       {/if}
     </div>
   </div>
+
+  <!-- DNS Zone -->
+  <div class="gs-section">
+    <div class="gs-card">
+      <h5>DNS Zone</h5>
+      <p class="dns-list-hint">
+        Additional DNS zones for device name resolution. The <code>local</code>
+        zone is always active for mDNS/Bonjour compatibility. Add your own domain
+        (e.g. "jvj28.com") so devices also resolve as
+        <code>hostname.jvj28.com</code>. Separate multiple zones with commas.
+      </p>
+      <div style="margin-top: 8px; max-width: 400px;">
+        <ConnectedSettingInput
+          keyName="dns_local_zone"
+          title={$_("DNS Zone")}
+          labelText={$_("Zone")}
+          type="text"
+          helperText="Default: local"
+        />
+      </div>
+    </div>
+  </div>
+
+  <!-- Dynamic DNS (DDNS) -->
+  <div class="gs-section">
+    <div class="gs-card">
+      <div class="dns-list-header">
+        <div>
+          <h5>Dynamic DNS (RFC 2136)</h5>
+          <p class="dns-list-hint">
+            Accept RFC 2136 Dynamic DNS UPDATE messages from DHCP servers (e.g.
+            ISC DHCP, Kea, pfSense). This lets GateSentry automatically learn
+            device hostnames when they receive DHCP leases.
+          </p>
+        </div>
+      </div>
+
+      <div style="margin-top: 8px;">
+        <ToggleComponent
+          settingName="ddns_enabled"
+          label="DDNS Updates"
+          labelA="Disabled"
+          labelB="Enabled"
+          size="sm"
+        />
+      </div>
+
+      <div class="ddns-tsig-section">
+        <h6 class="ddns-subsection-title">TSIG Authentication</h6>
+        <p class="dns-list-hint">
+          When enabled, DDNS updates must be signed with a valid TSIG key.
+          Configure the same key name and secret on your DHCP server.
+        </p>
+
+        <div style="margin-top: 8px;">
+          <ToggleComponent
+            settingName="ddns_tsig_required"
+            label="Require TSIG"
+            labelA="Not Required"
+            labelB="Required"
+            size="sm"
+          />
+        </div>
+
+        <div class="ddns-tsig-fields">
+          <ConnectedSettingInput
+            keyName="ddns_tsig_key_name"
+            title={$_("TSIG Key Name")}
+            labelText={$_("Key Name")}
+            type="text"
+            helperText="e.g. dhcp-key"
+          />
+          <div class="ddns-secret-row">
+            <div class="ddns-secret-input">
+              <ConnectedSettingInput
+                keyName="ddns_tsig_key_secret"
+                title={$_("TSIG Secret")}
+                labelText={$_("Shared Secret (Base64)")}
+                type="password"
+                helperText="Base64-encoded HMAC shared secret"
+              />
+            </div>
+            <div class="ddns-copy-wrap">
+              <button
+                class="ddns-copy-btn"
+                title="Copy secret to clipboard"
+                on:click={copySecret}
+              >
+                <Copy size={16} />
+              </button>
+              {#if copyTooltip}
+                <span class="ddns-copy-tooltip">{copyTooltip}</span>
+              {/if}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
 {/if}
 
 <style>
@@ -859,5 +978,64 @@
     .dns-stat-val {
       font-size: 0.8125rem;
     }
+  }
+
+  /* ── DDNS Section ── */
+  .ddns-tsig-section {
+    margin-top: 20px;
+    padding-top: 16px;
+    border-top: 1px solid #e0e0e0;
+  }
+  .ddns-subsection-title {
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: #393939;
+    margin-bottom: 4px;
+  }
+  .ddns-tsig-fields {
+    margin-top: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    max-width: 400px;
+  }
+  .ddns-secret-row {
+    display: flex;
+    align-items: flex-end;
+    gap: 4px;
+  }
+  .ddns-secret-input {
+    flex: 1;
+    min-width: 0;
+  }
+  .ddns-copy-wrap {
+    position: relative;
+    flex-shrink: 0;
+    padding-bottom: 20px; /* align with input above helperText */
+  }
+  .ddns-copy-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    background: none;
+    border: 1px solid #e0e0e0;
+    border-radius: 4px;
+    cursor: pointer;
+    color: #525252;
+  }
+  .ddns-copy-btn:hover {
+    background: #e0e0e0;
+    color: #161616;
+  }
+  .ddns-copy-tooltip {
+    position: absolute;
+    bottom: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 0.6875rem;
+    color: #0f62fe;
+    white-space: nowrap;
   }
 </style>
