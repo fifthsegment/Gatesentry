@@ -44,7 +44,7 @@ set -euo pipefail
 
 IMAGE_NAME="gatesentry"
 DOCKERHUB_REPO="jbarwick/gatesentry"
-DOCKERHUB_README="DOCKERHUB_README.md"
+DOCKERHUB_README="DOCKERHUB_README_V2.md"
 # Strip any scheme (https://, http://) — Docker refs are just host:port
 NEXUS_REGISTRY="${NEXUS_SERVER#https://}"
 NEXUS_REGISTRY="${NEXUS_REGISTRY#http://}"
