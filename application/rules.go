@@ -8,19 +8,27 @@ import (
 	"strings"
 	"time"
 
-	GatesentryTypes "bitbucket.org/abdullah_irfan/gatesentryf/types"
+	gatesentryDomainList "bitbucket.org/abdullah_irfan/gatesentryf/domainlist"
 	gatesentry2storage "bitbucket.org/abdullah_irfan/gatesentryf/storage"
+	GatesentryTypes "bitbucket.org/abdullah_irfan/gatesentryf/types"
 	gatesentryUtils "bitbucket.org/abdullah_irfan/gatesentryf/utils"
 )
 
 // RuleManager handles rule storage and matching
 type RuleManager struct {
-	storage *gatesentry2storage.MapStore
+	storage       *gatesentry2storage.MapStore
+	domainListMgr *gatesentryDomainList.DomainListManager
 }
 
 // NewRuleManager creates a new rule manager
 func NewRuleManager(storage *gatesentry2storage.MapStore) *RuleManager {
 	return &RuleManager{storage: storage}
+}
+
+// SetDomainListManager sets the shared DomainListManager for domain list lookups.
+// This is called after both the RuleManager and DomainListManager are created.
+func (rm *RuleManager) SetDomainListManager(dlm *gatesentryDomainList.DomainListManager) {
+	rm.domainListMgr = dlm
 }
 
 // GetRules retrieves all rules from storage
@@ -148,16 +156,81 @@ func (rm *RuleManager) GetRule(ruleID string) (*GatesentryTypes.Rule, error) {
 
 // MatchDomain checks if a domain matches a rule's domain pattern
 func matchDomain(pattern, domain string) bool {
-	pattern = strings.ToLower(pattern)
-	domain = strings.ToLower(domain)
+	pattern = strings.ToLower(strings.TrimRight(pattern, "."))
+	domain = strings.ToLower(strings.TrimRight(domain, "."))
+
+	// Universal wildcard — matches every domain
+	if pattern == "*" {
+		return true
+	}
 
 	if pattern == domain {
 		return true
 	}
 
-	if strings.HasPrefix(pattern, "*.") {
+	// Wildcard matching: * matches zero or more characters (including dots)
+	// Supports patterns like *.example.com, ad*, *tracker*, etc.
+	if strings.Contains(pattern, "*") {
+		return globMatch(pattern, domain)
+	}
+
+	return false
+}
+
+// globMatch performs simple glob-style matching where * matches any sequence
+// of characters (including dots/subdomains). Supports multiple * in pattern.
+func globMatch(pattern, str string) bool {
+	// Fast path for common *.suffix pattern
+	if strings.HasPrefix(pattern, "*.") && !strings.Contains(pattern[2:], "*") {
 		suffix := pattern[2:]
-		return strings.HasSuffix(domain, "."+suffix) || domain == suffix
+		return strings.HasSuffix(str, "."+suffix) || str == suffix
+	}
+
+	// General glob: split on * and check that parts appear in order
+	parts := strings.Split(pattern, "*")
+
+	// First part must be a prefix
+	if !strings.HasPrefix(str, parts[0]) {
+		return false
+	}
+	str = str[len(parts[0]):]
+
+	// Middle parts must appear in order
+	for i := 1; i < len(parts)-1; i++ {
+		idx := strings.Index(str, parts[i])
+		if idx < 0 {
+			return false
+		}
+		str = str[idx+len(parts[i]):]
+	}
+
+	// Last part must be a suffix
+	return strings.HasSuffix(str, parts[len(parts)-1])
+}
+
+// matchRuleDomain checks whether a domain matches any of a rule's domain
+// criteria. A rule matches if ANY of the following are true:
+//  1. rule.Domain is set and matchDomain(rule.Domain, domain) (legacy, backward compat)
+//  2. Any pattern in rule.DomainPatterns matches (wildcard matching)
+//  3. The domain appears in ANY domain list referenced by rule.DomainLists (O(1) index lookup)
+func (rm *RuleManager) matchRuleDomain(rule *GatesentryTypes.Rule, domain string) bool {
+	// 1. Legacy single-domain pattern
+	if rule.Domain != "" && matchDomain(rule.Domain, domain) {
+		return true
+	}
+
+	// 2. Multiple domain patterns (wildcards)
+	for _, pattern := range rule.DomainPatterns {
+		if matchDomain(pattern, domain) {
+			return true
+		}
+	}
+
+	// 3. Domain list membership (O(1) lookup via shared index)
+	if len(rule.DomainLists) > 0 && rm.domainListMgr != nil && rm.domainListMgr.Index != nil {
+		if rm.domainListMgr.Index.IsDomainInAnyList(strings.ToLower(domain), rule.DomainLists) {
+			return true
+		}
 	}
 
 	return false
@@ -181,6 +254,9 @@ func checkTimeRestriction(restriction *GatesentryTypes.TimeRestriction) bool {
 
 // MatchRule finds the first matching rule for a given domain and user
 func (rm *RuleManager) MatchRule(domain, user string) GatesentryTypes.RuleMatch {
+	// Normalize FQDN trailing dot — DNS-derived hostnames may include it
+	domain = strings.TrimRight(domain, ".")
+
 	rules, err := rm.GetRules()
 	if err != nil {
 		log.Printf("Error getting rules: %v", err)
@@ -192,7 +268,7 @@ func (rm *RuleManager) MatchRule(domain, user string) GatesentryTypes.RuleMatch 
 			continue
 		}
 
-		if !matchDomain(rule.Domain, domain) {
+		if !rm.matchRuleDomain(&rule, domain) {
 			continue
 		}
 
@@ -218,19 +294,30 @@ func (rm *RuleManager) MatchRule(domain, user string) GatesentryTypes.RuleMatch 
 			Rule:    &rule,
 		}
 
-		match.ShouldMITM = rule.MITMAction == GatesentryTypes.MITMActionEnable
-		match.ShouldBlock = rule.Action == GatesentryTypes.RuleActionBlock
-		
-		if match.ShouldMITM {
-			if rule.BlockType == GatesentryTypes.BlockTypeContentType || 
-			   rule.BlockType == GatesentryTypes.BlockTypeBoth {
-				match.BlockContentTypes = rule.BlockedContentTypes
-			}
-			if rule.BlockType == GatesentryTypes.BlockTypeURLRegex || 
-			   rule.BlockType == GatesentryTypes.BlockTypeBoth {
-				match.BlockURLRegexes = rule.URLRegexPatterns
-			}
+		// Resolve MITM state:
+		//   "enable"  → true
+		//   "disable" → false
+		//   "default" → use global enable_https_filtering setting
+		switch rule.MITMAction {
+		case GatesentryTypes.MITMActionEnable:
+			match.ShouldMITM = true
+		case GatesentryTypes.MITMActionDisable:
+			match.ShouldMITM = false
+		default: // "default" or empty
+			match.ShouldMITM = rm.storage.Get("enable_https_filtering") == "true"
 		}
+		match.ShouldBlock = rule.Action == GatesentryTypes.RuleActionBlock
+
+		// Populate match criteria — these are always set regardless of MITM.
+		// Content types and URL regexes are request-level match criteria.
+		// Keyword filtering is content scanning (works on HTTP and HTTPS+MITM).
+		if len(rule.BlockedContentTypes) > 0 {
+			match.BlockContentTypes = rule.BlockedContentTypes
+		}
+		if len(rule.URLRegexPatterns) > 0 {
+			match.BlockURLRegexes = rule.URLRegexPatterns
+		}
+		match.KeywordFilterEnabled = rule.KeywordFilterEnabled
 
 		return match
 	}
@@ -241,14 +328,14 @@ func (rm *RuleManager) MatchRule(domain, user string) GatesentryTypes.RuleMatch 
 // CheckContentTypeBlocked checks if a content type should be blocked based on rule
 func CheckContentTypeBlocked(contentType string, blockedTypes []string) bool {
 	contentType = strings.ToLower(strings.TrimSpace(contentType))
-	
+
 	for _, blocked := range blockedTypes {
 		blocked = strings.ToLower(strings.TrimSpace(blocked))
 		if strings.Contains(contentType, blocked) {
 			return true
 		}
 	}
-	
+
 	return false
 }
 
@@ -264,7 +351,7 @@ func CheckURLPathBlocked(urlPath string, patterns []string) bool {
 			return true
 		}
 	}
-	
+
 	return false
 }
 

@@ -132,12 +132,12 @@ func (l *TransparentProxyListener) handleTransparentHTTP(conn net.Conn, original
 	}
 	user := ""
 
-	shouldBlock, _, _ := CheckProxyRules(host, user)
+	shouldBlock, ruleMatch, _ := CheckProxyRules(host, user)
 	if shouldBlock {
 		if DebugLogging {
 			log.Printf("[Transparent] Blocking HTTP request to %s by rule", originalDst)
 		}
-		LogProxyAction(req.URL.String(), user, ProxyActionBlockedUrl)
+		LogProxyActionWithRule(req.URL.String(), user, ProxyActionBlockedUrl, extractRuleName(ruleMatch))
 		conn.Close()
 		return
 	}
@@ -226,7 +226,7 @@ func (l *TransparentProxyListener) handleTransparentHTTPS(conn net.Conn, origina
 		if serverName != "" {
 			logUrl = "https://" + serverName
 		}
-		LogProxyAction(logUrl, user, ProxyActionBlockedUrl)
+		LogProxyActionWithRule(logUrl, user, ProxyActionBlockedUrl, extractRuleName(ruleMatch))
 		conn.Close()
 		return
 	}

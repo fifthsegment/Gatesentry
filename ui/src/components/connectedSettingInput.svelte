@@ -10,6 +10,7 @@
   import {
     RadioButtonGroup,
     TextInput,
+    PasswordInput,
     RadioButton,
   } from "carbon-components-svelte";
   import { store } from "../store/apistore";
@@ -90,6 +91,15 @@
       <RadioButton value="true" labelText={$_("True")} />
       <RadioButton value="false" labelText={$_("False")} />
     </RadioButtonGroup>
+  {:else if type == "password"}
+    <PasswordInput
+      {labelText}
+      {helperText}
+      {disabled}
+      tooltipPosition="left"
+      value={data ?? ""}
+      on:blur={updateField}
+    />
   {:else}
     <TextInput
       {title}

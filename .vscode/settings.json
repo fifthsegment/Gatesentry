@@ -1,4 +1,12 @@
 {
     "editor.formatOnSave": true,
-    "[svelte]": {"editor.defaultFormatter": "svelte.svelte-vscode"}
+    "[svelte]": {
+        "editor.defaultFormatter": "svelte.svelte-vscode"
+    },
+    // Go linting — use golangci-lint for comprehensive analysis
+    "go.lintTool": "golangci-lint",
+    "go.lintFlags": [
+        "--fast"
+    ],
+    "go.lintOnSave": "workspace"
 }

@@ -3,16 +3,15 @@
 
   import Toggle from "../../components/toggle.svelte";
   import ConnectedSettingInput from "../../components/connectedSettingInput.svelte";
-  import { Breadcrumb, BreadcrumbItem } from "carbon-components-svelte";
+  import { Network_4 } from "carbon-icons-svelte";
 
   let enable_ai_image_filtering = "";
 </script>
 
-<Breadcrumb style="margin-bottom: 10px;">
-  <BreadcrumbItem href="/">Dashboard</BreadcrumbItem>
-  <BreadcrumbItem>Gatesentry AI</BreadcrumbItem>
-</Breadcrumb>
-<h2>Gatesentry AI</h2>
+<div class="gs-page-title">
+  <Network_4 size={24} />
+  <h2>Gatesentry AI</h2>
+</div>
 <br />
 <div>
   This is an experimental feature. It is not recommended to use this in

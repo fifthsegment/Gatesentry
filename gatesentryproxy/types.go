@@ -1,5 +1,7 @@
 package gatesentryproxy
 
+import "sync"
+
 type GSProxyPassthru struct {
 	UserData         interface{}
 	DontTouch        bool
@@ -18,26 +20,27 @@ type GSHandler struct {
 }
 
 type GSUserCached struct {
-	User string
-	Pass string
+	User     string
+	Pass     string
+	CachedAt int64
 }
 
 type GSProxy struct {
-	AuthHandler        func(authheader string) bool
-	ContentHandler     func(*GSContentFilterData)
-	ContentTypeHandler func(*GSContentTypeFilterData)
-	ContentSizeHandler func(GSContentSizeFilterData)
-	UserAccessHandler  func(*GSUserAccessFilterData)
-	TimeAccessHandler  func(*GSTimeAccessFilterData)
-	UrlAccessHandler   func(*GSUrlFilterData)
-	ProxyErrorHandler  func(*GSProxyErrorData)
-	DoMitm             func(host string) bool
-	IsExceptionUrl     func(url string) bool
-	IsAuthEnabled      func() bool
-	LogHandler         func(GSLogData)
-	RuleMatchHandler   func(domain string, user string) interface{} // Returns RuleMatch
-	Handlers           map[string][]*GSHandler
-	UsersCache         map[string]GSUserCached
+	AuthHandler          func(authheader string) bool
+	ContentHandler       func(*GSContentFilterData)
+	ContentSizeHandler   func(GSContentSizeFilterData)
+	UserAccessHandler    func(*GSUserAccessFilterData)
+	TimeAccessHandler    func(*GSTimeAccessFilterData)
+	UrlAccessHandler     func(*GSUrlFilterData)
+	ProxyErrorHandler    func(*GSProxyErrorData)
+	DoMitm               func(host string) bool
+	IsExceptionUrl       func(url string) bool
+	IsAuthEnabled        func() bool
+	LogHandler           func(GSLogData)
+	RuleMatchHandler     func(domain string, user string) interface{} // Returns RuleMatch
+	RuleBlockPageHandler func(domain string, ruleName string) []byte  // Build HTML block page for rule-based domain blocks
+	Handlers             map[string][]*GSHandler
+	UsersCache           sync.Map
 }
 
 // For the refactored filter input
@@ -47,13 +50,6 @@ type GSContentFilterData struct {
 	Content              []byte
 	FilterResponse       []byte
 	FilterResponseAction ProxyAction
-}
-
-type GSContentTypeFilterData struct {
-	Url                  string
-	ContentType          string
-	FilterResponseAction ProxyAction
-	FilterResponse       []byte
 }
 
 type GSContentSizeFilterData struct {
@@ -82,6 +78,7 @@ type GSLogData struct {
 	ContentType string
 	User        string
 	Action      ProxyAction
+	RuleName    string
 }
 
 type GSUrlFilterData struct {

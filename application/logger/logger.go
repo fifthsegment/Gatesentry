@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log"
 	"strings"
+	"sync"
 	"time"
 
 	gatesentry2utils "bitbucket.org/abdullah_irfan/gatesentryf/utils"
@@ -19,6 +20,51 @@ type Log struct {
 	// DataCache
 	LastCommitTime time.Time
 	LogLocation    string
+
+	// SSE subscriber support
+	mu          sync.RWMutex
+	subscribers map[chan LogEntry]struct{}
+}
+
+// Subscribe returns a channel that receives new log entries in real-time.
+// The caller MUST call Unsubscribe when done to avoid goroutine leaks.
+func (L *Log) Subscribe() chan LogEntry {
+	ch := make(chan LogEntry, 64)
+	L.mu.Lock()
+	if L.subscribers == nil {
+		L.subscribers = make(map[chan LogEntry]struct{})
+	}
+	L.subscribers[ch] = struct{}{}
+	L.mu.Unlock()
+	return ch
+}
+
+// Unsubscribe removes a subscriber channel and closes it.
+func (L *Log) Unsubscribe(ch chan LogEntry) {
+	L.mu.Lock()
+	delete(L.subscribers, ch)
+	L.mu.Unlock()
+	close(ch)
+}
+
+// SubscriberCount returns the current number of active log stream subscribers.
+func (L *Log) SubscriberCount() int {
+	L.mu.RLock()
+	defer L.mu.RUnlock()
+	return len(L.subscribers)
+}
+
+// broadcast sends a log entry to all active subscribers (non-blocking).
+func (L *Log) broadcast(entry LogEntry) {
+	L.mu.RLock()
+	defer L.mu.RUnlock()
+	for ch := range L.subscribers {
+		select {
+		case ch <- entry:
+		default:
+			// subscriber is slow, drop the entry
+		}
+	}
 }
 
 type LogEntry struct {
@@ -28,7 +74,7 @@ type LogEntry struct {
 	Type              string `json:"type"`
 	DNSResponseType   string `json:"dnsResponseType"`
 	ProxyResponseType string `json:"proxyResponseType"`
-	// Add more fields if needed
+	RuleName          string `json:"ruleName,omitempty"`
 }
 
 func (L *Log) Commit(tx *buntdb.Tx) {
@@ -76,6 +122,31 @@ func NewLogger(LogLocation string) *Log {
 	l.Database = db
 	l.LogLocation = LogLocation
 	l.LastCommitTime = time.Now()
+
+	// Shrink the database on startup to purge expired entries and reclaim disk space
+	go func() {
+		log.Println("[Logger] Running startup database shrink...")
+		if err := db.Shrink(); err != nil {
+			log.Println("[Logger] Startup shrink error:", err)
+		} else {
+			log.Println("[Logger] Startup shrink complete")
+		}
+	}()
+
+	// Periodic maintenance: shrink every 6 hours
+	go func() {
+		ticker := time.NewTicker(6 * time.Hour)
+		defer ticker.Stop()
+		for range ticker.C {
+			log.Println("[Logger] Running periodic database shrink...")
+			if err := db.Shrink(); err != nil {
+				log.Println("[Logger] Periodic shrink error:", err)
+			} else {
+				log.Println("[Logger] Periodic shrink complete")
+			}
+		}
+	}()
+
 	return l
 }
 
@@ -98,32 +169,49 @@ func (L *Log) LogDNS(domain string, user string, responseType string) {
 		})
 		// fmt.Println( err );
 		_ = err
+
+		// Broadcast to SSE subscribers
+		L.broadcast(LogEntry{
+			Time:            secs,
+			IP:              ip,
+			URL:             domain,
+			Type:            "dns",
+			DNSResponseType: responseType,
+		})
 	}()
 }
 
-func (L *Log) LogProxy(url string, user string, actionType string) {
+func (L *Log) LogProxy(url string, user string, actionType string, ruleName string) {
 	ip := user
-	// url:=url;
 	go func() {
 		now := time.Now()
 		secs := now.Unix()
-		_ = secs
-		// logitem := "[GS-Logger] " + ctx.Req.RemoteAddr + " - " + ctx.Req.URL.String();
 
 		timestring := gatesentry2utils.Int64toString(secs)
-		logJson := `{"time": ` + timestring + `, "ip":"` + ip + `","url":"` + url + `", "type":"proxy", "proxyResponseType":"` + actionType + `"}`
+		ruleField := ""
+		if ruleName != "" {
+			ruleField = `, "ruleName":"` + ruleName + `"`
+		}
+		logJson := `{"time": ` + timestring + `, "ip":"` + ip + `","url":"` + url + `", "type":"proxy", "proxyResponseType":"` + actionType + `"` + ruleField + `}`
 		key := gatesentry2utils.RandomString(25) + timestring
-		// fmt.Println( logJson );
 
 		err := L.Database.Update(func(tx *buntdb.Tx) error {
 			_, _, err := tx.Set(key, logJson, &buntdb.SetOptions{Expires: true, TTL: Log_Entry_Expires})
 			L.Commit(tx)
 			return err
 		})
-		// fmt.Println( err );
 		_ = err
-	}()
 
+		// Broadcast to SSE subscribers
+		L.broadcast(LogEntry{
+			Time:              secs,
+			IP:                ip,
+			URL:               url,
+			Type:              "proxy",
+			ProxyResponseType: actionType,
+			RuleName:          ruleName,
+		})
+	}()
 }
 
 func (L *Log) GetLog() string {
@@ -198,8 +286,24 @@ func (L *Log) GetLogSearch(search string) string {
 	return strings.Join(outputs, ",")
 }
 
-func (L *Log) GetLastXSecondsDNSLogs(fromSeconds int64, groupByDate bool) (interface{}, error) {
-	var logs interface{} // The return type can be either []LogEntry or map[string][]LogEntry
+// GetLastXSecondsDNSLogs retrieves DNS/proxy log entries from the last N seconds.
+//
+// groupByFormat controls how entries are bucketed:
+//   - ""                   → no grouping, returns []LogEntry
+//   - "2006-01-02"         → group by day   (local time)
+//   - "2006-01-02T15"      → group by hour  (local time)
+//   - "2006-01-02T15:04"   → group by minute (local time)
+//
+// When a groupByFormat is provided the return type is map[string][]LogEntry
+// where the key is the formatted local-time bucket string.
+func (L *Log) GetLastXSecondsDNSLogs(fromSeconds int64, groupByFormat string) (interface{}, error) {
+	var logSlice []LogEntry
+	var logMap map[string][]LogEntry
+
+	useGrouping := groupByFormat != ""
+	if useGrouping {
+		logMap = make(map[string][]LogEntry)
+	}
 
 	now := time.Now()
 	totime := now.Unix()
@@ -212,47 +316,36 @@ func (L *Log) GetLastXSecondsDNSLogs(fromSeconds int64, groupByDate bool) (inter
 
 	L.Database.View(func(tx *buntdb.Tx) error {
 		return tx.DescendRange("entries", `{"time":`+to+`}`, `{"time":`+from+`}`, func(key, value string) bool {
-			var parsedValue map[string]interface{}
-			if err := json.Unmarshal([]byte(value), &parsedValue); err != nil {
+			var logEntry LogEntry
+			if err := json.Unmarshal([]byte(value), &logEntry); err != nil {
 				return true // Continue iterating
 			}
 
-			if v, ok := parsedValue["type"]; ok && (v == "dns" || v == "proxy") {
-				var logEntry LogEntry
-				if err := json.Unmarshal([]byte(value), &logEntry); err != nil {
-					log.Println("[LogViewer] Error parsing log entry: " + err.Error() + " - " + value)
-					return true // Continue iterating
-				}
-				if logEntry.Type == "proxy" {
-					logEntry.URL = strings.Replace(logEntry.URL, "http://", "", -1)
-					logEntry.URL = strings.Replace(logEntry.URL, ":443", "", -1)
-					// log.Println( logEntry );
-					log.Println("[LogViewer] Proxy log entry : " + logEntry.URL)
+			if logEntry.Type != "dns" && logEntry.Type != "proxy" {
+				return true
+			}
 
-				}
-				if groupByDate {
-					// Group entries by date
-					if logs == nil {
-						logs = make(map[string][]LogEntry)
-					}
-					date := time.Unix(logEntry.Time, 0).Format("2006-01-02")
-					logs.(map[string][]LogEntry)[date] = append(logs.(map[string][]LogEntry)[date], logEntry)
-				} else {
-					// No grouping, add directly to the slice
-					if logs == nil {
-						logs = []LogEntry{}
-					}
-					logs = append(logs.([]LogEntry), logEntry)
-				}
+			if logEntry.Type == "proxy" {
+				logEntry.URL = strings.Replace(logEntry.URL, "http://", "", -1)
+				logEntry.URL = strings.Replace(logEntry.URL, ":443", "", -1)
+			}
 
+			if useGrouping {
+				bucket := time.Unix(logEntry.Time, 0).Local().Format(groupByFormat)
+				logMap[bucket] = append(logMap[bucket], logEntry)
+			} else {
+				logSlice = append(logSlice, logEntry)
 			}
 
 			return true
 		})
 	})
-	if logs == nil {
-		logs = []LogEntry{}
-	}
 
-	return logs, nil
+	if useGrouping {
+		return logMap, nil
+	}
+	if logSlice == nil {
+		logSlice = []LogEntry{}
+	}
+	return logSlice, nil
 }

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	gatesentry2storage "bitbucket.org/abdullah_irfan/gatesentryf/storage"
+	GatesentryTypes "bitbucket.org/abdullah_irfan/gatesentryf/types"
 	gatesentryWebserver "bitbucket.org/abdullah_irfan/gatesentryf/webserver"
 	gatesentryWebserverTypes "bitbucket.org/abdullah_irfan/gatesentryf/webserver/types"
 )
@@ -33,12 +34,14 @@ func GSwebserverStart(port int) {
 		<-t.C
 	}
 
-	fmt.Println("Webserver is listening on : " + ggport)
+	basePath := GetBasePath()
+	fmt.Println("Webserver is listening on : " + ggport + " (base path: " + basePath + ")")
 	gatesentry2storage.SetBaseDir(GSBASEDIR)
 	R.GSWebSettings = gatesentry2storage.NewMapStore("GSWebSettings", true)
 
 	runtimeArgs := gatesentryWebserverTypes.InputArgs{
 		GetUserGetJSON:          R.GSUserGetDataJSON,
+		GetAuthUsers:            func() []GatesentryTypes.GSUser { return R.AuthUsers },
 		AuthUsers:               R.AuthUsers,
 		RemoveUser:              R.RemoveUser,
 		UpdateUser:              R.UpdateUser,
@@ -49,7 +52,12 @@ func GSwebserverStart(port int) {
 	}
 	runtime := gatesentryWebserverTypes.NewTemporaryRuntime(runtimeArgs)
 
-	// gatesentryWebserver.RegisterEndpoints(app, settings, &R.Filters, R.Logger, runtime, R.BoundAddress)
+	// Use the shared domain list manager from R (created in Start())
+	dlManager := R.DomainListManager
+
+	// Create the rule manager and wire in the domain list manager for DomainLists lookups
+	ruleMgr := NewRuleManager(R.GSSettings)
+	ruleMgr.SetDomainListManager(dlManager)
 
 	gatesentryWebserver.RegisterEndpointsStartServer(
 		&R.Filters,
@@ -59,7 +67,9 @@ func GSwebserverStart(port int) {
 		R.BoundAddress,
 		strconv.Itoa(GSWebServerPort),
 		R.GSSettings,
-		NewRuleManager(R.GSSettings),
+		ruleMgr,
+		dlManager,
+		basePath,
 	)
 
 	// app.Listen(":" + strconv.Itoa(GSWebServerPort))

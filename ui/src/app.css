@@ -1,3 +1,8 @@
+/* ── Prevent horizontal scroll from header panel overflow ── */
+html, body {
+  overflow-x: hidden;
+}
+
 .text-center {
   text-align: center;
 }
@@ -5,7 +10,7 @@
 .mitm-privacy-notice {
   border: 1px solid #ccc;
   padding: 10px;
-  margin-top: 10px; 
+  margin-top: 10px;
   background-color: rgba(255, 255, 255, 0.8);
 }
 
@@ -32,7 +37,7 @@
 .simple-border {
   border: 1px solid #ccc;
   padding: 10px;
-  margin-top: 10px; 
+  margin-top: 10px;
   background-color: rgba(255, 255, 255, 0.8);
 }
 
@@ -46,10 +51,190 @@
 }
 
 .content-right {
-  display: flex; 
-  justify-content: flex-end; 
+  display: flex;
+  justify-content: flex-end;
 }
 
 .gatesentry-modal .bx--modal-footer {
+  display: none;
+}
+
+/* ── Responsive: make DataTables horizontally scrollable on small screens ── */
+.bx--data-table-container {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* ── Content padding — single consistent value, overrides Carbon default 2rem ── */
+.bx--content {
+  padding: 0.75rem !important;
+  will-change: auto;
+  background: #f0f0f0;
+}
+
+/* ── Standard page classes ── */
+.gs-section {
+  margin-bottom: 20px;
+}
+.gs-section h5 {
+  margin: 0 0 2px 0;
+}
+
+.gs-card {
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  background: #fff;
+  padding: 16px;
+}
+
+.gs-card-flush {
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  background: #fff;
+  overflow: hidden;
+}
+
+.gs-row-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  background: #e0e0e0;
+  border: 1px solid #e0e0e0;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.gs-row-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  background: #fff;
+}
+
+.gs-empty {
+  font-size: 0.8125rem;
+  color: #a8a8a8;
+  padding: 12px 0;
+}
+
+.gs-info-footer {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  background: #f4f4f4;
+  border-top: 1px solid #e0e0e0;
+  padding: 10px 16px;
+}
+
+.gs-info-footer p {
+  font-size: 0.8125rem;
+  color: #6f6f6f;
+  line-height: 1.4;
+  margin: 0;
+}
+
+.gs-info-icon {
+  color: #6f6f6f;
+  font-weight: 700;
+  font-size: 0.75rem;
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  border: 1.5px solid #a8a8a8;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 1px;
+}
+
+@media (max-width: 671px) {
+  .gs-section {
+    margin-bottom: 14px;
+  }
+  .gs-card {
+    padding: 10px;
+    border-radius: 4px;
+  }
+  .gs-card-flush {
+    border-radius: 4px;
+  }
+  .gs-row-item {
+    padding: 8px 10px;
+  }
+  .gs-info-footer {
+    padding: 8px 10px;
+  }
+  .gs-tabs {
+    margin: 8px 0 12px 0;
+  }
+  .gs-tab {
+    flex: 1;
+    text-align: center;
+    padding: 10px 8px;
+  }
+}
+
+/* ── Sidebar transition ── */
+.bx--side-nav {
+  transition: transform 0.11s cubic-bezier(0.2, 0, 1, 0.9);
+}
+
+/* ── Responsive: page headings ── */
+@media (max-width: 671px) {
+  h2 {
+    font-size: 1.25rem;
+  }
+  h4, h5 {
+    font-size: 1rem;
+  }
+}
+
+/* ── Page title with icon ── */
+.gs-page-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+.gs-page-title h2 {
+  margin: 0;
+}
+.gs-page-info {
+  margin: -0.25rem 0 0.75rem 0;
+  font-size: 0.85rem;
+  color: #6f6f6f;
+}
+
+/* ── Tabs ── */
+.gs-tabs {
+  display: flex;
+  border-bottom: 2px solid #e0e0e0;
+  margin: 12px 0 20px 0;
+  gap: 0;
+}
+.gs-tab {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+  padding: 10px 20px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #525252;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+.gs-tab:hover {
+  color: #161616;
+}
+.gs-tab--active {
+  color: #0f62fe;
+  border-bottom-color: #0f62fe;
+  font-weight: 600;
+}
+.gs-tab-hidden {
   display: none;
 }
