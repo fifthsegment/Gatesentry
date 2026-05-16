@@ -4,6 +4,7 @@
   import ConnectedGeneralSettingInput from "../../components/connectedGeneralSettingInputs.svelte";
   import HttpsToggle from "../../components/httpsToggle.svelte";
   import ConnectedCertificateComposed from "../../components/connectedCertificateComposed.svelte";
+  import WpadSettings from "../../components/wpadSettings.svelte";
   import ConnectedSettingInput from "../../components/connectedSettingInput.svelte";
   import { Breadcrumb, BreadcrumbItem } from "carbon-components-svelte";
 </script>
@@ -37,3 +38,5 @@
 <HttpsToggle />
 
 <ConnectedCertificateComposed />
+
+<WpadSettings />

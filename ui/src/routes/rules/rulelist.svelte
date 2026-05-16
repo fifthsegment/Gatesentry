@@ -1,8 +1,15 @@
 <script lang="ts">
-  import { Button, Column, InlineLoading, InlineNotification, Row } from "carbon-components-svelte";
+  import {
+    Button,
+    Column,
+    InlineLoading,
+    InlineNotification,
+    Row,
+  } from "carbon-components-svelte";
   import Ruleform from "./rform.svelte";
   import { Add } from "carbon-icons-svelte";
   import { onMount } from "svelte";
+  import { getBasePath } from "../../lib/navigate";
 
   let rules = [];
   let loading = false;
@@ -10,7 +17,7 @@
   let success = "";
   let expandedRules = new Set(); // Track which rules are expanded
 
-  const API_BASE = "/api/rules";
+  const API_BASE = getBasePath() + "/api/rules";
 
   function toggleExpand(index) {
     if (expandedRules.has(index)) {
@@ -39,7 +46,9 @@
       }
       if (!response.ok) {
         const errorText = await response.text();
-        throw new Error(`Failed to load rules: ${response.status} - ${errorText}`);
+        throw new Error(
+          `Failed to load rules: ${response.status} - ${errorText}`,
+        );
       }
       const data = await response.json();
       rules = data.rules || [];
@@ -83,7 +92,7 @@
   async function removeRule(e) {
     const index = e.detail;
     const rule = rules[index];
-    
+
     // If the rule has an ID, delete it from the backend
     if (rule.id) {
       loading = true;
@@ -104,8 +113,10 @@
           throw new Error(`Failed to delete rule: ${errorData}`);
         }
 
-        success = `Rule "${rule.name || `#${index + 1}`}" deleted successfully!`;
-        
+        success = `Rule "${
+          rule.name || `#${index + 1}`
+        }" deleted successfully!`;
+
         // Clear success message after 3 seconds
         setTimeout(() => {
           success = "";
@@ -159,7 +170,7 @@
       rules = rules; // Trigger reactivity
 
       success = `Rule "${rule.name || `#${index + 1}`}" saved successfully!`;
-      
+
       // Collapse the rule after successful save
       expandedRules.delete(index);
       expandedRules = expandedRules;
@@ -206,7 +217,7 @@
       success = "All rules saved successfully!";
       // Reload rules to get updated IDs
       await loadRules();
-      
+
       // Clear success message after 3 seconds
       setTimeout(() => {
         success = "";
@@ -247,9 +258,9 @@
       <InlineLoading description="Loading rules..." />
     {:else}
       {#each rules as rule, index (index)}
-        <Ruleform 
-          {rule} 
-          {index} 
+        <Ruleform
+          {rule}
+          {index}
           expanded={expandedRules.has(index)}
           on:toggle={() => toggleExpand(index)}
           on:remove={removeRule}

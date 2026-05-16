@@ -1,0 +1,6 @@
+# Only bin/ and Dockerfile are needed for the Docker build context.
+# Exclude everything else.
+
+*
+!bin/gatesentrybin
+!Dockerfile

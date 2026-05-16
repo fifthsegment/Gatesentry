@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -23,6 +24,28 @@ import (
 )
 
 var hmacSampleSecret = []byte("I7JE72S9XJ48ANXMI78ASDNMQ839")
+
+// corsMiddleware adds CORS headers to all API responses.
+// Echoes back the Origin header to allow cross-origin requests from any hostname,
+// which is necessary when accessing GateSentry from different device hostnames
+// (e.g., monster-jj, monster-jj.local, monster-jj.jvj28.com, localhost, IP addresses).
+var corsMiddleware mux.MiddlewareFunc = func(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if origin := r.Header.Get("Origin"); origin != "" {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
+		}
+
+		// Handle preflight requests
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
 
 type User struct {
 	Username string `json:"username"`
@@ -87,6 +110,11 @@ var authenticationMiddleware mux.MiddlewareFunc = func(next http.Handler) http.H
 		if strings.HasPrefix(tokenString, "Bearer ") {
 			tokenString = strings.TrimPrefix(tokenString, "Bearer ")
 		}
+		// Fallback: accept token as a query parameter for SSE / EventSource
+		// connections, which cannot set custom headers.
+		if tokenString == "" {
+			tokenString = r.URL.Query().Get("token")
+		}
 		if tokenString == "" {
 			SendError(w, errors.New("Missing token auth"), http.StatusUnauthorized)
 			return
@@ -127,14 +155,18 @@ var verifyAuthHandler HttpHandlerFunc = func(w http.ResponseWriter, r *http.Requ
 	}{Validated: true, Jwtoken: "", Message: `Username : ` + username})
 }
 
-var indexHandler HttpHandlerFunc = func(w http.ResponseWriter, r *http.Request) {
-	data := gatesentryWebserverFrontend.GetIndexHtml()
-	if data == nil {
-		SendError(w, errors.New("Error getting index.html"), http.StatusInternalServerError)
-		return
+var indexHandler = makeIndexHandler("/")
+
+func makeIndexHandler(basePath string) HttpHandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		data := gatesentryWebserverFrontend.GetIndexHtmlWithBasePath(basePath)
+		if data == nil {
+			SendError(w, errors.New("Error getting index.html"), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html")
+		w.Write(data)
 	}
-	w.Header().Set("Content-Type", "text/html")
-	w.Write(data)
 }
 
 func RegisterEndpointsStartServer(
@@ -146,11 +178,12 @@ func RegisterEndpointsStartServer(
 	port string,
 	internalSettings *gatesentry2storage.MapStore,
 	ruleManager gatesentryWebserverEndpoints.RuleManagerInterface,
+	basePath string,
 ) {
 
 	// newRouter := mux.NewRouter()
 
-	internalServer := NewGsWeb()
+	internalServer := NewGsWeb(basePath)
 
 	internalServer.Post("/api/auth/token", HttpHandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var data User
@@ -167,6 +200,22 @@ func RegisterEndpointsStartServer(
 
 			return
 		}
+
+		// On successful login, capture the host the admin used to reach us.
+		// If wpad_proxy_host hasn't been configured yet, seed it — the admin
+		// just proved this address works by logging in with it.
+		if internalSettings.Get("wpad_proxy_host") == "" {
+			host := r.Host
+			if h, _, err := net.SplitHostPort(host); err == nil {
+				host = h
+			}
+			// Only seed if it's not localhost — that wouldn't help other devices
+			if host != "" && host != "localhost" && host != "127.0.0.1" && host != "::1" {
+				internalSettings.Update("wpad_proxy_host", host)
+				log.Printf("[WPAD] Auto-detected proxy host from admin login: %s", host)
+			}
+		}
+
 		ctx := context.WithValue(r.Context(), "username", data.Username)
 		tokenCreationHandler(w, r.WithContext(ctx))
 	}))
@@ -309,6 +358,20 @@ func RegisterEndpointsStartServer(
 		runtime.Reload()
 	})
 
+	// DNS cache stats and SSE event stream
+	internalServer.Get("/api/dns/cache/stats", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiDNSCacheStats(w, r)
+	})
+	internalServer.Get("/api/dns/cache/stats/history", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiDNSCacheHistory(w, r)
+	})
+	internalServer.Post("/api/dns/cache/flush", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiDNSCacheFlush(w, r)
+	})
+	internalServer.Get("/api/dns/events", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiDNSEvents(w, r)
+	})
+
 	internalServer.Post("/api/stats", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
 		params := mux.Vars(r)
 		fromTimeParam := params["fromTime"]
@@ -317,12 +380,13 @@ func RegisterEndpointsStartServer(
 	})
 
 	internalServer.Get("/api/status", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
-		output := gatesentryWebserverEndpoints.ApiGetStatus(logger, boundAddress)
+		output := gatesentryWebserverEndpoints.ApiGetStatus(logger, boundAddress, internalSettings)
 		SendJSON(w, output)
 	})
 
 	internalServer.Get("/api/stats/byUrl", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
-		output := gatesentryWebserverEndpoints.ApiGetStatsByURL(logger)
+		seconds, group := gatesentryWebserverEndpoints.ParseStatsQuery(r)
+		output := gatesentryWebserverEndpoints.ApiGetStatsByURL(logger, seconds, group)
 		SendJSON(w, output)
 	})
 
@@ -338,10 +402,15 @@ func RegisterEndpointsStartServer(
 		SendJSON(w, output)
 	})
 
+	internalServer.Post("/api/certificate/generate", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		output := gatesentryWebserverEndpoints.GSApiCertificateGenerate(internalSettings)
+		SendJSON(w, output)
+	})
+
 	internalServer.Get("/api/files/certificate", HttpHandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		output := gatesentryWebserverEndpoints.GetCertificateBytes(internalSettings)
-		w.Header().Set("Content-Disposition", "attachment; filename=certificate.pem")
-		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("Content-Disposition", "attachment; filename=gatesentry-ca.crt")
+		w.Header().Set("Content-Type", "application/x-x509-ca-cert")
 		w.Write(output)
 	}))
 
@@ -349,53 +418,99 @@ func RegisterEndpointsStartServer(
 	log.Println("Initializing rule manager...")
 	gatesentryWebserverEndpoints.InitRuleManager(ruleManager)
 	log.Println("Rule manager initialized")
-	
+
 	log.Println("Registering GET /api/rules...")
 	internalServer.Get("/api/rules", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
 		gatesentryWebserverEndpoints.GSApiRulesGetAll(w, r)
 	})
-	
+
 	log.Println("Registering POST /api/rules...")
 	internalServer.Post("/api/rules", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
 		gatesentryWebserverEndpoints.GSApiRuleCreate(w, r)
 	})
-	
+
 	log.Println("Registering GET /api/rules/{id}...")
 	internalServer.Get("/api/rules/{id}", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
 		gatesentryWebserverEndpoints.GSApiRuleGet(w, r)
 	})
-	
+
 	log.Println("Registering PUT /api/rules/{id}...")
 	internalServer.Put("/api/rules/{id}", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
 		gatesentryWebserverEndpoints.GSApiRuleUpdate(w, r)
 	})
-	
+
 	log.Println("Registering DELETE /api/rules/{id}...")
 	internalServer.Delete("/api/rules/{id}", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
 		gatesentryWebserverEndpoints.GSApiRuleDelete(w, r)
 	})
-	
+
 	log.Println("Registering POST /api/rules/test...")
 	internalServer.Post("/api/rules/test", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
 		gatesentryWebserverEndpoints.GSApiRuleTest(w, r)
 	})
 	log.Println("All rule endpoints registered successfully")
 
-	internalServer.router.PathPrefix("/fs/").Handler(
-		http.StripPrefix("/fs",
-			http.FileServer(
-				gatesentryWebserverFrontend.GetFSHandler(),
-			),
-		),
-	)
+	// Device inventory endpoints
+	log.Println("Registering device API endpoints...")
+	internalServer.Get("/api/devices", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiDevicesGetAll(w, r)
+	})
+	internalServer.Get("/api/devices/{id}", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiDeviceGet(w, r)
+	})
+	internalServer.Post("/api/devices/{id}/name", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiDeviceSetName(w, r)
+	})
+	internalServer.Delete("/api/devices/{id}", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiDeviceDelete(w, r)
+	})
+	log.Println("Device API endpoints registered")
 
-	internalServer.Get("/", indexHandler)
-	internalServer.Get("/login", indexHandler)
-	internalServer.Get("/stats", indexHandler)
-	internalServer.Get("/users", indexHandler)
-	internalServer.Get("/dns", indexHandler)
-	internalServer.Get("/settings", indexHandler)
-	internalServer.Get("/rules", indexHandler)
+	// --- WPAD / PAC file endpoint ---
+	// Registered on the ROOT router (not the basePath subrouter) because:
+	// 1. WPAD auto-discovery always fetches http://wpad.<domain>/wpad.dat (root path)
+	// 2. No authentication — all network clients must be able to fetch the PAC file
+	// 3. Must work regardless of GS_BASE_PATH configuration
+	log.Println("Registering WPAD/PAC endpoints...")
+	wpadHandler := gatesentryWebserverEndpoints.GSApiWPADHandler(internalSettings)
+	internalServer.router.HandleFunc("/wpad.dat", wpadHandler).Methods("GET")
+	internalServer.router.HandleFunc("/proxy.pac", wpadHandler).Methods("GET")
+	log.Println("WPAD/PAC endpoints registered: /wpad.dat, /proxy.pac")
+
+	// Authenticated WPAD info endpoint (for admin UI)
+	internalServer.Get("/api/wpad/info", authenticationMiddleware,
+		HttpHandlerFunc(gatesentryWebserverEndpoints.GSApiWPADInfoHandler(internalSettings, port)))
+
+	// Serve static assets from the embedded files/fs/ directory.
+	// GetFSHandler() returns fs.Sub(build, "files"), so files live at fs/bundle.js etc.
+	// We only strip the basePath prefix (not /fs), so the remaining path /fs/bundle.js
+	// correctly maps to fs/bundle.js in the embedded filesystem.
+	fsHandler := http.FileServer(gatesentryWebserverFrontend.GetFSHandler())
+	if basePath != "/" {
+		internalServer.sub.PathPrefix("/fs/").Handler(
+			http.StripPrefix(basePath, fsHandler),
+		)
+	} else {
+		internalServer.sub.PathPrefix("/fs/").Handler(fsHandler)
+	}
+
+	baseIndexHandler := makeIndexHandler(basePath)
+	internalServer.Get("/", baseIndexHandler)
+	internalServer.Get("/login", baseIndexHandler)
+	internalServer.Get("/stats", baseIndexHandler)
+	internalServer.Get("/users", baseIndexHandler)
+	internalServer.Get("/dns", baseIndexHandler)
+	internalServer.Get("/settings", baseIndexHandler)
+	internalServer.Get("/rules", baseIndexHandler)
+	internalServer.Get("/logs", baseIndexHandler)
+	internalServer.Get("/blockedkeywords", baseIndexHandler)
+	internalServer.Get("/blockedfiletypes", baseIndexHandler)
+	internalServer.Get("/excludeurls", baseIndexHandler)
+	internalServer.Get("/blockedurls", baseIndexHandler)
+	internalServer.Get("/excludehosts", baseIndexHandler)
+	internalServer.Get("/services", baseIndexHandler)
+	internalServer.Get("/devices", baseIndexHandler)
+	internalServer.Get("/ai", baseIndexHandler)
 
 	internalServer.ListenAndServe(":" + port)
 
