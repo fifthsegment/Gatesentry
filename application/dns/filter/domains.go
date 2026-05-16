@@ -130,7 +130,7 @@ func fetchDomainsFromBlocklist(url string) ([]string, error) {
 			if ip == "0.0.0.0" || ip == "::1" {
 				domains = append(domains, domain)
 			}
-		} else {
+		} else if len(parts) == 1 {
 			domain := parts[0]
 			domains = append(domains, domain)
 		}
