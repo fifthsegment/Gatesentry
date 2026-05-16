@@ -2,6 +2,7 @@
 
 PYTHON ?= python3
 PIP ?= pip3
+GS_DNS_PORT ?= 10053
 
 clean-test:
 	@echo "Cleaning up test artifacts..."
@@ -11,8 +12,8 @@ clean-test:
 
 install-test-deps:
 	@echo "Installing Python test dependencies..."
-	$(PIP) install --break-system-packages dnspython requests 2>/dev/null || \
-	$(PIP) install dnspython requests 2>/dev/null || \
+	$(PIP) install --break-system-packages pytest dnspython requests 2>/dev/null || \
+	$(PIP) install pytest dnspython requests 2>/dev/null || \
 	echo "WARNING: pip install failed, Python tests may skip"
 
 build: clean-test
@@ -22,8 +23,8 @@ run: build
 	cd /tmp && ./gatesentry-bin
 
 _start-server: clean-test build
-	@echo "Starting Gatesentry server in background..."
-	@cd /tmp && ./gatesentry-bin > /tmp/gatesentry.log 2>&1 & echo $$! > /tmp/gatesentry.pid
+	@echo "Starting Gatesentry server in background (DNS on port $(GS_DNS_PORT))..."
+	@cd /tmp && GATESENTRY_DNS_PORT=$(GS_DNS_PORT) ./gatesentry-bin > /tmp/gatesentry.log 2>&1 & echo $$! > /tmp/gatesentry.pid
 	@echo "Waiting for server to be ready..."
 	@for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do \
 		if curl -s http://localhost:10786 > /dev/null 2>&1; then \
@@ -55,7 +56,7 @@ test-go: _start-server
 
 test-python: install-test-deps _start-server
 	@echo "Running Python integration tests..."
-	@$(PYTHON) tests/integration_test.py --base-url http://localhost:10786 --proxy localhost; \
+	@$(PYTHON) -m pytest tests/integration_test.py -v --tb=short --color=yes; \
 	PY_RESULT=$$?; \
 	$(MAKE) _stop-server; \
 	if [ $$PY_RESULT -ne 0 ]; then echo "Python tests failed"; exit 1; fi
@@ -72,7 +73,7 @@ test: install-test-deps _start-server
 	fi
 	@echo ""
 	@echo "Running Python integration tests..."
-	@$(PYTHON) tests/integration_test.py --base-url http://localhost:10786 --proxy localhost; \
+	@$(PYTHON) -m pytest tests/integration_test.py -v --tb=short --color=yes; \
 	PY_RESULT=$$?; \
 	$(MAKE) _stop-server; \
 	if [ $$PY_RESULT -ne 0 ]; then echo "Python tests failed"; exit 1; fi
