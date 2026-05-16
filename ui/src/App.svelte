@@ -14,7 +14,7 @@
   import Sidenavmenu from "./components/sidenavmenu.svelte";
   import Headerrightnav from "./components/headerrightnav.svelte";
   import { store } from "./store/apistore";
-  import { navigate } from "svelte-routing/src/history";
+  import { gsNavigate, getBasePath } from "./lib/navigate";
   import Filter from "./routes/filter/filter.svelte";
   import Notifications from "./components/notifications.svelte";
   import Settings from "./routes/settings/settings.svelte";
@@ -28,6 +28,7 @@
   import Users from "./routes/users/users.svelte";
   import Globalheader from "./components/globalheader.svelte";
   import Rules from "./routes/rules/rules.svelte";
+  import Devices from "./routes/devices/devices.svelte";
   export let url = "";
 
   let loaded = false;
@@ -64,7 +65,7 @@
       }
 
       if (!loggedIn) {
-        navigate("/login");
+        gsNavigate("/login");
       }
     }
   }
@@ -83,7 +84,7 @@
   // }
 </script>
 
-<Router {url}>
+<Router {url} basepath={getBasePath()}>
   {#await setupResult}
     Loading...
   {:then}
@@ -121,6 +122,9 @@
         </Route>
         <Route path="/rules">
           <Rules />
+        </Route>
+        <Route path="/devices">
+          <Devices />
         </Route>
         <Route path="/stats">
           <Stats />

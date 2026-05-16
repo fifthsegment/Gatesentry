@@ -1,13 +1,51 @@
-version: '3.8'
 services:
   gatesentry:
-    restart: always
-    image: abdullahi1/gatesentry:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: gatesentry
+    restart: unless-stopped
+
+    # Networking notes:
+    #   - Production (native Linux): use network_mode: host for mDNS multicast,
+    #     real client IPs, and direct port binding.
+    #   - Docker Desktop (WSL2/macOS): host networking doesn't work — the
+    #     container binds to the LinuxKit VM, not the actual host. Use bridged
+    #     mode with port mapping instead.
+    # network_mode: host    # uncomment for native Linux production
     ports:
-      - "80:80"
-      - "53:53"
-      - "53:53/udp"
-      - "10413:10413"
-      - "10786:10786"
+      - "10053:10053/udp" # DNS server (UDP)
+      - "10053:10053/tcp" # DNS server (TCP)
+      - "8080:8080" # Web admin UI
+      - "10413:10413" # HTTP(S) filtering proxy
+      - "10414:10414" # Transparent proxy
+      - "5354:5353/udp" # mDNS/Bonjour
+
     volumes:
-      - ./docker_root:/usr/local/gatesentry/gatesentry # this is where the config file will be stored
+      # Persistent data: settings, BuntDB database, certificates, logs
+      - ./docker_root:/usr/local/gatesentry/gatesentry
+
+    environment:
+      # Timezone for time-based access rules
+      - TZ=Asia/Singapore
+      # Set to "true" to enable verbose proxy debug logging
+      # - GS_DEBUG_LOGGING=false
+      # Max content scan size in MB (default: 10)
+      # - GS_MAX_SCAN_SIZE_MB=10
+      # Set to "false" to disable the transparent proxy listener
+      # - GS_TRANSPARENT_PROXY=true
+      # Custom transparent proxy port (default: auto)
+      # - GS_TRANSPARENT_PROXY_PORT=10414
+      # Override the admin UI port (default: 80)
+      - GS_ADMIN_PORT=8080
+      # URL base path prefix (default: /gatesentry)
+      # Set to / for root-level access (e.g., http://gatesentry.local/)
+      - GS_BASE_PATH=/
+      - GATESENTRY_DNS_PORT=10053
+      - GATESENTRY_DNS_ADDR=0.0.0.0
+
+    # Note: "ports" is not used with network_mode: host.
+    # The container binds directly to the host's network interfaces:
+    #   53/udp+tcp  - DNS server
+    #   80          - Web admin UI (http://gatesentry.local)
+    #   10413       - HTTP(S) filtering proxy

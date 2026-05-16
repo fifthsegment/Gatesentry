@@ -5,9 +5,10 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"strings"
 )
 
-//go:embed files
+//go:embed all:files
 var build embed.FS
 
 func GetBlockPageMaterialUIStylesheet() []byte {
@@ -26,6 +27,33 @@ func GetIndexHtml() []byte {
 	}
 	return indexData
 
+}
+
+// GetIndexHtmlWithBasePath returns index.html with the base path injected.
+// Injects a <script> setting window.__GS_BASE_PATH__ and a <base href> tag
+// so the Svelte SPA can resolve assets and API calls relative to the base path.
+func GetIndexHtmlWithBasePath(basePath string) []byte {
+	raw := GetIndexHtml()
+	if raw == nil {
+		return nil
+	}
+
+	// For root base path, no injection needed
+	if basePath == "/" {
+		return raw
+	}
+
+	html := string(raw)
+
+	// Build injection tags
+	baseHref := basePath + "/"
+	injection := `<base href="` + baseHref + `">` + "\n" +
+		`    <script>window.__GS_BASE_PATH__ = "` + basePath + `";</script>`
+
+	// Inject after <head> or after first <meta> tag
+	html = strings.Replace(html, "<head>", "<head>\n    "+injection, 1)
+
+	return []byte(html)
 }
 
 func GetFileSystem(dir string, fsys fs.FS) http.FileSystem {

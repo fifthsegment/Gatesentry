@@ -10,6 +10,7 @@ import {
   Network_4,
   UserAccess,
   Rule,
+  Devices,
 } from "carbon-icons-svelte";
 
 let menuItems = [
@@ -36,6 +37,12 @@ let menuItems = [
     text: "DNS",
     href: "/dns",
     icon: ServerDns,
+  },
+  {
+    type: "link",
+    text: "Devices",
+    href: "/devices",
+    icon: Devices,
   },
   {
     type: "menu",

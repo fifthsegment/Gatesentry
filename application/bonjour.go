@@ -11,10 +11,20 @@ import (
 
 func StartBonjour() {
 	log.Println("Starting Bonjour service")
+
+	// Advertise the web admin UI so browsers resolve http://gatesentry.local
 	go func() {
-		_, err := bonjour.Register("GateSentry", "_gatesentry_proxy._tcp", "", 10413, []string{"txtv=1", "app=gatesentry"}, nil)
+		_, err := bonjour.Register("GateSentry", "_http._tcp", "", 80, []string{"txtv=1", "app=gatesentry", "path=/"}, nil)
 		if err != nil {
-			log.Println(err.Error())
+			log.Println("[Bonjour] HTTP registration error:", err.Error())
+		}
+	}()
+
+	// Advertise the filtering proxy for proxy auto-discovery
+	go func() {
+		_, err := bonjour.Register("GateSentry Proxy", "_gatesentry_proxy._tcp", "", 10413, []string{"txtv=1", "app=gatesentry"}, nil)
+		if err != nil {
+			log.Println("[Bonjour] Proxy registration error:", err.Error())
 		}
 	}()
 

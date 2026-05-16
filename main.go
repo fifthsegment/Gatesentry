@@ -26,7 +26,7 @@ import (
 )
 
 var GSPROXYPORT = "10413"
-var GSWEBADMINPORT = "10786"
+var GSWEBADMINPORT = "80"
 var GSBASEDIR = ""
 var Baseendpointv2 = "https://www.gatesentryfilter.com/api/"
 var GATESENTRY_VERSION = "1.20.6"
@@ -231,6 +231,20 @@ func RunGateSentry() {
 	}
 
 	transparentProxyDisabled := os.Getenv("GS_TRANSPARENT_PROXY") == "false"
+
+	// Allow overriding the admin UI port via environment variable
+	if adminPort := os.Getenv("GS_ADMIN_PORT"); adminPort != "" {
+		GSWEBADMINPORT = adminPort
+		log.Printf("[CONFIG] Admin UI port set to %s", adminPort)
+	}
+
+	// Allow configuring a URL base path for reverse proxy deployments
+	// e.g., GS_BASE_PATH=/gatesentry → UI served at http://host:port/gatesentry/
+	basePath := os.Getenv("GS_BASE_PATH")
+	if basePath == "" {
+		basePath = "/gatesentry"
+	}
+	application.SetBasePath(basePath)
 
 	webadminport, err := strconv.Atoi(GSWEBADMINPORT)
 	if err != nil {

@@ -18,7 +18,7 @@ test: clean-test build
 	@cd /tmp && ./gatesentry-bin > /dev/null 2>&1 & echo $$! > /tmp/gatesentry.pid
 	@echo "Waiting for server to be ready..."
 	@for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do \
-		if curl -s http://localhost:10786/api/health > /dev/null 2>&1 || curl -s http://localhost:10786 > /dev/null 2>&1; then \
+		if curl -s http://localhost:80/gatesentry/api/health > /dev/null 2>&1 || curl -s http://localhost:80/gatesentry/ > /dev/null 2>&1; then \
 			echo "Server is ready!"; \
 			break; \
 		fi; \

@@ -27,7 +27,7 @@ Usages:
 
 ## Getting started
 
-There are 2 ways to run Gatesentry, either using the docker image or using the single file binary directly. 
+There are 2 ways to run Gatesentry, either using the docker image or using the single file binary directly.
 
 ### Method 1: Using Docker
 
@@ -88,14 +88,14 @@ By default Gatesentry uses the following ports
 | ----- | ---------------------------------------------------- |
 | 10413 | For proxy (explicit mode)                            |
 | 10414 | For proxy (transparent mode, optional)               |
-| 10786 | For the web based administration panel               |
+| 80    | For the web based administration panel               |
 | 53    | For the built-in DNS server                          |
 | 80    | For the built-in webserver (showing DNS block pages) |
 
 ### Accessing the User Interface:
 
 Open a modern web browser of your choice.
-Enter the following URL in the address bar: http://localhost:10786
+Enter the following URL in the address bar: http://localhost
 The Gatesentry User Interface will load, providing access to various functionalities and settings.
 
 ### Default Login Credentials:
@@ -105,13 +105,13 @@ The Gatesentry User Interface will load, providing access to various functionali
 
 Use the above credentials to log in to the Gatesentry system for the first time. For security reasons, it is highly recommended to change the default password after the initial login.
 
-Note:Ensure your system’s firewall and security settings allow traffic on ports 10413 and 10786 to ensure seamless operation and access to the Gatesentry server and user interface.
+Note:Ensure your system's firewall and security settings allow traffic on ports 53, 80, and 10413 to ensure seamless operation and access to the Gatesentry server and user interface.
 
 This guide now specifically refers to the Gatesentry software and uses the `gatesentry-{platform}` filename convention for clarity.
 
 ### DNS Information
 
-Gatesentry ships with a built in DNS server which can be used to block domains.  
+Gatesentry ships with a built in DNS server which can be used to block domains.
 The resolver used for forwarding requests can now be configured via the
 application settings ("dns_resolver"). It defaults to Google DNS
 (`8.8.8.8:53`).
