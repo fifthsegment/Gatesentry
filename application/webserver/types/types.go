@@ -61,6 +61,7 @@ type Datareceiver struct {
 
 type TemporaryRuntime struct {
 	GetUserGetJSON          func() []byte
+	GetAuthUsers            func() []GatesentryTypes.GSUser
 	AuthUsers               []GatesentryTypes.GSUser
 	RemoveUser              func(GatesentryTypes.GSUser)
 	UpdateUser              func(string, GatesentryTypes.GSUserPublic)
@@ -73,6 +74,7 @@ type TemporaryRuntime struct {
 
 type InputArgs struct {
 	GetUserGetJSON          func() []byte
+	GetAuthUsers            func() []GatesentryTypes.GSUser
 	AuthUsers               []GatesentryTypes.GSUser
 	RemoveUser              func(GatesentryTypes.GSUser)
 	UpdateUser              func(string, GatesentryTypes.GSUserPublic)
@@ -85,6 +87,7 @@ type InputArgs struct {
 func NewTemporaryRuntime(args InputArgs) *TemporaryRuntime {
 	return &TemporaryRuntime{
 		GetUserGetJSON:          args.GetUserGetJSON,
+		GetAuthUsers:            args.GetAuthUsers,
 		AuthUsers:               args.AuthUsers,
 		RemoveUser:              args.RemoveUser,
 		UpdateUser:              args.UpdateUser,

@@ -1,15 +1,18 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"log"
 	"net"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"errors"
@@ -26,10 +29,10 @@ import (
 )
 
 var GSPROXYPORT = "10413"
-var GSWEBADMINPORT = "10786"
+var GSWEBADMINPORT = "80"
 var GSBASEDIR = ""
 var Baseendpointv2 = "https://www.gatesentryfilter.com/api/"
-var GATESENTRY_VERSION = "1.20.6"
+var GATESENTRY_VERSION = "2.0.0-alpha.15"
 var GS_BOUND_ADDRESS = ":"
 var R *application.GSRuntime
 
@@ -232,6 +235,20 @@ func RunGateSentry() {
 
 	transparentProxyDisabled := os.Getenv("GS_TRANSPARENT_PROXY") == "false"
 
+	// Allow overriding the admin UI port via environment variable
+	if adminPort := os.Getenv("GS_ADMIN_PORT"); adminPort != "" {
+		GSWEBADMINPORT = adminPort
+		log.Printf("[CONFIG] Admin UI port set to %s", adminPort)
+	}
+
+	// Allow configuring a URL base path for reverse proxy deployments
+	// e.g., GS_BASE_PATH=/gatesentry → UI served at http://host:port/gatesentry/
+	basePath := os.Getenv("GS_BASE_PATH")
+	if basePath == "" {
+		basePath = "/gatesentry"
+	}
+	application.SetBasePath(basePath)
+
 	webadminport, err := strconv.Atoi(GSWEBADMINPORT)
 	if err != nil {
 		log.Fatal(err)
@@ -239,6 +256,19 @@ func RunGateSentry() {
 	}
 	R = application.Start(webadminport)
 	R.BoundAddress = &GS_BOUND_ADDRESS
+
+	// Wire the proxy DNS resolver switch: when the DNS server is toggled
+	// on/off via the UI (which triggers Init/Reload), the proxy's resolver
+	// must switch between GateSentry DNS and the upstream resolver.
+	R.OnDNSServerStateChanged = func(enabled bool, upstreamResolver string) {
+		gatesentryproxy.SetDNSResolver(enabled, upstreamResolver)
+	}
+
+	// Apply the persisted DNS server state to the proxy resolver on boot.
+	// Start() already called Init() before the callback was wired, so we
+	// need to sync the proxy resolver with the saved setting now.
+	bootDNSEnabled := R.GSSettings.Get("enable_dns_server") == "true"
+	gatesentryproxy.SetDNSResolver(bootDNSEnabled, R.GSSettings.Get("dns_resolver"))
 
 	application.StartBonjour()
 	gatesentryproxy.InitProxy()
@@ -286,24 +316,6 @@ func RunGateSentry() {
 		length := gafd.ContentSize
 		R.UpdateUserData(gafd.User, uint64(length))
 		// R.UpdateConsumption is currently a no-op
-	}
-
-	ngp.ContentTypeHandler = func(gafd *gatesentryproxy.GSContentTypeFilterData) {
-		contentType := gafd.ContentType
-		responder := &gresponder.GSFilterResponder{Blocked: false}
-		application.RunFilter("url/all_blocked_mimes", contentType, responder)
-		if responder.Blocked {
-			// rs.Changed = true
-			message := "This content type has been blocked on this network."
-			if contentType == "image/png" || contentType == "image/jpeg" || contentType == "image/jpg" || "image/gif" == contentType || "image/webp" == contentType {
-				transparentImageBytes, _ := filters.Asset("app/transparent.png")
-				gafd.FilterResponseAction = gatesentryproxy.ProxyActionBlockedFileType
-				gafd.FilterResponse = transparentImageBytes
-			} else {
-				gafd.FilterResponseAction = gatesentryproxy.ProxyActionBlockedFileType
-				gafd.FilterResponse = []byte(gresponder.BuildGeneralResponsePage([]string{message}, -1))
-			}
-		}
 	}
 
 	ngp.TimeAccessHandler = func(gafd *gatesentryproxy.GSTimeAccessFilterData) {
@@ -359,7 +371,7 @@ func RunGateSentry() {
 		url := gafd.Url
 		user := gafd.User
 		actionTaken := string(gafd.Action)
-		R.Logger.LogProxy(url, user, actionTaken)
+		R.Logger.LogProxy(url, user, actionTaken, gafd.RuleName)
 	}
 
 	ngp.RuleMatchHandler = func(domain string, user string) interface{} {
@@ -369,6 +381,14 @@ func RunGateSentry() {
 		}
 		match := ruleManager.MatchRule(domain, user)
 		return match
+	}
+
+	ngp.RuleBlockPageHandler = func(domain string, ruleName string) []byte {
+		msg := "Unable to fulfill your request because <strong>" + domain + "</strong> is blocked by a proxy rule."
+		if ruleName != "" {
+			msg += "<br/>Rule: <strong>" + ruleName + "</strong>"
+		}
+		return []byte(gresponder.BuildGeneralResponsePage([]string{msg}, -1))
 	}
 
 	ngp.ProxyErrorHandler = func(gafd *gatesentryproxy.GSProxyErrorData) {
@@ -385,7 +405,7 @@ func RunGateSentry() {
 	}
 
 	// Making a comm channel for our internal dns server
-	go application.DNSServerThread(application.GetBaseDir(), R.Logger, R.DNSServerChannel, R.GSSettings, R.DnsServerInfo)
+	go application.DNSServerThread(application.GetBaseDir(), R.Logger, R.DNSServerChannel, R.GSSettings, R.DnsServerInfo, R.DomainListManager)
 
 	addr := "0.0.0.0:"
 	addr += GSPROXYPORT
@@ -419,6 +439,7 @@ func RunGateSentry() {
 		}
 		<-ttt.C
 	}
+	ttt.Stop()
 
 	// if portavailable {}
 
@@ -802,8 +823,30 @@ func RunGateSentry() {
 
 	server := http.Server{Handler: proxyHandler}
 	log.Printf("Starting up...Listening on = %s", addr)
-	err = server.Serve(tcpKeepAliveListener{proxyListener.(*net.TCPListener)})
-	log.Fatal(err)
+
+	// Start the proxy server in a goroutine so we can handle shutdown signals
+	go func() {
+		if err := server.Serve(tcpKeepAliveListener{proxyListener.(*net.TCPListener)}); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Proxy server error: %v", err)
+		}
+	}()
+
+	// Wait for shutdown signal (SIGTERM from Docker, SIGINT from Ctrl+C)
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGINT)
+	sig := <-sigChan
+	log.Printf("Received signal %v, shutting down gracefully...", sig)
+
+	// Give active connections up to 10 seconds to finish
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer shutdownCancel()
+
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		log.Printf("Proxy server shutdown error: %v", err)
+	}
+
+	application.Stop()
+	log.Println("GateSentry stopped.")
 
 }
 

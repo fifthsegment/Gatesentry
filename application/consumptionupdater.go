@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"log"
 	"sync"
-	"time"
 )
 
 var GSConsumption *GSConsumptionContainer
@@ -73,12 +72,5 @@ func ConsumptionUpdater() {
 	}
 	log.Println("Creating a new Consumption container")
 	GSConsumption = NewGSConsumptionContainer()
-	// fmt.Println( )
 	R.GSConsumptionUpdaterRunning = true
-	go func() {
-
-		t := time.NewTicker(time.Second * CONSUMPTIONUPDATEINTERVAL)
-		_ = t
-
-	}()
 }

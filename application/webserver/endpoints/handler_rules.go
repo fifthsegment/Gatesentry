@@ -82,12 +82,6 @@ func GSApiRuleCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate rule
-	if rule.Domain == "" {
-		http.Error(w, "Domain is required", http.StatusBadRequest)
-		return
-	}
-
 	createdRule, err := ruleManager.AddRule(rule)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -117,12 +111,6 @@ func GSApiRuleUpdate(w http.ResponseWriter, r *http.Request) {
 	err := json.NewDecoder(r.Body).Decode(&rule)
 	if err != nil {
 		http.Error(w, "Invalid request body: "+err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	// Validate rule
-	if rule.Domain == "" {
-		http.Error(w, "Domain is required", http.StatusBadRequest)
 		return
 	}
 

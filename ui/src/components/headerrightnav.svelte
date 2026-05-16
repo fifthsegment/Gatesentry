@@ -20,7 +20,7 @@
   import { SettingsAdjust, UserAvatarFilledAlt } from "carbon-icons-svelte";
   import { afterUpdate } from "svelte";
   import ConnectedGeneralSettingInputs from "./connectedGeneralSettingInputs.svelte";
-  import { navigate } from "svelte-routing";
+  import { gsNavigate } from "../lib/navigate";
 
   $: loggedIn = $store.api.loggedIn;
   let checked = false;
@@ -33,7 +33,7 @@
     store.logout();
     userProfilePanelOpen = false;
     modalOpen = false;
-    navigate("/login");
+    gsNavigate("/login");
   };
 </script>
 

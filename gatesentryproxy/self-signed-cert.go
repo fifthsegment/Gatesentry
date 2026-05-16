@@ -2,55 +2,73 @@ package gatesentryproxy
 
 import (
 	"crypto/rand"
-	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
-	"encoding/pem"
 	"math/big"
+	"net"
+	"strings"
 	"time"
 )
 
-func createSelfSignedTLSConfig() (*tls.Config, error) {
-	return &tls.Config{
-		Certificates: []tls.Certificate{TLSCert},
-	}, nil
-}
-
-func UNUSED_createSelfSignedTLSConfig(host string) (*tls.Config, error) {
-	// Generate a new private key
-	privKey, err := rsa.GenerateKey(rand.Reader, 2048)
-	if err != nil {
-		return nil, err
+// createBlockPageTLSConfig generates a TLS config with a certificate for the
+// given hostname, signed by the GateSentry CA. This ensures browsers that
+// trust the CA will accept the block page without certificate errors.
+// Falls back to the raw CA cert if the CA is not loaded.
+func createBlockPageTLSConfig(host string) (*tls.Config, error) {
+	// Strip port if present
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
 	}
 
-	// Create a self-signed certificate
+	// If the CA cert isn't loaded, fall back to using TLSCert directly
+	if ParsedTLSCert == nil {
+		return &tls.Config{
+			Certificates: []tls.Certificate{TLSCert},
+		}, nil
+	}
+
+	// Generate a certificate for this specific host, signed by the GateSentry CA
 	template := &x509.Certificate{
-		SerialNumber: big.NewInt(1),
+		SerialNumber: big.NewInt(0).SetBytes([]byte(host)),
 		Subject: pkix.Name{
-			CommonName: host,
+			CommonName:   host,
+			Organization: []string{"GateSentry Block Page"},
 		},
-		NotBefore: time.Now(),
-		NotAfter:  time.Now().Add(time.Hour * 24), // 24 hours
-		KeyUsage:  x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(24 * time.Hour),
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		BasicConstraintsValid: true,
 	}
 
-	derBytes, err := x509.CreateCertificate(rand.Reader, template, template, &privKey.PublicKey, privKey)
+	// Set SAN: IP or DNS name
+	if ip := net.ParseIP(host); ip != nil {
+		template.IPAddresses = []net.IP{ip}
+	} else {
+		template.DNSNames = []string{host}
+		// Also add wildcard if it's a simple hostname
+		if strings.Count(host, ".") >= 1 {
+			template.DNSNames = append(template.DNSNames, host)
+		}
+	}
+
+	// Sign with the GateSentry CA
+	certDER, err := x509.CreateCertificate(rand.Reader, template, ParsedTLSCert, ParsedTLSCert.PublicKey, TLSCert.PrivateKey)
 	if err != nil {
-		return nil, err
+		// Fall back to raw CA cert on error
+		return &tls.Config{
+			Certificates: []tls.Certificate{TLSCert},
+		}, nil
 	}
 
-	// PEM encode the certificate and key
-	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: derBytes})
-	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(privKey)})
-
-	// Create a tls.Certificate
-	cert, err := tls.X509KeyPair(certPEM, keyPEM)
-	if err != nil {
-		return nil, err
+	cert := tls.Certificate{
+		Certificate: [][]byte{certDER},
+		PrivateKey:  TLSCert.PrivateKey,
 	}
+	// Append CA cert to chain
+	cert.Certificate = append(cert.Certificate, TLSCert.Certificate...)
 
-	// Create a tls.Config object
 	return &tls.Config{
 		Certificates: []tls.Certificate{cert},
 	}, nil

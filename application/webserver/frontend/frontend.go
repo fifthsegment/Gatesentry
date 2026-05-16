@@ -2,12 +2,15 @@ package gatesentryWebserverFrontend
 
 import (
 	"embed"
+	"encoding/json"
+	"html"
 	"io/fs"
 	"log"
 	"net/http"
+	"strings"
 )
 
-//go:embed files
+//go:embed all:files
 var build embed.FS
 
 func GetBlockPageMaterialUIStylesheet() []byte {
@@ -26,6 +29,34 @@ func GetIndexHtml() []byte {
 	}
 	return indexData
 
+}
+
+// GetIndexHtmlWithBasePath returns index.html with the base path injected.
+// Injects a <script> setting window.__GS_BASE_PATH__ and a <base href> tag
+// so the Svelte SPA can resolve assets and API calls relative to the base path.
+func GetIndexHtmlWithBasePath(basePath string) []byte {
+	raw := GetIndexHtml()
+	if raw == nil {
+		return nil
+	}
+
+	// For root base path, no injection needed
+	if basePath == "/" {
+		return raw
+	}
+
+	htmlStr := string(raw)
+
+	// Build injection tags — escape basePath for safe HTML/JS injection
+	baseHref := html.EscapeString(basePath + "/")
+	jsPath, _ := json.Marshal(basePath) // produces a safely-quoted JSON string
+	injection := `<base href="` + baseHref + `">` + "\n" +
+		`    <script>window.__GS_BASE_PATH__ = ` + string(jsPath) + `;</script>`
+
+	// Inject after <head> or after first <meta> tag
+	htmlStr = strings.Replace(htmlStr, "<head>", "<head>\n    "+injection, 1)
+
+	return []byte(htmlStr)
 }
 
 func GetFileSystem(dir string, fsys fs.FS) http.FileSystem {
@@ -51,4 +82,46 @@ func GetFSHandler() http.FileSystem {
 	}
 
 	return http.FS(fsys)
+}
+
+// GetRootFile returns the contents of a file from the embedded files/ root directory.
+// Used for serving root-level static assets like favicon.ico, gatesentry.svg, etc.
+func GetRootFile(name string) ([]byte, error) {
+	return fs.ReadFile(build, "files/"+name)
+}
+
+// RootFileHandler returns an http.HandlerFunc that serves a single file from
+// the embedded files/ root. The Content-Type is inferred from the extension.
+func RootFileHandler(name string) http.HandlerFunc {
+	// Map common extensions to MIME types
+	extToMime := map[string]string{
+		".svg":  "image/svg+xml",
+		".ico":  "image/x-icon",
+		".png":  "image/png",
+		".jpg":  "image/jpeg",
+		".jpeg": "image/jpeg",
+		".webp": "image/webp",
+		".json": "application/json",
+		".xml":  "application/xml",
+		".txt":  "text/plain",
+	}
+
+	return func(w http.ResponseWriter, r *http.Request) {
+		data, err := GetRootFile(name)
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+
+		// Set Content-Type from extension
+		for ext, mime := range extToMime {
+			if strings.HasSuffix(name, ext) {
+				w.Header().Set("Content-Type", mime)
+				break
+			}
+		}
+
+		w.Header().Set("Cache-Control", "public, max-age=86400")
+		w.Write(data)
+	}
 }

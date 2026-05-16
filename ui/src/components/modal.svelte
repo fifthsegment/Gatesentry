@@ -4,7 +4,6 @@
   export let open = false;
   export let on: { close: () => void } = { close: () => {} };
   export let title = "";
-  export let children = null;
   export let hasForm = false;
   export let shouldSubmitOnEnter = false;
 </script>

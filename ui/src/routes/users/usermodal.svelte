@@ -6,6 +6,7 @@
     RadioButtonGroup,
     TextInput,
   } from "carbon-components-svelte";
+  import { View, ViewOff } from "carbon-icons-svelte";
   import Modal from "../../components/modal.svelte";
   import { _ } from "svelte-i18n";
   import { createEventDispatcher, onDestroy, onMount } from "svelte";
@@ -14,11 +15,11 @@
   import { createNotificationError } from "../../lib/utils";
   import type { UserType } from "../../types";
   const dispatch = createEventDispatcher();
-  export let showForm = false;
   export let user: UserType | null = null;
   // new user
   let username = user?.username ?? "";
   let password = user?.password ?? "";
+  let showPassword = false;
   let allowAccess =
     user?.allowaccess && user.allowaccess == true ? "true" : "false";
 
@@ -73,20 +74,37 @@
   };
 </script>
 
-<Form on:submit={handleCreateUser}>
+<Form on:submit={handleCreateUser} autocomplete="off">
   <TextInput
     bind:value={username}
-    id="user"
-    labelText={$_("User")}
+    id="field1"
+    name="field1"
+    autocomplete="off"
+    labelText={$_("Proxy Account Name")}
     disabled={user ? true : false}
   />
   <br />
-  <TextInput
-    bind:value={password}
-    id="password"
-    labelText={$_("Password")}
-    type="password"
-  />
+  <div class="credential-field" class:credential-masked={!showPassword}>
+    <TextInput
+      bind:value={password}
+      id="field2"
+      name="field2"
+      autocomplete="off"
+      labelText={$_("Proxy Credential")}
+    />
+    <!-- svelte-ignore a11y-no-static-element-interactions a11y-click-events-have-key-events -->
+    <span
+      class="credential-toggle"
+      on:click={() => (showPassword = !showPassword)}
+      title={showPassword ? $_("Hide") : $_("Show")}
+    >
+      {#if showPassword}
+        <ViewOff size={18} />
+      {:else}
+        <View size={18} />
+      {/if}
+    </span>
+  </div>
   <br />
   <RadioButtonGroup
     legendText="Allow internet access"
@@ -107,3 +125,30 @@
     {/if}
   </div>
 </Form>
+
+<style>
+  .credential-field {
+    position: relative;
+  }
+  .credential-masked :global(input) {
+    -webkit-text-security: disc;
+    font-family: text-security-disc, monospace;
+    letter-spacing: 0.125em;
+  }
+  .credential-toggle {
+    position: absolute;
+    right: 1px;
+    bottom: 1px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 38px;
+    cursor: pointer;
+    color: #525252;
+    transition: color 0.12s;
+  }
+  .credential-toggle:hover {
+    color: #161616;
+  }
+</style>

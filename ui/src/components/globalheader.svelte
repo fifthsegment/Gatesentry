@@ -1,6 +1,5 @@
 <script lang="ts">
   import { Header, SkipToContent } from "carbon-components-svelte";
-  import Headermenu from "./headermenu.svelte";
   import Headerrightnav from "./headerrightnav.svelte";
   import { onMount } from "svelte";
   import { store } from "../store/apistore";
@@ -19,11 +18,11 @@
   platformName={version}
   bind:isSideNavOpen
   persistentHamburgerMenu={true}
+  expansionBreakpoint={0}
 >
   <svelte:fragment slot="skip-to-content">
     <SkipToContent />
   </svelte:fragment>
-  <Headermenu />
 
   <Headerrightnav {userProfilePanelOpen} />
 </Header>

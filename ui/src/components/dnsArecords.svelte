@@ -4,6 +4,7 @@
     Button,
     ComposedModal,
     DataTable,
+    InlineLoading,
     ModalBody,
     ModalFooter,
     ModalHeader,
@@ -131,7 +132,7 @@
 
 <div>
   {#if data == null}
-    <p>Loading...</p>
+    <InlineLoading description="Loading A records..." />
   {:else}
     <h5>{$_("Custom A Records")}</h5>
     <p>
@@ -205,7 +206,7 @@
     >
       <Toolbar size="sm">
         <ToolbarContent>
-          {#if showForm}{:else}
+          {#if !showForm}
             <Button icon={AddAlt} on:click={() => (showForm = true)}>
               {$_("Insert")}
             </Button>
