@@ -10,7 +10,7 @@ import (
 	gatesentryTypes "bitbucket.org/abdullah_irfan/gatesentryf/types"
 )
 
-func InitializeInternalRecords(records *map[string]string, mutex *sync.Mutex, settings *gatesentry2storage.MapStore) {
+func InitializeInternalRecords(records *map[string]string, mutex *sync.RWMutex, settings *gatesentry2storage.MapStore) {
 	mutex.Lock()
 	defer mutex.Unlock()
 	fmt.Println("Initializing internal records...")

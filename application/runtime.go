@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"os/exec"
 	"strings"
 	"time"
@@ -176,7 +177,24 @@ func (R *GSRuntime) Init() {
 	R.GSSettings.SetDefault("timezone", "Europe/Oslo")
 	R.GSSettings.SetDefault("enable_https_filtering", "false")
 	R.GSSettings.SetDefault("enable_dns_server", "true")
-	R.GSSettings.SetDefault("dns_resolver", "8.8.8.8:53")
+	// Use environment variable for DNS resolver if set, otherwise use default
+	// Environment variable takes precedence over stored settings to allow
+	// containerized/deployment-time configuration
+	if envResolver := os.Getenv("GATESENTRY_DNS_RESOLVER"); envResolver != "" {
+		// Normalize resolver address - ensure port is included
+		// Use net.SplitHostPort to properly handle IPv6 addresses
+		dnsResolverValue := envResolver
+		_, _, err := net.SplitHostPort(envResolver)
+		if err != nil {
+			// No port specified, add default :53
+			// net.JoinHostPort handles IPv6 bracketing automatically
+			dnsResolverValue = net.JoinHostPort(envResolver, "53")
+		}
+		log.Printf("[DNS] Using resolver from environment (overrides settings): %s", dnsResolverValue)
+		R.GSSettings.Update("dns_resolver", dnsResolverValue)
+	} else {
+		R.GSSettings.SetDefault("dns_resolver", "8.8.8.8:53")
+	}
 	R.GSSettings.SetDefault("idemail", "")
 	R.GSSettings.SetDefault("enable_ai_image_filtering", "false")
 	R.GSSettings.SetDefault("ai_scanner_url", "")
