@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"bitbucket.org/abdullah_irfan/gatesentryf/internalfiles"
-	gatesentry2proxy "bitbucket.org/abdullah_irfan/gatesentryf/proxy"
 	GatesentryTypes "bitbucket.org/abdullah_irfan/gatesentryf/types"
 	gatesentryWebserverTypes "bitbucket.org/abdullah_irfan/gatesentryf/webserver/types"
 	"bitbucket.org/abdullah_irfan/gatesentryproxy"
@@ -48,6 +47,7 @@ const NONCONSUMPTIONUPDATESBEFOREKILL = 24
 var INSTALLATIONID = "a"
 var GSAPIBASEPOINT = "a"
 var GSBASEDIR = "./"
+var GSBASEPATH = "/"
 
 // const INSTALLATIONID = "3";
 var GSVerString = ""
@@ -74,7 +74,6 @@ type GSRuntime struct {
 	GSSettings                  *gatesentry2storage.MapStore
 	GSUpdateLog                 *gatesentry2storage.MapStore
 	Logger                      *gatesentry2logger.Log
-	Proxy                       *gatesentry2proxy.GSProxy
 	AuthUsers                   []GatesentryTypes.GSUser
 	FailedConsumptionUpdates    int
 	GSUserDataSaverRunning      bool
@@ -91,6 +90,29 @@ func SetBaseDir(a string) {
 
 func GetBaseDir() string {
 	return GSBASEDIR
+}
+
+// SetBasePath sets the URL base path for reverse proxy deployments.
+// Normalizes to ensure leading slash, strips trailing slash (unless root "/").
+// e.g., "gatesentry" → "/gatesentry", "/gatesentry/" → "/gatesentry", "" → "/"
+func SetBasePath(p string) {
+	if p == "" || p == "/" {
+		GSBASEPATH = "/"
+		return
+	}
+	// Ensure leading slash
+	if p[0] != '/' {
+		p = "/" + p
+	}
+	// Strip trailing slash
+	if len(p) > 1 && p[len(p)-1] == '/' {
+		p = p[:len(p)-1]
+	}
+	GSBASEPATH = p
+}
+
+func GetBasePath() string {
+	return GSBASEPATH
 }
 
 func (R *GSRuntime) GSWasUpdated() {

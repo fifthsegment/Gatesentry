@@ -2,12 +2,15 @@ package gatesentryWebserverFrontend
 
 import (
 	"embed"
+	"encoding/json"
+	"html"
 	"io/fs"
 	"log"
 	"net/http"
+	"strings"
 )
 
-//go:embed files
+//go:embed all:files
 var build embed.FS
 
 func GetBlockPageMaterialUIStylesheet() []byte {
@@ -26,6 +29,34 @@ func GetIndexHtml() []byte {
 	}
 	return indexData
 
+}
+
+// GetIndexHtmlWithBasePath returns index.html with the base path injected.
+// Injects a <script> setting window.__GS_BASE_PATH__ and a <base href> tag
+// so the Svelte SPA can resolve assets and API calls relative to the base path.
+func GetIndexHtmlWithBasePath(basePath string) []byte {
+	raw := GetIndexHtml()
+	if raw == nil {
+		return nil
+	}
+
+	// For root base path, no injection needed
+	if basePath == "/" {
+		return raw
+	}
+
+	htmlStr := string(raw)
+
+	// Build injection tags — escape basePath for safe HTML/JS injection
+	baseHref := html.EscapeString(basePath + "/")
+	jsPath, _ := json.Marshal(basePath) // produces a safely-quoted JSON string
+	injection := `<base href="` + baseHref + `">` + "\n" +
+		`    <script>window.__GS_BASE_PATH__ = ` + string(jsPath) + `;</script>`
+
+	// Inject after <head> or after first <meta> tag
+	htmlStr = strings.Replace(htmlStr, "<head>", "<head>\n    "+injection, 1)
+
+	return []byte(htmlStr)
 }
 
 func GetFileSystem(dir string, fsys fs.FS) http.FileSystem {
