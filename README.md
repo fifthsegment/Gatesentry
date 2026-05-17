@@ -21,7 +21,7 @@ Useful as a network-wide content filter, a privacy guard, a parental control lay
 
 ## Getting started
 
-There are 2 ways to run Gatesentry, either using the docker image or using the single file binary directly. 
+There are 2 ways to run Gatesentry, either using the docker image or using the single file binary directly.
 
 ### Method 1: Using Docker
 
