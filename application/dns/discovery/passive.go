@@ -9,12 +9,6 @@ import (
 	"time"
 )
 
-// ObservePassiveQuery records that a DNS query was seen from the given IP.
-// If the IP is already known, it updates LastSeen (fast path).
-// If unknown, it attempts a MAC lookup and creates a new passive device entry.
-//
-// This is the main entry point for Phase 2 passive discovery.
-// Called from handleDNSRequest in a goroutine to avoid adding latency.
 func (ds *DeviceStore) ObservePassiveQuery(clientIP string) {
 	if clientIP == "" {
 		return
@@ -25,19 +19,14 @@ func (ds *DeviceStore) ObservePassiveQuery(clientIP string) {
 		return
 	}
 
-	// Fast path: known device — just touch it (map lookup + timestamp update).
-	// FindDeviceByIP uses RLock internally, then TouchDevice uses Lock briefly.
 	existing := ds.FindDeviceByIP(clientIP)
 	if existing != nil {
 		ds.TouchDevice(existing.ID)
 		return
 	}
 
-	// Slow path: unknown device — create it.
-	// This only happens once per unique IP, so the cost is acceptable.
 	mac := LookupARPEntry(clientIP)
 
-	// Check if we know this MAC under a different IP (DHCP renewal / IP change)
 	if mac != "" {
 		existingByMAC := ds.FindDeviceByMAC(mac)
 		if existingByMAC != nil {
@@ -53,7 +42,7 @@ func (ds *DeviceStore) ObservePassiveQuery(clientIP string) {
 		}
 	}
 
-	// Completely new device — create a passive entry
+	// New device, unknown MAC — create a passive entry
 	now := time.Now()
 	device := &Device{
 		Source:    SourcePassive,

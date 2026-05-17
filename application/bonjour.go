@@ -27,17 +27,4 @@ func StartBonjour() {
 			log.Println("[Bonjour] Proxy registration error:", err.Error())
 		}
 	}()
-
-	// Run registration (blocking call)
-
-	// Ctrl+C handling
-	// handler := make(chan os.Signal, 1)
-	// signal.Notify(handler, os.Interrupt)
-	// for sig := range handler {
-	//     if sig == os.Interrupt {
-	//         s.Shutdown()
-	//         time.Sleep(1e9)
-	//         break
-	//     }
-	// }
 }

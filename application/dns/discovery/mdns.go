@@ -14,33 +14,33 @@ import (
 // These cover the vast majority of devices found on home networks:
 // Apple devices, Chromecasts, printers, NAS boxes, smart speakers, etc.
 var DefaultServiceTypes = []string{
-	"_http._tcp",            // Web servers, management UIs, IoT devices
-	"_https._tcp",           // Secure web servers
-	"_airplay._tcp",         // Apple AirPlay (Apple TV, HomePod, AirPlay speakers)
-	"_raop._tcp",            // Remote Audio Output Protocol (AirPlay audio)
-	"_googlecast._tcp",      // Google Chromecast, Google Home, Nest Hub
-	"_printer._tcp",         // Network printers (generic)
-	"_ipp._tcp",             // Internet Printing Protocol
-	"_ipps._tcp",            // IPP over TLS
-	"_pdl-datastream._tcp",  // HP JetDirect / PCL printers
-	"_scanner._tcp",         // Network scanners
-	"_smb._tcp",             // SMB/CIFS file sharing (Windows, Samba, NAS)
-	"_afpovertcp._tcp",      // Apple Filing Protocol (older Macs, Time Machine)
-	"_nfs._tcp",             // NFS file sharing
-	"_ssh._tcp",             // SSH servers (Linux boxes, NAS, routers)
-	"_sftp-ssh._tcp",        // SFTP over SSH
-	"_rfb._tcp",             // VNC remote desktop
-	"_companion-link._tcp",  // Apple Companion Link (iOS ↔ Apple TV)
-	"_homekit._tcp",         // Apple HomeKit accessories
-	"_hap._tcp",             // HomeKit Accessory Protocol
-	"_sleep-proxy._udp",     // Apple Sleep Proxy (Mac Mini, Apple TV)
-	"_spotify-connect._tcp", // Spotify Connect devices
-	"_sonos._tcp",           // Sonos speakers
-	"_daap._tcp",            // Digital Audio Access Protocol (iTunes sharing)
-	"_touch-able._tcp",      // Apple Remote (iOS Remote app)
-	"_workstation._tcp",     // Workstation/computer discovery
-	"_device-info._tcp",     // Device information service
-	"_udisks-ssh._tcp",      // USB disk sharing over SSH
+	"_http._tcp",
+	"_https._tcp",
+	"_airplay._tcp",
+	"_raop._tcp",
+	"_googlecast._tcp",
+	"_printer._tcp",
+	"_ipp._tcp",
+	"_ipps._tcp",
+	"_pdl-datastream._tcp",
+	"_scanner._tcp",
+	"_smb._tcp",
+	"_afpovertcp._tcp",
+	"_nfs._tcp",
+	"_ssh._tcp",
+	"_sftp-ssh._tcp",
+	"_rfb._tcp",
+	"_companion-link._tcp",
+	"_homekit._tcp",
+	"_hap._tcp",
+	"_sleep-proxy._udp",
+	"_spotify-connect._tcp",
+	"_sonos._tcp",
+	"_daap._tcp",
+	"_touch-able._tcp",
+	"_workstation._tcp",
+	"_device-info._tcp",
+	"_udisks-ssh._tcp",
 }
 
 // DefaultScanInterval is the default time between full mDNS scan cycles.
@@ -52,16 +52,6 @@ const DefaultBrowseTimeout = 5 * time.Second
 
 // MDNSBrowser performs periodic mDNS/Bonjour service discovery on the
 // local network and feeds discovered devices into the DeviceStore.
-//
-// It browses a configurable list of service types (e.g., _airplay._tcp,
-// _googlecast._tcp, _printer._tcp) and for each discovered service entry:
-//   - Correlates with existing devices by IP, hostname, or mDNS instance name
-//   - Enriches existing devices (e.g., adding a name to a passive-only device)
-//   - Creates new devices for previously unseen hosts
-//
-// The browser runs as a background goroutine started by Start() and stopped
-// by Stop(). It performs an immediate scan on startup, then scans at the
-// configured interval.
 type MDNSBrowser struct {
 	store         *DeviceStore
 	interval      time.Duration
@@ -219,10 +209,7 @@ func (b *MDNSBrowser) browseServiceType(serviceType string, timeout time.Duratio
 		return nil
 	}
 
-	// Buffered channel prevents the resolver's mainloop from blocking
-	// when we stop reading after timeout. Without this, the resolver
-	// goroutine could deadlock trying to send an entry while we're
-	// trying to send on the Exit channel.
+	// Buffered channel prevents resolver from blocking when we stop reading after timeout
 	entries := make(chan *bonjour.ServiceEntry, 100)
 
 	err = resolver.Browse(serviceType, "local.", entries)
@@ -252,15 +239,6 @@ func (b *MDNSBrowser) browseServiceType(serviceType string, timeout time.Duratio
 	}
 }
 
-// processEntry takes a discovered mDNS service entry and upserts it into the
-// device store, merging with any existing device matched by IP or hostname.
-//
-// Match priority:
-//  1. Existing device by IPv4 (most common — passive discovery already created it)
-//  2. Existing device by IPv6
-//  3. Existing device by cleaned hostname
-//  4. Existing device by mDNS instance name
-//  5. Create new device
 func (b *MDNSBrowser) processEntry(entry *bonjour.ServiceEntry) {
 	if entry == nil {
 		return
@@ -366,9 +344,6 @@ func CleanMDNSHostname(hostname string) string {
 	return h
 }
 
-// IsLinkLocalIPv6 returns true if the IP is an IPv6 link-local address (fe80::/10).
-// Link-local addresses are valid for on-link communication but less useful for
-// DNS resolution since they require a zone ID (scope) to be routable.
 func IsLinkLocalIPv6(ipStr string) bool {
 	ip := net.ParseIP(ipStr)
 	if ip == nil {

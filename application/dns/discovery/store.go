@@ -12,9 +12,7 @@ import (
 	"github.com/miekg/dns"
 )
 
-// sanitizeDNSName converts a raw hostname into a valid DNS label.
-// Lowercases, replaces invalid characters with hyphens, trims hyphens.
-// Examples: "Vivienne's iPad" → "viviennes-ipad", "MacMini" → "macmini"
+// SanitizeDNSName normalizes a hostname into a valid DNS label.
 var invalidDNSChars = regexp.MustCompile(`[^a-z0-9-]`)
 var multiHyphen = regexp.MustCompile(`-{2,}`)
 
@@ -34,8 +32,6 @@ func SanitizeDNSName(name string) string {
 	return s
 }
 
-// reverseIPv4 converts an IPv4 address to its in-addr.arpa PTR name.
-// Example: "192.168.1.100" → "100.1.168.192.in-addr.arpa"
 func reverseIPv4(ip string) string {
 	parts := strings.Split(ip, ".")
 	if len(parts) != 4 {
@@ -45,8 +41,6 @@ func reverseIPv4(ip string) string {
 		parts[3], parts[2], parts[1], parts[0])
 }
 
-// reverseIPv6 converts an IPv6 address to its ip6.arpa PTR name.
-// Example: "fd00:1234:5678::24a" → "a.4.2.0.0.0.0.0...ip6.arpa"
 func reverseIPv6(ipStr string) string {
 	ip := net.ParseIP(ipStr)
 	if ip == nil {
@@ -66,14 +60,7 @@ func reverseIPv6(ipStr string) string {
 	return strings.Join(parts, ".") + ".ip6.arpa"
 }
 
-// DeviceStore is a thread-safe store for discovered devices and their
-// derived DNS records. It is the central data structure that all discovery
-// tiers feed into, and that the DNS query handler reads from.
-//
-// Concurrency model:
-//   - DNS query handler calls Lookup*() methods with RLock (concurrent reads)
-//   - Discovery sources call Upsert*/Remove* methods with full Lock (exclusive writes)
-//   - Same RWMutex pattern as the existing blockedDomains/internalRecords maps
+// DeviceStore is a thread-safe store for discovered devices and DNS records.
 type DeviceStore struct {
 	mu sync.RWMutex
 
@@ -87,24 +74,12 @@ type DeviceStore struct {
 	recordsByName map[string][]DnsRecord
 
 	// recordsByReverse maps reverse PTR name → []DnsRecord.
-	// Example key: "100.1.168.192.in-addr.arpa"
 	recordsByReverse map[string][]DnsRecord
 
-	// deviceByHostname maps lowercase hostname → device ID for matching.
 	deviceByHostname map[string]string
-
-	// deviceByMAC maps lowercase MAC → device ID for matching.
-	deviceByMAC map[string]string
-
-	// deviceByIP maps IP string → device ID for passive discovery.
-	deviceByIP map[string]string
-
-	// zones contains the DNS zone suffixes for generated records.
-	// The first entry is the "primary" zone used for PTR targets and display.
-	// Records are generated for ALL zones so that e.g. both "macmini.local"
-	// and "macmini.jvj28.com" resolve to the same device.
-	// Default: ["local"]
-	zones []string
+	deviceByMAC      map[string]string
+	deviceByIP       map[string]string
+	zones            []string
 }
 
 // NewDeviceStore creates an empty DeviceStore with the given zone suffix.
@@ -126,11 +101,6 @@ func NewDeviceStore(zone string) *DeviceStore {
 }
 
 // NewDeviceStoreMultiZone creates a DeviceStore with multiple zone suffixes.
-// The first zone is the primary zone (used for PTR targets and display).
-// Records are generated for ALL zones.
-// Example: NewDeviceStoreMultiZone("jvj28.com", "local")
-//
-//	→ macmini.jvj28.com AND macmini.local both resolve
 func NewDeviceStoreMultiZone(zones ...string) *DeviceStore {
 	if len(zones) == 0 {
 		zones = []string{"local"}

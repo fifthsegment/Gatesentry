@@ -18,14 +18,7 @@ const (
 	SourceManual  DiscoverySource = "manual"  // User-entered via UI
 )
 
-// Device represents a physical device on the home network.
-//
-// A device is identified primarily by hostname (DHCP Option 12, mDNS name),
-// NOT by IP address (which changes with DHCP) or MAC address (which may be
-// randomized on modern operating systems).
-//
-// DNS records (A, AAAA, PTR) are derived from the device's current addresses
-// and are automatically regenerated when addresses change.
+// Device represents a physical device on the local network.
 type Device struct {
 	// ID is a stable unique identifier (UUID v4).
 	ID string `json:"id"`

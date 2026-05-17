@@ -97,7 +97,7 @@ func GSApiDeviceSetName(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Update the device via UpsertDevice to trigger DNS record rebuild
+
 	device.ManualName = req.Name
 	if req.Owner != "" {
 		device.Owner = req.Owner

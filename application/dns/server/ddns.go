@@ -9,16 +9,8 @@ import (
 	"github.com/miekg/dns"
 )
 
-// --- Package-level DDNS configuration ---
-// These are set in StartDNSServer() from settings.
-
 var (
-	// ddnsEnabled controls whether DDNS UPDATE messages are accepted.
-	// Default: true (DDNS works out of the box for DHCP servers on the same machine).
 	ddnsEnabled = true
-
-	// ddnsTSIGRequired controls whether TSIG authentication is mandatory.
-	// Default: false (simple setups don't need TSIG; enable for security).
 	ddnsTSIGRequired = false
 )
 
@@ -34,16 +26,6 @@ func ddnsMsgAcceptFunc(dh dns.Header) dns.MsgAcceptAction {
 }
 
 // handleDDNSUpdate processes an RFC 2136 Dynamic DNS UPDATE message.
-// It validates TSIG if configured, checks the zone, parses the UPDATE
-// section using RFC 2136 §2.5 semantics, and applies add/delete operations
-// to the device store.
-//
-// RFC 2136 §2.5 update section semantics:
-//   - Class IN  + TTL > 0         → Add RR to an RRset
-//   - Class ANY + TTL = 0 + no RD → Delete all RRsets for a name
-//   - Class NONE + TTL = 0        → Delete specific RR from an RRset
-//
-// Reference: Python DDNS implementation in DDNS/ project
 func handleDDNSUpdate(w dns.ResponseWriter, r *dns.Msg) {
 	// 1. Check if DDNS is enabled
 	if !ddnsEnabled {
@@ -129,11 +111,6 @@ type ddnsUpdate struct {
 }
 
 // parseDDNSUpdates extracts add and delete operations from the UPDATE section.
-//
-// RFC 2136 §2.5 class semantics:
-//   - Class IN (1)     → Add to an RRset
-//   - Class ANY (255)  → Delete an RRset (TTL=0, no RDATA) or all RRsets (TypeANY)
-//   - Class NONE (254) → Delete a specific RR from an RRset
 func parseDDNSUpdates(rrs []dns.RR, zone string) (adds []ddnsUpdate, deletes []ddnsUpdate) {
 	for _, rr := range rrs {
 		hdr := rr.Header()
@@ -239,12 +216,6 @@ func applyDDNSAdd(update ddnsUpdate, zone string) {
 }
 
 // applyDDNSDelete processes a DELETE operation from a DDNS UPDATE.
-//
-// Uses ClearDeviceAddress to directly remove IPs without going through
-// UpsertDevice's merge logic (which would preserve empty IPs). The device
-// itself is kept alive so that subsequent ADDs in the same UPDATE message
-// can find it by hostname. Orphaned devices are cleaned up after all
-// operations are applied.
 func applyDDNSDelete(update ddnsUpdate) {
 	if deviceStore == nil {
 		return
@@ -286,8 +257,7 @@ func applyDDNSDelete(update ddnsUpdate) {
 	}
 }
 
-// cleanupOrphanedDevices removes non-persistent devices that have no remaining
-// IP addresses. Called after all DDNS delete/add operations are applied.
+// cleanupOrphanedDevices removes addressless, non-persistent devices.
 func cleanupOrphanedDevices() {
 	if deviceStore == nil {
 		return
@@ -313,14 +283,7 @@ func isAuthorizedZone(zone string) bool {
 	return false
 }
 
-// extractHostname strips the zone suffix from an FQDN to get the bare hostname.
-//
-// Examples:
-//
-//	extractHostname("macmini.local", "local") → "macmini"
-//	extractHostname("printer.jvj28.com", "jvj28.com") → "printer"
-//	extractHostname("sub.host.local", "local") → "sub.host"
-//	extractHostname("local", "local") → "" (zone itself is not a hostname)
+// extractHostname strips the zone suffix from an FQDN.
 func extractHostname(fqdn string, zone string) string {
 	fqdn = strings.ToLower(fqdn)
 	zone = strings.ToLower(zone)
