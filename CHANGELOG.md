@@ -1,5 +1,18 @@
 # CHANGELOG
 
+## v1.20.7 (17 May 2026)
+
+- DNS server: replaced global `sync.Mutex` with `sync.RWMutex`, mutex released before upstream forwarding
+- DNS server: added TCP support alongside UDP for queries exceeding 512 bytes
+- DNS server: `GATESENTRY_DNS_RESOLVER` env var now overrides stored settings
+- Fixed startup panic when DNS blocklists contain whitespace-only lines
+- Added pytest integration test suite (46 tests covering proxy, MITM, DNS, API, UI)
+- CI: integration tests run as gated PR check
+- Fixed Codecov coverage collection (was reporting 0%)
+- Added coverage-int target: instrumentation-based integration coverage
+- Rewrote AI-generated repo description and README
+- Removed stale AI-generated documentation files
+
 ## v1.20.6 (31 January 2026)
 
 - Fix HTTP2 not working properly in transparent mode
