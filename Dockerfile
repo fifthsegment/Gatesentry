@@ -1,7 +1,7 @@
 FROM node:20-alpine AS ui-builder
 WORKDIR /src/ui
 COPY ui/package.json ui/yarn.lock ui/.yarnrc.yml ./
-RUN yarn install --frozen-lockfile
+RUN yarn install
 COPY ui/ .
 RUN yarn build
 
