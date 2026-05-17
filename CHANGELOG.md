@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## v1.21.0 (17 May 2026)
+
+- Device discovery service: mDNS/Bonjour browser, passive DNS observation, RFC 2136 DDNS UPDATE support
+- Device store with multi-zone DNS records (A/AAAA/PTR), thread-safe with sync.RWMutex
+- Device inventory UI: devices list, device detail, naming and owner assignment
+- Admin UI port configurable via GS_ADMIN_PORT env var
+- Base path support for reverse proxy deployments (GS_BASE_PATH)
+
 ## v1.20.7 (17 May 2026)
 
 - DNS server: replaced global `sync.Mutex` with `sync.RWMutex`, mutex released before upstream forwarding
@@ -12,11 +20,6 @@
 - Added coverage-int target: instrumentation-based integration coverage
 - Rewrote AI-generated repo description and README
 - Removed stale AI-generated documentation files
-- Device discovery service: mDNS/Bonjour browser, passive DNS observation, RFC 2136 DDNS UPDATE support
-- Device store with multi-zone DNS records (A/AAAA/PTR), thread-safe with sync.RWMutex
-- Device inventory UI: devices list, device detail, naming and owner assignment
-- Admin UI port configurable via GS_ADMIN_PORT env var
-- Base path support for reverse proxy deployments (GS_BASE_PATH)
 
 ## v1.20.6 (31 January 2026)
 
