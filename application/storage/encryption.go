@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"math/big"
 
-	// "fmt"
 	"io"
 	"strings"
 )
@@ -104,68 +103,8 @@ func decrypt(key []byte, text string) ([]byte, error) {
 
 func Encrypt(plaintext []byte, key []byte) ([]byte, error) {
 	return encrypt(key, string(plaintext))
-	// // return encrypt( string(plaintext), string(key) );
-	// // The key argument should be the AES key, either 16 or 32 bytes
-	// // to select AES-128 or AES-256.
-	// // key := []byte("AES256Key-32Characters1234567890")
-	// // plaintext := []byte("exampleplaintext")
-
-	// block, err := aes.NewCipher(key)
-	// if err != nil {
-	// 	return nil, err;
-	// }
-
-	// // Never use more than 2^32 random nonces with a given key because of the risk of a repeat.
-	// nonce := []byte("ABCDEFGHIJKL");
-	// _=nonce;
-	// // nonce := make([]byte, 12)
-	// // if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
-	// // 	panic(err.Error())
-	// // }
-
-	// aesgcm, err := cipher.NewGCM(block)
-	// if err != nil {
-	// 	return nil, err;
-	// }
-
-	// ciphertext := aesgcm.Seal(nil, nonce, plaintext, nil)
-	// fmt.Println("Encrypted text = "+ string( ciphertext ) );
-	// // fmt.Printf("%x\n", ciphertext)
-	// return ciphertext,nil;
 }
 
 func Decrypt(ciphertext []byte, key []byte) ([]byte, error) {
 	return decrypt(key, string(ciphertext))
-	// // return decrypt( string(ciphertext), string(key) );
-	// // The key argument should be the AES key, either 16 or 32 bytes
-	// // to select AES-128 or AES-256.
-	// // key := []byte("AES256Key-32Characters1234567890")
-	// // ciphertext, _ := hex.DecodeString("f90fbef747e7212ad7410d0eee2d965de7e890471695cddd2a5bc0ef5da1d04ad8147b62141ad6e4914aee8c512f64fba9037603d41de0d50b718bd665f019cdcd")
-
-	// nonce := []byte("ABCDEFGHIJKL");
-	// _=nonce;
-
-	// block, err := aes.NewCipher(key)
-	// if err != nil {
-
-	// 	fmt.Println("key error ")
-	// 	return nil, err;
-	// }
-
-	// aesgcm, err := cipher.NewGCM(block)
-
-	// if err != nil {
-	// 	fmt.Println("block error ")
-	// 	return nil, err;
-	// }
-
-	// plaintext, err := aesgcm.Open(nil, nonce, ciphertext, nil)
-	// if err != nil {
-	// 	fmt.Println("last stage error " + string(plaintext) )
-	// 	return nil, err;
-	// }
-
-	// // fmt.Printf("%s\n", string(plaintext))
-
-	// return plaintext,nil;
 }

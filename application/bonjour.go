@@ -2,9 +2,6 @@ package gatesentryf
 
 import (
 	"log"
-	// "os"
-	// "os/signal"
-	// "time"
 
 	"github.com/oleksandr/bonjour"
 )

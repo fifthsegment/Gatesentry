@@ -3,7 +3,6 @@ package gatesentryproxy
 import (
 	"fmt"
 	"runtime"
-	// "time"
 )
 
 func PrintMemUsage() {

@@ -3,7 +3,6 @@ package gatesentryf
 import (
 	"fmt"
 	"strconv"
-	// "gatesentry2/proxy"
 )
 
 var R *GSRuntime

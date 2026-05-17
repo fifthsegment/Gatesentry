@@ -3,7 +3,6 @@ package gatesentryf
 import (
 	GatesentryTypes "bitbucket.org/abdullah_irfan/gatesentryf/types"
 
-	// "fmt"
 	"encoding/json"
 	"log"
 	"sync"
@@ -27,9 +26,7 @@ func GSGetConsumptionData(installId string) (int64, string, error) {
 		// panic(err)
 		return 0, "", err
 	}
-	// data := gsconj
 	return 0, gscon.AdditionalInfo, nil
-	// _=resp;
 }
 
 func NewGSConsumptionContainer() *GSConsumptionContainer {
@@ -39,10 +36,6 @@ func NewGSConsumptionContainer() *GSConsumptionContainer {
 }
 
 func (C *GSConsumptionContainer) ZeroOut(d int64) {
-	// if (C.Mutex == nil ){
-	// 	log.Println("ConsumptionUpdater: Mutex is nil, setting it up.")
-	// 	C.Mutex = &sync.Mutex{};
-	// }
 	C.Mutex.Lock()
 
 	log.Println("Updating Consumption Data")
@@ -51,10 +44,6 @@ func (C *GSConsumptionContainer) ZeroOut(d int64) {
 }
 
 func (C *GSConsumptionContainer) UpdateData(d int64) {
-	// if (C.Mutex == nil ){
-	// 	log.Println("ConsumptionUpdater: Mutex is nil, setting it up.")
-	// 	C.Mutex = &sync.Mutex{};
-	// }
 	C.Mutex.Lock()
 
 	log.Println("Updating Consumption Data")
@@ -73,7 +62,6 @@ func ConsumptionUpdater() {
 	}
 	log.Println("Creating a new Consumption container")
 	GSConsumption = NewGSConsumptionContainer()
-	// fmt.Println( )
 	R.GSConsumptionUpdaterRunning = true
 	go func() {
 
