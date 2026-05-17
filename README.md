@@ -1,27 +1,21 @@
 # Gatesentry
 
-An open source proxy server (supports SSL filtering / MITM) + DNS Server with a nice frontend.
+HTTP/HTTPS proxy with SSL interception (MITM), content filtering, and a built-in DNS sinkhole. Ships with a web admin dashboard.
 
-![Codecov](https://codecov.io/gh/fifthsegment/Gatesentry/branch/master/graph/badge.svg)
+[![Codecov](https://codecov.io/gh/fifthsegment/Gatesentry/branch/master/graph/badge.svg)](https://codecov.io/gh/fifthsegment/Gatesentry)
+[![Release](https://img.shields.io/github/v/release/fifthsegment/Gatesentry)](https://github.com/fifthsegment/Gatesentry/releases/latest)
 
+## What it does
 
-[Download the latest release](https://github.com/fifthsegment/Gatesentry/releases)
+Runs as a local proxy on your machine or network. Clients route traffic through it and Gatesentry can:
 
-Usages:
+- Inspect and filter HTTPS traffic (MITM with a generated CA certificate)
+- Block domains via DNS (runs its own DNS server, pulls blocklists from external sources)
+- Match URLs and content against keyword, MIME, and domain rules
+- Apply time-based and per-user access schedules
+- Log all traffic and display stats in the web UI
 
-- Privacy Protection: Users can use Gatesentry to prevent tracking by various online services by blocking tracking scripts and cookies.
-
-- Parental Controls: Parents can configure Gatesentry to block inappropriate content or websites for younger users on the network.
-
-- Bandwidth Management: By blocking unnecessary content like ads or heavy scripts, users can save on bandwidth, which is especially useful for limited data plans.
-
-- Enhanced Security: Gatesentry can be used to block known malicious websites or phishing domains, adding an extra layer of security to the network.
-
-- Access Control: In a corporate or institutional setting, Gatesentry can be used to restrict access to non-work-related sites during work hours.
-
-- Logging and Monitoring: Track and monitor all the requests made in the network to keep an eye on suspicious activities or to analyze network usage patterns.
-
-- Custom Redirects (via DNS): Redirect specific URLs to other addresses, useful for local development or for redirecting deprecated domains.
+Useful as a network-wide content filter, a privacy guard, a parental control layer, or a sinkhole for known-bad domains.
 
 ![gatesentry-repo](https://github.com/fifthsegment/Gatesentry/assets/5513549/5ab836ab-7362-4916-9f7c-655e67e4deab)
 
@@ -73,48 +67,46 @@ There are 2 ways to run Gatesentry, either using the docker image or using the s
 
     The installer (GatesentrySetup.exe) should automatically install a service. You can look for it by searching for gatesentry in your Service manager (open it by running `services.msc`)
 
-3.  Launching the Server:
+3.  Start the server:
 
-    Execute the Gatesentry binary file to start the server.
-    Upon successful launch, the server will begin listening for incoming connections on port 10413.
+    ```
+    ./gatesentry-{platform}
+    ```
 
-## Important information
+    The proxy listens on port 10413, admin UI on port 10786.
 
-### Ports
+### Run as a background service
 
-By default Gatesentry uses the following ports
+**Linux / macOS:**
 
-| Port  | Purpose                                              |
-| ----- | ---------------------------------------------------- |
-| 10413 | For proxy (explicit mode)                            |
-| 10414 | For proxy (transparent mode, optional)               |
-| 10786 | For the web based administration panel               |
-| 53    | For the built-in DNS server                          |
-| 80    | For the built-in webserver (showing DNS block pages) |
+```
+./gatesentry-{platform} -service install
+service gatesentry start
+service gatesentry stop
+```
 
-### Accessing the User Interface:
+**Windows:** Run `GatesentrySetup.exe`. The installer registers a Windows service automatically.
 
-Open a modern web browser of your choice.
-Enter the following URL in the address bar: http://localhost:10786
-The Gatesentry User Interface will load, providing access to various functionalities and settings.
+| Port  | Purpose                        |
+| ----- | ------------------------------ |
+| 10413 | Explicit proxy                 |
+| 10414 | Transparent proxy (optional)   |
+| 10786 | Web admin panel                |
+| 53    | DNS server                     |
+| 80    | Block page server              |
 
-### Default Login Credentials:
+### Default credentials
 
-    Username: admin
-    Password: admin
+```
+Username: admin
+Password: admin
+```
 
-Use the above credentials to log in to the Gatesentry system for the first time. For security reasons, it is highly recommended to change the default password after the initial login.
+Change the password after first login.
 
-Note:Ensure your system’s firewall and security settings allow traffic on ports 10413 and 10786 to ensure seamless operation and access to the Gatesentry server and user interface.
+### DNS
 
-This guide now specifically refers to the Gatesentry software and uses the `gatesentry-{platform}` filename convention for clarity.
-
-### DNS Information
-
-Gatesentry ships with a built in DNS server which can be used to block domains.  
-The resolver used for forwarding requests can now be configured via the
-application settings ("dns_resolver"). It defaults to Google DNS
-(`8.8.8.8:53`).
+The DNS server blocks domains from external blocklists. Use `dns_resolver` in settings to choose an upstream (defaults to `8.8.8.8:53`).
 
 ## Transparent Proxy Mode (Linux only)
 
