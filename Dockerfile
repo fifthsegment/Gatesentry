@@ -1,31 +1,23 @@
-# =============================================================================
-# GateSentry Runtime Image
-#
-# This is a runtime-only container. The Go binary (with the Svelte UI embedded)
-# is built on the host via build.sh and copied in. No Node, no Go toolchain,
-# no build dependencies — just Alpine + the binary.
-#
-# Build workflow:
-#   ./build.sh          # builds UI + Go binary → bin/gatesentrybin
-#   docker compose up -d --build
-# =============================================================================
+FROM node:20-alpine AS ui-builder
+WORKDIR /src/ui
+COPY ui/package.json ui/yarn.lock ui/.yarnrc.yml ./
+RUN yarn install --frozen-lockfile
+COPY ui/ .
+RUN yarn build
+
+FROM golang:1.24-alpine AS go-builder
+WORKDIR /src
+COPY go.mod go.sum go.work go.work.sum ./
+RUN go mod download
+COPY . .
+COPY --from=ui-builder /src/ui/dist/ /src/application/webserver/frontend/files/
+RUN mv /src/application/webserver/frontend/files/fs/* /src/application/webserver/frontend/files/ 2>/dev/null || true
+RUN CGO_ENABLED=0 go build -o /gatesentry-bin .
 
 FROM alpine:3.20
-
 RUN apk add --no-cache ca-certificates tzdata
-
 WORKDIR /usr/local/gatesentry
-
-# Copy the pre-built binary (built on the host by build.sh)
-COPY bin/gatesentrybin ./gatesentry-bin
-
-# Pre-create the data directory (volume mount point for persistent state)
+COPY --from=go-builder /gatesentry-bin ./
 RUN mkdir -p /usr/local/gatesentry/gatesentry
-
-# Ports:
-#   53     - DNS server (UDP + TCP)
-#   80     - Web admin UI
-#   10413  - HTTP(S) filtering proxy
-EXPOSE 53/udp 53/tcp 80 10413
-
+EXPOSE 53/udp 53/tcp 10413 10786
 ENTRYPOINT ["./gatesentry-bin"]
