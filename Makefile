@@ -32,7 +32,7 @@ coverage:
 	echo "Coverage saved to coverage.txt"
 
 # ── Integration-test coverage (spins up instrumented server) ─────────────
-coverage-int: install-test-deps
+coverage-int: coverage install-test-deps
 	@echo "Building coverage-instrumented binary..."
 	go build -cover -covermode=atomic -coverpkg=./application/...,./gatesentryproxy/... -o $(COV_BIN) .
 	@mkdir -p $(COVDIR)
