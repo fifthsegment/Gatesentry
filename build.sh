@@ -24,5 +24,5 @@ else
     rm -rf bin/*
 fi
 echo "Building GateSentry..."
-CGO_ENABLED=0 go build -ldflags="-s -w" -o bin/ ./...
-echo "Build successful. Executable is in the 'bin' directory."
+go build -ldflags="-s -w" -o bin/gatesentrybin .
+echo "Build successful. Executable is in bin/gatesentrybin"

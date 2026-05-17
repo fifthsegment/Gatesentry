@@ -12,7 +12,8 @@ RUN go mod download
 COPY . .
 COPY --from=ui-builder /src/ui/dist/ /src/application/webserver/frontend/files/
 RUN mv /src/application/webserver/frontend/files/fs/* /src/application/webserver/frontend/files/ 2>/dev/null || true
-RUN CGO_ENABLED=0 go build -o /gatesentry-bin .
+RUN apk add --no-cache libc-dev gcc
+RUN go build -o /gatesentry-bin .
 
 FROM alpine:3.20
 RUN apk add --no-cache ca-certificates tzdata
