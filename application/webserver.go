@@ -33,7 +33,8 @@ func GSwebserverStart(port int) {
 		<-t.C
 	}
 
-	fmt.Println("Webserver is listening on : " + ggport)
+	basePath := GetBasePath()
+	fmt.Println("Webserver is listening on : " + ggport + " (base path: " + basePath + ")")
 	gatesentry2storage.SetBaseDir(GSBASEDIR)
 	R.GSWebSettings = gatesentry2storage.NewMapStore("GSWebSettings", true)
 
@@ -60,6 +61,7 @@ func GSwebserverStart(port int) {
 		strconv.Itoa(GSWebServerPort),
 		R.GSSettings,
 		NewRuleManager(R.GSSettings),
+		basePath,
 	)
 
 	// app.Listen(":" + strconv.Itoa(GSWebServerPort))

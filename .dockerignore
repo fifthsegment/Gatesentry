@@ -1,0 +1,7 @@
+bin/
+docker_root/
+pr-binaries/
+test-binaries/
+*.log
+.git/
+node_modules/

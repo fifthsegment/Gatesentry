@@ -6,6 +6,13 @@ on:
     branches:
       - master
       - main
+    paths:
+      - '**.go'
+      - 'ui/**'
+      - 'Dockerfile'
+      - 'docker-compose.yml'
+      - 'build.sh'
+      - '.dockerignore'
 
 permissions:
   contents: read
@@ -56,11 +63,32 @@ jobs:
           echo "Building Windows amd64..."
           env GOOS=windows GOARCH=amd64 go build -o pr-binaries/gatesentry-windows-amd64.exe
           
-          # Make binaries executable
           chmod +x pr-binaries/gatesentry-*
-          
-          # Get file sizes
           ls -lh pr-binaries/
+
+      - name: Smoke test Linux binary
+        run: |
+          echo "Starting Gatesentry for smoke test..."
+          GATESENTRY_DNS_PORT=10053 ./pr-binaries/gatesentry-linux-amd64 &
+          GS_PID=$!
+          trap "kill $GS_PID 2>/dev/null || true" EXIT
+
+          for i in $(seq 1 20); do
+            if curl -s http://localhost:10786 > /tmp/smoke-response 2>/dev/null; then
+              echo "Server healthy after ${i}s"
+              break
+            fi
+            [ $i -eq 20 ] && echo "Server never became healthy" && kill $GS_PID && exit 1
+            sleep 1
+          done
+
+          if grep -q '<html' /tmp/smoke-response; then
+            echo "UI serves HTML correctly"
+          else
+            echo "UI response missing <html>"
+            head -20 /tmp/smoke-response
+            exit 1
+          fi
 
       - name: Upload binaries as artifacts
         uses: actions/upload-artifact@v4
@@ -114,32 +142,14 @@ jobs:
             
             ### Quick Test (Linux/macOS):
             \`\`\`bash
-            # Extract and make executable
             chmod +x gatesentry-*
-            
-            # Test with low memory settings (good for routers)
-            export GS_MAX_SCAN_SIZE_MB=3
-            export GS_DEBUG_LOGGING=false
-            ./gatesentry-linux-amd64
-            
-            # Or test with custom settings
-            export GS_MAX_SCAN_SIZE_MB=10
             ./gatesentry-linux-amd64
             \`\`\`
             
             ### Quick Test (Windows):
             \`\`\`powershell
-            # Set environment variables
-            $env:GS_MAX_SCAN_SIZE_MB=10
-            $env:GS_DEBUG_LOGGING="false"
             .\\gatesentry-windows-amd64.exe
             \`\`\`
-            
-            ### Configuration Options:
-            - \`GS_MAX_SCAN_SIZE_MB\`: Set max content scan size (1-1000 MB, default: 10)
-            - \`GS_DEBUG_LOGGING\`: Enable verbose logging (true/false, default: false)
-            
-            See [ROUTER_OPTIMIZATION.md](https://github.com/${repo.owner}/${repo.repo}/blob/${context.payload.pull_request.head.ref}/ROUTER_OPTIMIZATION.md) for detailed configuration guide.
             
             ---
             

@@ -1,13 +1,15 @@
-version: '3.8'
 services:
   gatesentry:
-    restart: always
-    image: abdullahi1/gatesentry:latest
-    ports:
-      - "80:80"
-      - "53:53"
-      - "53:53/udp"
-      - "10413:10413"
-      - "10786:10786"
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: gatesentry
+    restart: unless-stopped
+
+    network_mode: host
+
     volumes:
-      - ./docker_root:/usr/local/gatesentry/gatesentry # this is where the config file will be stored
+      - ./docker_root:/usr/local/gatesentry/gatesentry
+
+    environment:
+      - TZ=Asia/Singapore

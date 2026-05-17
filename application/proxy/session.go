@@ -25,9 +25,7 @@ func SetSessionData(ctx *goproxy.ProxyCtx, key string, value interface{}) {
 	sess := ctx.UserData.(*GSPassThru)
 	switch key {
 	case "DONT_TOUCH":
-		// ctx.UserData.DONT_TOUCH = value.(bool);
 		sess.DONT_TOUCH = value.(bool)
-		break
 	}
 }
 
@@ -36,9 +34,7 @@ func GetSessionData(ctx *goproxy.ProxyCtx, key string) interface{} {
 	sess := ctx.UserData.(*GSPassThru)
 	switch key {
 	case "DONT_TOUCH":
-		// ctx.UserData.DONT_TOUCH = value.(bool);
 		return sess.DONT_TOUCH
-		break
 	}
 	return nil
 }
