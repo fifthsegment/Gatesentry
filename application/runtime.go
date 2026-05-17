@@ -15,12 +15,6 @@ import (
 	gatesentryWebserverTypes "bitbucket.org/abdullah_irfan/gatesentryf/webserver/types"
 	"bitbucket.org/abdullah_irfan/gatesentryproxy"
 
-	// "gatesentry2/internalfiles"
-	// "io/ioutil"
-	// "os"
-	// "runtime"
-	// "syscall"
-	// "path/filepath"
 	"io/ioutil"
 	"os"
 	"runtime"
@@ -140,8 +134,7 @@ func InitTasks() {
 				log.Println("Setting zoneinfo env variable")
 				zz := "C:\\Users\\dell\\Downloads\\gs\\zoneinfo.zip"
 				os.Setenv("ZONEINFO", zz)
-				// os.Setenv("ZONEINFO", GSBASEDIR + "\\zoneinfo.zip" )
-				syscall.Setenv("ZONEINFO", zz)
+							syscall.Setenv("ZONEINFO", zz)
 				log.Println(os.Getenv("ZONEINFO"))
 				log.Println(syscall.Getenv("ZONEINFO"))
 			} else {

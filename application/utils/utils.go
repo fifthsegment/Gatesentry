@@ -1,9 +1,6 @@
 package gatesentry2utils
 
 import (
-	// "bytes"
-
-	// "io/ioutil"
 	"math/rand"
 	"net/http"
 	"strconv"

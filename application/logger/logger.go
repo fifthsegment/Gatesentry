@@ -1,7 +1,6 @@
 package gatesentry2logger
 
 import (
-	// "gatesentry2/utils"
 	"encoding/json"
 	"log"
 	"strings"

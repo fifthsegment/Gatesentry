@@ -7,7 +7,6 @@ import (
 	"log"
 	"os"
 	"runtime"
-	// "strconv"
 )
 
 func GetUpdateBinaryURL(basepoint string) string {

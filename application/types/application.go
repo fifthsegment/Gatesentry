@@ -1,9 +1,5 @@
 package GatesentryTypes
 
-type GSDataUpdater struct {
-	Email string
-	Id    string
-}
 
 type GSConsumptionUpdater struct {
 	Id             string
@@ -13,27 +9,9 @@ type GSConsumptionUpdater struct {
 	Time           string
 }
 
-type GSKeepAliver struct {
-	Id      string
-	Version float32
-}
 
-type GSKeepAliveResponse struct {
-	Ok      bool
-	Error   bool
-	Message string
-}
 
-type GSConsumptionUpdaterResponse struct {
-	Ok             bool
-	Error          bool
-	Message        string
-	AdditionalInfo string
-}
 
-type GSWebServerCommunicator struct {
-	Action string
-}
 
 type GSUser struct {
 	User         string `json:"username"`

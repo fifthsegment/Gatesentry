@@ -153,7 +153,6 @@ func RegisterEndpointsStartServer(
 	basePath string,
 ) {
 
-	// newRouter := mux.NewRouter()
 
 	internalServer := NewGsWeb(basePath)
 

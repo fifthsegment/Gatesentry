@@ -6,11 +6,9 @@ import (
 	"errors"
 	"io"
 	"io/ioutil"
-	// "net/http"
 	"strings"
 	"net/http"
 	"github.com/rogpeppe/go-charset/charset"
-	// "encoding/xml"
 	"github.com/abourget/goproxy"
 )
 
@@ -46,7 +44,6 @@ func (f FuncRespHandler) Handle(resp *http.Response, ctx *goproxy.ProxyCtx) *htt
 // 	"text/json")
 
 func HandleBody(ctx *goproxy.ProxyCtx){
-	// HandleString()
 }
 
 // HandleString will recieve a function that filters a string, and will convert the
