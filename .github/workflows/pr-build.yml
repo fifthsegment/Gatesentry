@@ -56,11 +56,32 @@ jobs:
           echo "Building Windows amd64..."
           env GOOS=windows GOARCH=amd64 go build -o pr-binaries/gatesentry-windows-amd64.exe
           
-          # Make binaries executable
           chmod +x pr-binaries/gatesentry-*
-          
-          # Get file sizes
           ls -lh pr-binaries/
+
+      - name: Smoke test Linux binary
+        run: |
+          echo "Starting Gatesentry for smoke test..."
+          GATESENTRY_DNS_PORT=10053 ./pr-binaries/gatesentry-linux-amd64 &
+          GS_PID=$!
+          trap "kill $GS_PID 2>/dev/null || true" EXIT
+
+          for i in $(seq 1 20); do
+            if curl -s http://localhost:10786 > /tmp/smoke-response 2>/dev/null; then
+              echo "Server healthy after ${i}s"
+              break
+            fi
+            [ $i -eq 20 ] && echo "Server never became healthy" && kill $GS_PID && exit 1
+            sleep 1
+          done
+
+          if grep -q '<html' /tmp/smoke-response; then
+            echo "UI serves HTML correctly"
+          else
+            echo "UI response missing <html>"
+            head -20 /tmp/smoke-response
+            exit 1
+          fi
 
       - name: Upload binaries as artifacts
         uses: actions/upload-artifact@v4
