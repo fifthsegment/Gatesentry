@@ -1,0 +1,13 @@
+# GitGuardian false-positive suppression
+# These are public/default dev credentials for testing, not real secrets.
+paths-ignore:
+  - "tests/**"
+  - "**/*_test.go"
+  - "main_test.go"
+  - "setup_test.go"
+
+matches-ignore:
+  - name: "admin"
+    match: "admin"
+  - name: "test password"
+    match: "inttestpass123"
