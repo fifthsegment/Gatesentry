@@ -25,7 +25,7 @@ import (
 )
 
 var IProxy *GSProxy
-var MaxContentScanSize int64 = 1e7 // Reduced from 100MB to 10MB for low-spec hardware
+var MaxContentScanSize int64 = 2e6 // 2MB default — Path C (HTML-only) doesn't need more
 var DebugLogging = false           // Disable verbose logging for performance
 
 // AdminPort is the GateSentry admin UI port. Proxy requests targeting this port
@@ -186,7 +186,7 @@ func (p *GSProxy) RunAuthHandler(authheader string) bool {
 
 func InitProxy() {
 	CreateBlockedImageBytes()
-	MaxContentScanSize = 1e7 // 10MB for low-spec hardware
+	MaxContentScanSize = 2e6 // 2MB default
 }
 
 type ProxyHandler struct {

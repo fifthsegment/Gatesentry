@@ -1,5 +1,17 @@
 # CHANGELOG
 
+## v1.23.0 (17 May 2026)
+
+- Streaming response pipeline: 3-path content router (stream / peek+stream / buffer+scan)
+- Response header sanitization: Content-Length validation, hop-by-hop removal, X-Content-Type-Options
+- SSRF hardening: DNS wiring through GateSentry resolver, loop detection, admin port isolation
+- MaxContentScanSize reduced to 2MB default, tunable via GS_MAX_SCAN_SIZE_MB env var
+
+## v1.22.0 (17 May 2026)
+
+- Fixed static file serving: restored CSS/JS assets, added MIME types, fixed vite.svg path
+- Restored block page CSS and JS deleted by frontend rebuild
+
 ## v1.21.0 (17 May 2026)
 
 - Device discovery service: mDNS/Bonjour browser, passive DNS observation, RFC 2136 DDNS UPDATE support
