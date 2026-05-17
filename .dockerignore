@@ -1,6 +1,7 @@
-# Only bin/ and Dockerfile are needed for the Docker build context.
-# Exclude everything else.
-
-*
-!bin/gatesentrybin
-!Dockerfile
+bin/
+docker_root/
+pr-binaries/
+test-binaries/
+*.log
+.git/
+node_modules/
