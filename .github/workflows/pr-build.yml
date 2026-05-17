@@ -135,32 +135,14 @@ jobs:
             
             ### Quick Test (Linux/macOS):
             \`\`\`bash
-            # Extract and make executable
             chmod +x gatesentry-*
-            
-            # Test with low memory settings (good for routers)
-            export GS_MAX_SCAN_SIZE_MB=3
-            export GS_DEBUG_LOGGING=false
-            ./gatesentry-linux-amd64
-            
-            # Or test with custom settings
-            export GS_MAX_SCAN_SIZE_MB=10
             ./gatesentry-linux-amd64
             \`\`\`
             
             ### Quick Test (Windows):
             \`\`\`powershell
-            # Set environment variables
-            $env:GS_MAX_SCAN_SIZE_MB=10
-            $env:GS_DEBUG_LOGGING="false"
             .\\gatesentry-windows-amd64.exe
             \`\`\`
-            
-            ### Configuration Options:
-            - \`GS_MAX_SCAN_SIZE_MB\`: Set max content scan size (1-1000 MB, default: 10)
-            - \`GS_DEBUG_LOGGING\`: Enable verbose logging (true/false, default: false)
-            
-            See [ROUTER_OPTIMIZATION.md](https://github.com/${repo.owner}/${repo.repo}/blob/${context.payload.pull_request.head.ref}/ROUTER_OPTIMIZATION.md) for detailed configuration guide.
             
             ---
             
