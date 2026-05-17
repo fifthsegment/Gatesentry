@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## v1.23.0 (17 May 2026)
+
+- WebSocket proxy support: ws:// connections now properly proxied via TCP tunnel
+- (was rejecting all WebSocket connections with "not supported" error)
+
+## v1.22.0 (17 May 2026)
+
+- Fixed static file serving: restored CSS/JS assets, added MIME types, fixed vite.svg path
+- Restored block page CSS and JS deleted by frontend rebuild
+
 ## v1.21.0 (17 May 2026)
 
 - Device discovery service: mDNS/Bonjour browser, passive DNS observation, RFC 2136 DDNS UPDATE support
