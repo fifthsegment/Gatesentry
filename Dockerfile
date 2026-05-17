@@ -8,9 +8,8 @@ RUN yarn build
 FROM golang:1.24-alpine AS go-builder
 RUN apk add --no-cache bash
 WORKDIR /src
-COPY go.mod go.sum go.work go.work.sum ./
-RUN go mod download
 COPY . .
+RUN go mod download
 COPY --from=ui-builder /src/ui/dist/ /src/application/webserver/frontend/files/
 RUN mv /src/application/webserver/frontend/files/fs/* /src/application/webserver/frontend/files/ 2>/dev/null || true
 RUN OUTPUT=/gatesentry-bin ./build.sh --no-ui
