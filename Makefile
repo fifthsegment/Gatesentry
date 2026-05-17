@@ -28,6 +28,7 @@ run: build
 coverage:
 	@echo "Collecting unit-test coverage..."
 	@go test -coverprofile=coverage.txt -covermode=atomic ./application/... ./gatesentryproxy/... 2>/dev/null; \
+	sed -i 's|bitbucket.org/abdullah_irfan/gatesentryf/|application/|g; s|bitbucket.org/abdullah_irfan/gatesentryproxy/|gatestentryproxy/|g' coverage.txt; \
 	echo "Coverage saved to coverage.txt"
 
 # ── Integration-test coverage (spins up instrumented server) ─────────────
@@ -59,6 +60,7 @@ coverage-int: install-test-deps
 	sleep 2; \
 	echo "Converting coverage to profile..."; \
 	go tool covdata textfmt -i=$(COVDIR) -o=intcoverage.txt 2>/dev/null; \
+	sed -i 's|bitbucket.org/abdullah_irfan/gatesentryf/|application/|g; s|bitbucket.org/abdullah_irfan/gatesentryproxy/|gatestentryproxy/|g' intcoverage.txt 2>/dev/null || true; \
 	echo "Merging unit + integration coverage..."; \
 	grep -v "^mode:" intcoverage.txt >> coverage.txt 2>/dev/null || true; \
 	rm -f /tmp/gatesentry.pid intcoverage.txt; \
