@@ -1,4 +1,4 @@
-.PHONY: test test-go test-python build run clean-test install-test-deps
+.PHONY: test test-go test-python build run clean-test install-test-deps coverage
 
 PYTHON ?= python3
 PIP ?= pip3
@@ -47,9 +47,14 @@ _stop-server:
 	@kill `cat /tmp/gatesentry.pid` 2>/dev/null || true
 	@rm -f /tmp/gatesentry.pid
 
+coverage:
+	@echo "Collecting Go coverage across all packages..."
+	@go test -coverprofile=coverage.txt -covermode=atomic ./application/... ./gatesentryproxy/... 2>/dev/null; \
+	echo "Coverage collected."
+
 test-go: _start-server
 	@echo "Running Go integration tests..."
-	@GODEBUG=gotestcache=off go test -v -timeout 5m ./tests/... -coverprofile=coverage.txt -covermode=atomic; \
+	@GODEBUG=gotestcache=off go test -v -timeout 5m ./tests/...; \
 	GO_RESULT=$$?; \
 	$(MAKE) _stop-server; \
 	if [ $$GO_RESULT -ne 0 ]; then echo "Go tests failed"; exit 1; fi
@@ -61,10 +66,10 @@ test-python: install-test-deps _start-server
 	$(MAKE) _stop-server; \
 	if [ $$PY_RESULT -ne 0 ]; then echo "Python tests failed"; exit 1; fi
 
-# Run all integration tests with server
-test: install-test-deps _start-server
+# Run all integration tests with server + collect Go coverage
+test: coverage install-test-deps _start-server
 	@echo "Running Go integration tests..."
-	@GODEBUG=gotestcache=off go test -v -timeout 5m ./tests/... -coverprofile=coverage.txt -covermode=atomic; \
+	@GODEBUG=gotestcache=off go test -v -timeout 5m ./tests/...; \
 	GO_RESULT=$$?; \
 	if [ $$GO_RESULT -ne 0 ]; then \
 		echo "Go tests failed — aborting"; \
