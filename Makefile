@@ -105,19 +105,8 @@ test-python: install-test-deps _start-server
 	$(MAKE) _stop-server; \
 	if [ $$PY_RESULT -ne 0 ]; then echo "Python tests failed"; exit 1; fi
 
-# Full test: unit coverage + integration tests with coverage
-test: coverage install-test-deps _start-server
-	@echo "Running Go integration tests..."
-	@GODEBUG=gotestcache=off go test -v -timeout 5m ./tests/...; \
-	GO_RESULT=$$?; \
-	if [ $$GO_RESULT -ne 0 ]; then \
-		echo "Go tests failed — aborting"; \
-		$(MAKE) _stop-server; \
-		exit 1; \
-	fi
+# Full test: unit coverage + instrumented integration coverage
+test: coverage-int
 	@echo ""
-	@echo "Running Python integration tests..."
-	@$(PYTHON) -m pytest tests/integration_test.py -v --tb=short --color=yes; \
-	PY_RESULT=$$?; \
-	$(MAKE) _stop-server; \
-	if [ $$PY_RESULT -ne 0 ]; then echo "Python tests failed"; exit 1; fi
+	@echo "Total coverage:"
+	@go tool cover -func=coverage.txt | tail -1
