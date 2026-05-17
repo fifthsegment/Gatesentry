@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"mime"
 	"net/http"
 	"strings"
 	"time"
@@ -152,7 +153,6 @@ func RegisterEndpointsStartServer(
 	ruleManager gatesentryWebserverEndpoints.RuleManagerInterface,
 	basePath string,
 ) {
-
 
 	internalServer := NewGsWeb(basePath)
 
@@ -401,18 +401,19 @@ func RegisterEndpointsStartServer(
 	})
 	log.Println("Device API endpoints registered")
 
+	// Register MIME types for static file serving
+	mime.AddExtensionType(".css", "text/css")
+	mime.AddExtensionType(".js", "application/javascript")
+	mime.AddExtensionType(".svg", "image/svg+xml")
+
 	// Serve static assets from the embedded files/fs/ directory.
 	// GetFSHandler() returns fs.Sub(build, "files"), so files live at fs/bundle.js etc.
 	// We only strip the basePath prefix (not /fs), so the remaining path /fs/bundle.js
 	// correctly maps to fs/bundle.js in the embedded filesystem.
 	fsHandler := http.FileServer(gatesentryWebserverFrontend.GetFSHandler())
-	if basePath != "/" {
-		internalServer.sub.PathPrefix("/fs/").Handler(
-			http.StripPrefix(basePath, fsHandler),
-		)
-	} else {
-		internalServer.sub.PathPrefix("/fs/").Handler(fsHandler)
-	}
+	internalServer.sub.PathPrefix("/fs/").Handler(
+		http.StripPrefix("/fs/", fsHandler),
+	)
 
 	baseIndexHandler := makeIndexHandler(basePath)
 	internalServer.Get("/", baseIndexHandler)
