@@ -3,17 +3,13 @@ name: Build a release
 on:
   push:
     branches:
+      - master
+      - main
       - release-*
-
-# on:
-#   workflow_run:
-#     workflows: ["Bump Version"] # Name of the workflow in bump-version.yml
-#     types:
-#       - completed
-#
 
 permissions:
   contents: write
+  packages: write
 
 jobs:
   build:
@@ -73,3 +69,58 @@ jobs:
             gatesentry-windows.exe
             gatesentry-linux-arm64
             GatesentrySetup.exe
+
+  docker:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: gatesentry:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Start container and smoke test
+        run: |
+          docker run -d --rm --name gatesentry-test \
+            -p 10786:10786 \
+            -p 10413:10413 \
+            -e GATESENTRY_DNS_PORT=10053 \
+            gatesentry:latest
+
+          echo "Waiting for server..."
+          for i in $(seq 1 20); do
+            if curl -s http://localhost:10786 > /tmp/smoke-response 2>/dev/null; then
+              echo "Server healthy after ${i}s"
+              break
+            fi
+            [ $i -eq 20 ] && echo "Server never became healthy" && docker logs gatesentry-test && exit 1
+            sleep 1
+          done
+
+          if grep -q '<html' /tmp/smoke-response; then
+            echo "Docker image serves UI correctly"
+          else
+            echo "UI response missing <html>"
+            head -20 /tmp/smoke-response
+            exit 1
+          fi
+
+          if curl -s --proxy http://localhost:10413 http://example.com -o /dev/null -w "%{http_code}" | grep -q 200; then
+            echo "Proxy port 10413 working"
+          else
+            echo "Proxy test failed"
+          fi
+
+      - name: Cleanup
+        if: always()
+        run: docker stop gatesentry-test 2>/dev/null || true
