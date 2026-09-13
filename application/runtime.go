@@ -18,6 +18,7 @@ import (
 	"io/ioutil"
 	"os"
 	"runtime"
+	"sync"
 	"syscall"
 
 	gatesentry2filters "bitbucket.org/abdullah_irfan/gatesentryf/filters"
@@ -71,6 +72,7 @@ type GSRuntime struct {
 	Logger                      *gatesentry2logger.Log
 	Proxy                       *gatesentry2proxy.GSProxy
 	AuthUsers                   []GatesentryTypes.GSUser
+	usersMu                     sync.RWMutex
 	FailedConsumptionUpdates    int
 	GSUserDataSaverRunning      bool
 	GSKeepSentryAliveRunning    bool
@@ -111,13 +113,44 @@ func GetBasePath() string {
 	return GSBASEPATH
 }
 
-func (R *GSRuntime) GSWasUpdated() {
+func logPersistenceError(operation string, err error) {
+	if err != nil {
+		log.Printf("Storage error while attempting to %s: %v", operation, err)
+	}
+}
+
+// readKnownGoodSetting reports refresh failures while retaining the store's
+// synchronized last-known-good value. fallback is used only when no snapshot
+// value exists, and should be conservative for policy and credential reads.
+func (R *GSRuntime) readKnownGoodSetting(key, fallback string) string {
+	value, err := R.GSSettings.GetE(key)
+	if err != nil {
+		log.Printf("Storage error while reading setting %q; retaining known-good value: %v", key, err)
+		if value == "" {
+			return fallback
+		}
+	}
+	return value
+}
+
+func (R *GSRuntime) GSWasUpdated() error {
 	t := time.Now()
 	ts := t.String()
-	prevversions := R.GSUpdateLog.Get("versions")
-	R.GSUpdateLog.Update("versions", prevversions+R.GSSettings.Get("version")+" - "+R.GetApplicationVersion()+" on = "+ts+",")
+	version, err := R.GSSettings.GetE("version")
+	if err != nil {
+		return fmt.Errorf("read application version: %w", err)
+	}
+	versionRecord := version + " - " + R.GetApplicationVersion() + " on = " + ts + ","
+	if err := R.GSUpdateLog.UpdateValue("versions", func(previous string) (string, error) {
+		return previous + versionRecord, nil
+	}); err != nil {
+		return fmt.Errorf("record application version: %w", err)
+	}
 	log.Println("GateSentry was updated.")
-	R.GSSettings.Update("version", R.GetApplicationVersion())
+	if err := R.GSSettings.Update("version", R.GetApplicationVersion()); err != nil {
+		return fmt.Errorf("update application version: %w", err)
+	}
+	return nil
 }
 
 func (R *GSRuntime) UpdateConsumption(consumedBytes int64) {
@@ -146,7 +179,7 @@ func InitTasks() {
 	}
 }
 
-func (R *GSRuntime) Init() {
+func (R *GSRuntime) Init() error {
 	startuptext := ` +-+-+-+-+-+-+-+-+-+-+
     |G|a|t|e|S|e|n|t|r|y|
     +-+-+-+-+-+-+-+-+-+-+`
@@ -180,20 +213,35 @@ func (R *GSRuntime) Init() {
 	R.AuthUsers = []GatesentryTypes.GSUser{}
 	gatesentry2storage.SetBaseDir(GSBASEDIR)
 	log.Println("Making a new MapStore for GSSettings")
-	R.GSSettings = gatesentry2storage.NewMapStore("GSSettings", true)
-	R.GSUpdateLog = gatesentry2storage.NewMapStore("GSUpdateLog", false)
-	R.GSSettings.SetDefault("strictness", "2000")
-	R.GSSettings.SetDefault("general_settings", "{\"log_location\": \"./log.db\", \"admin_password\": \"admin\", \"admin_username\": \"admin\" }")
-	R.GSSettings.SetDefault("blocktimes", "{\"fromhours\":0,\"tohours\":0,\"fromminutes\":58,\"tominutes\":59}")
-	R.GSSettings.SetDefault("authusers", "[{\"username\": \"guest\", \"password\": \"\",\"Base64String\":\"Z3Vlc3Q6cGFzc3dvcmQ=\", \"allowaccess\": true, \"dataconsumed\": 0 }]")
+	var err error
+	R.GSSettings, err = gatesentry2storage.OpenMapStore("GSSettings", true)
+	if err != nil {
+		return fmt.Errorf("open settings storage: %w", err)
+	}
+	R.GSUpdateLog, err = gatesentry2storage.OpenMapStore("GSUpdateLog", false)
+	if err != nil {
+		return fmt.Errorf("open update-log storage: %w", err)
+	}
+	var initializationErr error
+	setDefault := func(key, value string) {
+		if initializationErr == nil {
+			if err := R.GSSettings.SetDefault(key, value); err != nil {
+				initializationErr = fmt.Errorf("set default %q: %w", key, err)
+			}
+		}
+	}
+	setDefault("strictness", "2000")
+	setDefault("general_settings", "{\"log_location\": \"./log.db\", \"admin_password\": \"admin\", \"admin_username\": \"admin\" }")
+	setDefault("blocktimes", "{\"fromhours\":0,\"tohours\":0,\"fromminutes\":58,\"tominutes\":59}")
+	setDefault("authusers", "[{\"username\": \"guest\", \"password\": \"\",\"Base64String\":\"Z3Vlc3Q6cGFzc3dvcmQ=\", \"allowaccess\": true, \"dataconsumed\": 0 }]")
 	// R.GSSettings.Update("authusers", "[{\"user\": \"guest\", \"pass\": \"guest\", \"allowaccess\": true, \"dataconsumed\": 0 }]" );
-	R.GSSettings.SetDefault("EnableUsers", "false")
-	R.GSSettings.SetDefault("NonAlives", "0")
-	R.GSSettings.SetDefault("Noheartbeat", "0")
-	R.GSSettings.SetDefault("Noheartbeatmessage", "")
-	R.GSSettings.SetDefault("timezone", "Europe/Oslo")
-	R.GSSettings.SetDefault("enable_https_filtering", "false")
-	R.GSSettings.SetDefault("enable_dns_server", "true")
+	setDefault("EnableUsers", "false")
+	setDefault("NonAlives", "0")
+	setDefault("Noheartbeat", "0")
+	setDefault("Noheartbeatmessage", "")
+	setDefault("timezone", "Europe/Oslo")
+	setDefault("enable_https_filtering", "false")
+	setDefault("enable_dns_server", "true")
 	// Use environment variable for DNS resolver if set, otherwise use default
 	// Environment variable takes precedence over stored settings to allow
 	// containerized/deployment-time configuration
@@ -208,35 +256,61 @@ func (R *GSRuntime) Init() {
 			dnsResolverValue = net.JoinHostPort(envResolver, "53")
 		}
 		log.Printf("[DNS] Using resolver from environment (overrides settings): %s", dnsResolverValue)
-		R.GSSettings.Update("dns_resolver", dnsResolverValue)
+		if err := R.GSSettings.Update("dns_resolver", dnsResolverValue); err != nil {
+			initializationErr = fmt.Errorf("update DNS resolver: %w", err)
+		}
 	} else {
-		R.GSSettings.SetDefault("dns_resolver", "8.8.8.8:53")
+		setDefault("dns_resolver", "8.8.8.8:53")
 	}
-	R.GSSettings.SetDefault("idemail", "")
-	R.GSSettings.SetDefault("enable_ai_image_filtering", "false")
-	R.GSSettings.SetDefault("ai_image_filtering_mode", "disabled")
-	R.GSSettings.SetDefault("ai_grok_api_key", "")
-	R.GSSettings.SetDefault("ai_openai_api_key", "")
-	R.GSSettings.SetDefault("ai_local_llm_url", "")
-	R.GSSettings.SetDefault("ai_local_llm_model", "")
-	R.GSSettings.SetDefault("ai_grok_model", "")
-	R.GSSettings.SetDefault("ai_openai_model", "")
-	R.GSSettings.SetDefault("ai_scanner_url", "")
-	if seeded := gatesentry2filters.ApplyAIEnvSeeds(R.GSSettings.Get, R.GSSettings.Update, os.Getenv); len(seeded) > 0 {
+	setDefault("idemail", "")
+	setDefault("enable_ai_image_filtering", "false")
+	setDefault("ai_image_filtering_mode", "disabled")
+	setDefault("ai_grok_api_key", "")
+	setDefault("ai_openai_api_key", "")
+	setDefault("ai_local_llm_url", "")
+	setDefault("ai_local_llm_model", "")
+	setDefault("ai_grok_model", "")
+	setDefault("ai_openai_model", "")
+	setDefault("ai_scanner_url", "")
+	setAISetting := func(key, value string) {
+		if err := R.GSSettings.Update(key, value); err != nil {
+			initializationErr = fmt.Errorf("persist AI environment setting %q: %w", key, err)
+		}
+	}
+	readAISetting := func(key string) string {
+		value, err := R.GSSettings.GetE(key)
+		if err != nil && initializationErr == nil {
+			initializationErr = fmt.Errorf("read AI setting %q: %w", key, err)
+		}
+		return value
+	}
+	if seeded := gatesentry2filters.ApplyAIEnvSeeds(readAISetting, setAISetting, os.Getenv); len(seeded) > 0 {
 		log.Printf("[AI] seeded settings from environment: %s", strings.Join(seeded, ", "))
 	}
 
-	R.GSSettings.SetDefault("version", R.GetApplicationVersion())
-	R.GSUpdateLog.SetDefault("versions", "")
-
-	log.Println("Version from file = " + R.GSSettings.Get("version"))
-	if R.GetApplicationVersion() != R.GSSettings.Get("version") {
-		R.GSWasUpdated()
-	} else {
-
-		R.GSSettings.Update("version", R.GetApplicationVersion())
+	setDefault("version", R.GetApplicationVersion())
+	if err := R.GSUpdateLog.SetDefault("versions", ""); err != nil {
+		return fmt.Errorf("set update-log default: %w", err)
 	}
-	R.GSSettings.SetDefault("capem", `-----BEGIN CERTIFICATE-----
+	if initializationErr != nil {
+		return initializationErr
+	}
+
+	storedVersion, err := R.GSSettings.GetE("version")
+	if err != nil {
+		return fmt.Errorf("read application version: %w", err)
+	}
+	log.Println("Version from file = " + storedVersion)
+	if R.GetApplicationVersion() != storedVersion {
+		if err := R.GSWasUpdated(); err != nil {
+			return err
+		}
+	} else {
+		if err := R.GSSettings.Update("version", R.GetApplicationVersion()); err != nil {
+			return fmt.Errorf("update application version: %w", err)
+		}
+	}
+	setDefault("capem", `-----BEGIN CERTIFICATE-----
 MIIFFzCCAv+gAwIBAgIURmnEBuLr2cgTyvzT8Wq768X41z0wDQYJKoZIhvcNAQEL
 BQAwGzEZMBcGA1UEAwwQR2F0ZVNlbnRyeUZpbHRlcjAeFw0yNTAyMjUxMTU2MDRa
 Fw0yNzAzMTcxMTU2MDRaMBsxGTAXBgNVBAMMEEdhdGVTZW50cnlGaWx0ZXIwggIi
@@ -266,7 +340,7 @@ ILnnVNXSvvo5UuIXr9RyLQmkFtIAVvOBEqG6ua7CXgQifZnmVzvOf7DiQ1DKpT5D
 HOku5ntRzKZF0EaKMndLxE7ui+NJOtz4VN8H1qmnHgejFNJRANQQmkLToB1wRQ+6
 mMYOORHnp9ly0p8=
 -----END CERTIFICATE-----`)
-	R.GSSettings.SetDefault("keypem", `-----BEGIN PRIVATE KEY-----
+	setDefault("keypem", `-----BEGIN PRIVATE KEY-----
 MIIJRAIBADANBgkqhkiG9w0BAQEFAASCCS4wggkqAgEAAoICAQDBBzEQSOgshnS2
 BKyKXvRCv9Sk/2QJYJz6/AML6C37vcEtRx8tQkXJoEXnxIfhGSK15Xm5zdShTzyC
 2OXsie6KZspo/+K7Cv07C0zVVbrDmE3rjoiNYgEKlJtbrHYtEPsQwSd0TKhKQW+t
@@ -318,7 +392,7 @@ tp1yYLXK/oVm0vyyo7Zyjbvpj3MFnR4g9s6HWiOSslBsSrsP+Jn9fknvsXFWajor
 0pNijYOQe4i6JxOz9WRlOd2WvkSDQpE6sBSwEQlR8Sz2muXQrotjFKfLyrKWTK3s
 llHxr1oRgfKfh/NFn7AGoS8sGIRVE80P
 -----END PRIVATE KEY-----`)
-	R.GSSettings.SetDefault("dns_custom_entries", `[
+	setDefault("dns_custom_entries", `[
 		"https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts",
 		"https://raw.githubusercontent.com/anudeepND/blacklist/master/adservers.txt",
 		"https://v.firebog.net/hosts/AdguardDNS.txt",
@@ -334,10 +408,18 @@ llHxr1oRgfKfh/NFn7AGoS8sGIRVE80P
 		"https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/popupads-onlydomains.txt",
 		"https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/tif-onlydomains.txt"
 	]`)
+	if initializationErr != nil {
+		return initializationErr
+	}
 
-	general_settings := R.GSSettings.Get("general_settings")
+	general_settings, err := R.GSSettings.GetE("general_settings")
+	if err != nil {
+		return fmt.Errorf("read general settings: %w", err)
+	}
 	general_settings_parsed := gatesentryWebserverTypes.GSGeneral_Settings{}
-	json.Unmarshal([]byte(general_settings), &general_settings_parsed)
+	if err := json.Unmarshal([]byte(general_settings), &general_settings_parsed); err != nil {
+		return fmt.Errorf("parse general settings: %w", err)
+	}
 
 	log_location := general_settings_parsed.LogLocation
 	log_location = strings.Replace(log_location, "./", "", -1)
@@ -352,10 +434,16 @@ llHxr1oRgfKfh/NFn7AGoS8sGIRVE80P
 	}
 
 	for i := 0; i < len(R.Filters); i++ {
-		// log.Println( R.GSSettings.GetInt("strictness") )
-		R.Filters[i].Strictness = R.GSSettings.GetInt("strictness")
+		// log.Println( R.GSSettings.GetIntE("strictness") )
+		strictness, err := R.GSSettings.GetIntE("strictness")
+		if err != nil {
+			return fmt.Errorf("read strictness setting: %w", err)
+		}
+		R.Filters[i].Strictness = strictness
 	}
-	R.LoadUsers()
+	if err := R.LoadUsers(); err != nil {
+		return err
+	}
 	//
 	R.GSUserRunDataSaver()
 
@@ -368,10 +456,12 @@ llHxr1oRgfKfh/NFn7AGoS8sGIRVE80P
 	 */
 	ConsumptionUpdater()
 
-	R.ReloadCertificate()
+	if err := R.ReloadCertificate(); err != nil {
+		return err
+	}
 
 	go func() {
-		dnsEnabled := R.GSSettings.Get("enable_dns_server")
+		dnsEnabled := R.readKnownGoodSetting("enable_dns_server", "false")
 		log.Println("DNS server setting = " + dnsEnabled)
 		if dnsEnabled == "true" {
 			R.DNSServerChannel <- 1
@@ -379,6 +469,7 @@ llHxr1oRgfKfh/NFn7AGoS8sGIRVE80P
 			R.DNSServerChannel <- 2
 		}
 	}()
+	return nil
 }
 
 func (R *GSRuntime) GetInstallationId() string {
@@ -393,11 +484,20 @@ func (R *GSRuntime) GetApplicationVersion() string {
 	return GetApplicationVersion()
 }
 
-func (R *GSRuntime) ReloadCertificate() {
-	capembytes := []byte(R.GSSettings.Get("capem"))
-	keypembytes := []byte(R.GSSettings.Get("keypem"))
+func (R *GSRuntime) ReloadCertificate() error {
+	capem, err := R.GSSettings.GetE("capem")
+	if err != nil {
+		return fmt.Errorf("read CA certificate: %w", err)
+	}
+	keypem, err := R.GSSettings.GetE("keypem")
+	if err != nil {
+		return fmt.Errorf("read CA private key: %w", err)
+	}
+	capembytes := []byte(capem)
+	keypembytes := []byte(keypem)
 
 	gatesentryproxy.InitWithDataCerts(capembytes, keypembytes)
+	return nil
 }
 
 func (R *GSRuntime) GetTotalConsumptionData() (string, string) {
@@ -410,13 +510,13 @@ func (R *GSRuntime) GetTotalConsumptionData() (string, string) {
 }
 
 func (R *GSRuntime) OnHeartbeat() {
-	R.GSSettings.Update("Noheartbeat", "0")
-	R.GSSettings.Update("Noheartbeatmessage", "")
+	logPersistenceError("clear heartbeat status", R.GSSettings.Update("Noheartbeat", "0"))
+	logPersistenceError("clear heartbeat message", R.GSSettings.Update("Noheartbeatmessage", ""))
 }
 
 func (R *GSRuntime) OnNoHeartbeat(message string) {
-	R.GSSettings.Update("Noheartbeat", "1")
-	R.GSSettings.Update("Noheartbeatmessage", message)
+	logPersistenceError("set heartbeat status", R.GSSettings.Update("Noheartbeat", "1"))
+	logPersistenceError("set heartbeat message", R.GSSettings.Update("Noheartbeatmessage", message))
 }
 
 func (R *GSRuntime) IsBlackoutModeActive() (bool, string) {
@@ -426,9 +526,9 @@ func (R *GSRuntime) IsBlackoutModeActive() (bool, string) {
 	      return true, "Unable to connect to GateSentry's Main Server.";
 	   }
 	*/
-	active := R.GSSettings.Get("Noheartbeat")
+	active := R.readKnownGoodSetting("Noheartbeat", "1")
 	if active == "1" {
-		message := R.GSSettings.Get("Noheartbeatmessage")
+		message := R.readKnownGoodSetting("Noheartbeatmessage", "Configuration storage unavailable")
 		if message == "EOF" {
 			return true, "Unable to get a Keep Alive from GateSentry's Main Server."
 		}

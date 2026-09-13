@@ -7,7 +7,7 @@ import (
 
 var R *GSRuntime
 
-func Start(webadminport int) *GSRuntime {
+func Start(webadminport int) (*GSRuntime, error) {
 	GSVerString := GetApplicationVersion()
 	fmt.Println("Starting GateSentry v " + GSVerString)
 	// proxy := gatesentry2proxy.StartProxy();
@@ -19,7 +19,9 @@ func Start(webadminport int) *GSRuntime {
 		// Proxy: proxy,
 		// FileContents : make(map[string][]GSFILTERLINE),
 	}
-	R.Init()
+	if err := R.Init(); err != nil {
+		return nil, err
+	}
 	LoadFilters()
 	// RegisterProxyHandlers();
 	fmt.Println("Starting GateSentry webserver on port " + strconv.Itoa(R.WebServerPort))
@@ -27,7 +29,7 @@ func Start(webadminport int) *GSRuntime {
 
 	// proxy.Listen();
 
-	return R
+	return R, nil
 }
 
 func Stop() {

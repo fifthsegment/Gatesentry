@@ -11,31 +11,41 @@ import (
 // create an initializer for above struct
 
 // func (s *SettingsStore) GetAdminPassword() string {
-// 	general_settings := s.Get("general_settings")
+// 	general_settings := s.GetOrDefault("general_settings", "")
 // 	general_settings_parsed := GSGeneral_Settings{}
 // 	json.Unmarshal([]byte(general_settings), &general_settings_parsed)
 // 	return general_settings_parsed.AdminPassword
 // }
 
 // func (s *SettingsStore) GetAdminUser() string {
-// 	general_settings := s.Get("general_settings")
+// 	general_settings := s.GetOrDefault("general_settings", "")
 // 	general_settings_parsed := GSGeneral_Settings{}
 // 	json.Unmarshal([]byte(general_settings), &general_settings_parsed)
 // 	return general_settings_parsed.AdminUser
 // }
 
-func GetAdminUser(s *gatesentry2storage.MapStore) string {
-	general_settings := s.Get("general_settings")
+func GetAdminUser(s *gatesentry2storage.MapStore) (string, error) {
+	general_settings, err := s.GetE("general_settings")
+	if err != nil {
+		return "", err
+	}
 	general_settings_parsed := GSGeneral_Settings{}
-	json.Unmarshal([]byte(general_settings), &general_settings_parsed)
-	return general_settings_parsed.AdminUser
+	if err := json.Unmarshal([]byte(general_settings), &general_settings_parsed); err != nil {
+		return "", err
+	}
+	return general_settings_parsed.AdminUser, nil
 }
 
-func GetAdminPassword(s *gatesentry2storage.MapStore) string {
-	general_settings := s.Get("general_settings")
+func GetAdminPassword(s *gatesentry2storage.MapStore) (string, error) {
+	general_settings, err := s.GetE("general_settings")
+	if err != nil {
+		return "", err
+	}
 	general_settings_parsed := GSGeneral_Settings{}
-	json.Unmarshal([]byte(general_settings), &general_settings_parsed)
-	return general_settings_parsed.AdminPassword
+	if err := json.Unmarshal([]byte(general_settings), &general_settings_parsed); err != nil {
+		return "", err
+	}
+	return general_settings_parsed.AdminPassword, nil
 }
 
 type User struct {

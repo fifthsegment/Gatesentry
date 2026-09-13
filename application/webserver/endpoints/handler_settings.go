@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -13,27 +14,35 @@ import (
 	"github.com/badoux/checkmail"
 )
 
-func GSApiSettingsGET(requestedId string, settings *gatesentry2storage.MapStore) interface{} {
+func GSApiSettingsGET(requestedId string, settings *gatesentry2storage.MapStore) (interface{}, error) {
 	switch requestedId {
 	case "general_settings":
-		value := settings.Get(requestedId)
+		value, err := settings.GetE(requestedId)
+		if err != nil {
+			return nil, err
+		}
 		general_settings_parsed := gatesentryWebserverTypes.GSGeneral_Settings{}
-		json.Unmarshal([]byte(value), &general_settings_parsed)
+		if err := json.Unmarshal([]byte(value), &general_settings_parsed); err != nil {
+			return nil, err
+		}
 		general_settings_parsed.AdminPassword = ""
 		valueJson, err := json.Marshal(general_settings_parsed)
 		if err != nil {
-			value = settings.Get(requestedId)
+			return nil, err
 		} else {
 			value = string(valueJson)
 		}
-		return struct{ Value string }{Value: value}
+		return struct{ Value string }{Value: value}, nil
 	case "blocktimes", "strictness", "timezone", "idemail", "enable_https_filtering", "capem", "keypem", "enable_dns_server", "dns_custom_entries", "ai_scanner_url", "enable_ai_image_filtering", "ai_image_filtering_mode", "ai_grok_api_key", "ai_openai_api_key", "ai_local_llm_url", "ai_local_llm_model", "ai_grok_model", "ai_openai_model", "EnableUsers", "dns_resolver":
-		value := settings.Get(requestedId)
+		value, err := settings.GetE(requestedId)
+		if err != nil {
+			return nil, err
+		}
 		if requestedId == "ai_grok_api_key" || requestedId == "ai_openai_api_key" {
 			return struct {
 				Key        string
 				Configured bool
-			}{Key: requestedId, Configured: strings.TrimSpace(value) != ""}
+			}{Key: requestedId, Configured: strings.TrimSpace(value) != ""}, nil
 		}
 		if requestedId == "ai_image_filtering_mode" && strings.TrimSpace(value) == "" {
 			value = "disabled"
@@ -41,29 +50,36 @@ func GSApiSettingsGET(requestedId string, settings *gatesentry2storage.MapStore)
 		return struct {
 			Key   string
 			Value string
-		}{Key: requestedId, Value: value}
+		}{Key: requestedId, Value: value}, nil
 	case "timenow":
 		t := time.Now()
-		loc, _ := time.LoadLocation(settings.Get("timezone"))
+		timezone, err := settings.GetE("timezone")
+		if err != nil {
+			return nil, err
+		}
+		loc, err := time.LoadLocation(timezone)
+		if err != nil {
+			return nil, err
+		}
 		t = t.In(loc)
 		value := t.Format(time.UnixDate)
 
 		return struct {
 			Key   string
 			Value string
-		}{Key: requestedId, Value: value}
+		}{Key: requestedId, Value: value}, nil
 	}
-	return nil
+	return nil, nil
 }
 
-func GSApiSettingsPOST(requestedId string, settings *gatesentry2storage.MapStore, temp gatesentryWebserverTypes.Datareceiver) interface{} {
+func GSApiSettingsPOST(requestedId string, settings *gatesentry2storage.MapStore, temp gatesentryWebserverTypes.Datareceiver) (interface{}, error) {
 	if requestedId == "ai_image_filtering_mode" {
 		temp.Value = strings.ToLower(strings.TrimSpace(temp.Value))
 		switch temp.Value {
 		case "disabled", "grok", "chatgpt", "local":
 		default:
 			temp.Value = "ERROR: mode must be disabled, grok, chatgpt, or local"
-			return temp
+			return temp, nil
 		}
 	}
 	if requestedId == "ai_local_llm_url" {
@@ -71,7 +87,7 @@ func GSApiSettingsPOST(requestedId string, settings *gatesentry2storage.MapStore
 		u, err := url.Parse(v)
 		if v != "" && (err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https")) {
 			temp.Value = "ERROR: Local LLM URL must be http or https with a host"
-			return temp
+			return temp, nil
 		}
 		temp.Value = v
 	}
@@ -83,27 +99,31 @@ func GSApiSettingsPOST(requestedId string, settings *gatesentry2storage.MapStore
 			temp.Value = "ERROR: Unable to Validate your email"
 			// fmt.Printf("Code: %s, Msg: %s", smtpErr.Code(), smtpErr)
 			// fmt.Fprint(w, "Unable to validate your email address.");
-			return temp
+			return temp, nil
 		}
 	}
 
 	if requestedId == "general_settings" {
 		log.Println("Updating general settings")
-		general_settings_parsed := gatesentryWebserverTypes.GSGeneral_Settings{}
-		json.Unmarshal([]byte(temp.Value), &general_settings_parsed)
-		pwd := general_settings_parsed.AdminPassword
-		if pwd != "" {
-			settings.Update(requestedId, temp.Value)
-		} else {
-			general_settings_parsed.AdminPassword = gatesentryWebserverTypes.GetAdminPassword(settings)
-			// convert general_settings_parsed to json
-			valueJson, err := json.Marshal(general_settings_parsed)
-			if err != nil {
-				log.Fatal("Unable to marshal general settings")
-			} else {
-				//convert valuejSON to string
-				settings.Update(requestedId, string(valueJson))
+		submitted := gatesentryWebserverTypes.GSGeneral_Settings{}
+		if err := json.Unmarshal([]byte(temp.Value), &submitted); err != nil {
+			return nil, err
+		}
+		if err := settings.UpdateValue(requestedId, func(current string) (string, error) {
+			if submitted.AdminPassword == "" {
+				existing := gatesentryWebserverTypes.GSGeneral_Settings{}
+				if err := json.Unmarshal([]byte(current), &existing); err != nil {
+					return "", err
+				}
+				submitted.AdminPassword = existing.AdminPassword
 			}
+			valueJSON, err := json.Marshal(submitted)
+			if err != nil {
+				return "", err
+			}
+			return string(valueJSON), nil
+		}); err != nil {
+			return nil, err
 		}
 	}
 
@@ -118,19 +138,18 @@ func GSApiSettingsPOST(requestedId string, settings *gatesentry2storage.MapStore
 		requestedId == "capem" ||
 		requestedId == "keypem" ||
 		requestedId == "dns_resolver" {
-		settings.Update(requestedId, temp.Value)
+		updates := map[string]string{requestedId: temp.Value}
+		if requestedId == "ai_image_filtering_mode" {
+			updates["enable_ai_image_filtering"] = strconv.FormatBool(temp.Value != "disabled")
+		}
+		if err := settings.UpdateValues(updates); err != nil {
+			return nil, err
+		}
 		if requestedId == "dns_resolver" {
 			gatesentryDnsServer.SetExternalResolver(temp.Value)
-		}
-		if requestedId == "ai_image_filtering_mode" {
-			if temp.Value == "disabled" {
-				settings.Update("enable_ai_image_filtering", "false")
-			} else {
-				settings.Update("enable_ai_image_filtering", "true")
-			}
 		}
 	}
 
 	// fmt.Println( temp );
-	return temp
+	return temp, nil
 }

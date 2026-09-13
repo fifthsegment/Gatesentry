@@ -64,12 +64,15 @@ type program struct {
 func (p *program) Start(s service.Service) error {
 	log.Println("Starting up GateSentry")
 	p.exit = make(chan struct{})
-	// Start should not block. Do the actual work async.
-	go p.run()
-	return nil
+	startup := make(chan error, 1)
+	go p.run(startup)
+	return <-startup
 }
-func (p *program) run() error {
-	RunGateSentry()
+func (p *program) run(startup chan<- error) error {
+	if err := runGateSentry(startup); err != nil {
+		log.Printf("GateSentry stopped with error: %v", err)
+		return err
+	}
 	for {
 		select {
 		case <-p.exit:
@@ -203,7 +206,30 @@ func GetRuntime() *application.GSRuntime {
 	return application.R
 }
 
-func RunGateSentry() {
+func readRuntimeSetting(key, conservativeFallback string) string {
+	value, err := R.GSSettings.GetE(key)
+	if err != nil {
+		log.Printf("Storage error while reading setting %q; retaining known-good value: %v", key, err)
+		if value == "" {
+			return conservativeFallback
+		}
+	}
+	return value
+}
+
+func RunGateSentry() error {
+	return runGateSentry(nil)
+}
+
+func runGateSentry(startup chan<- error) (returnErr error) {
+	startupSignaled := false
+	signalStartup := func(err error) {
+		if startup != nil && !startupSignaled {
+			startup <- err
+			startupSignaled = true
+		}
+	}
+	defer func() { signalStartup(returnErr) }()
 	// Configure optimization settings via environment variables
 	if os.Getenv("GS_DEBUG_LOGGING") == "true" {
 		gatesentryproxy.DebugLogging = true
@@ -235,10 +261,12 @@ func RunGateSentry() {
 
 	webadminport, err := strconv.Atoi(GSWEBADMINPORT)
 	if err != nil {
-		log.Fatal(err)
-		return
+		return fmt.Errorf("parse web admin port: %w", err)
 	}
-	R = application.Start(webadminport)
+	R, err = application.Start(webadminport)
+	if err != nil {
+		return fmt.Errorf("initialize GateSentry: %w", err)
+	}
 	R.BoundAddress = &GS_BOUND_ADDRESS
 
 	application.StartBonjour()
@@ -261,32 +289,32 @@ func RunGateSentry() {
 				gafd.FilterResponseAction = gatesentryproxy.ProxyActionBlockedTextContent
 			}
 		} else {
-			mode := R.GSSettings.Get("ai_image_filtering_mode")
+			mode := readRuntimeSetting("ai_image_filtering_mode", "disabled")
 			if mode == filters.AIModeGrok || mode == filters.AIModeChatGPT || mode == filters.AIModeLocal {
 				model, key, baseURL := "", "", ""
 				switch mode {
 				case filters.AIModeGrok:
-					key, model = R.GSSettings.Get("ai_grok_api_key"), R.GSSettings.Get("ai_grok_model")
+					key, model = readRuntimeSetting("ai_grok_api_key", ""), readRuntimeSetting("ai_grok_model", "")
 				case filters.AIModeChatGPT:
-					key, model = R.GSSettings.Get("ai_openai_api_key"), R.GSSettings.Get("ai_openai_model")
+					key, model = readRuntimeSetting("ai_openai_api_key", ""), readRuntimeSetting("ai_openai_model", "")
 				case filters.AIModeLocal:
-					baseURL, model = R.GSSettings.Get("ai_local_llm_url"), R.GSSettings.Get("ai_local_llm_model")
+					baseURL, model = readRuntimeSetting("ai_local_llm_url", ""), readRuntimeSetting("ai_local_llm_model", "")
 				}
 				verdict, err := filters.ClassifyImage(context.Background(), filters.VisionRequest{Provider: mode, APIKey: key, BaseURL: baseURL, Model: model, ContentType: gafd.ContentType, Image: gafd.Content})
 				if err == nil && verdict.ShouldBlock(50) {
 					gafd.FilterResponseAction = gatesentryproxy.ProxyActionBlockedMediaContent
 					gafd.FilterResponse = []byte(verdict.Reason)
 				}
-			} else if filters.ShouldRunLegacyImageScanner(R.GSSettings.Get("ai_image_filtering_mode"), R.GSSettings.Get("enable_ai_image_filtering"), R.GSSettings.Get("ai_scanner_url")) {
+			} else if filters.ShouldRunLegacyImageScanner(readRuntimeSetting("ai_image_filtering_mode", "disabled"), readRuntimeSetting("enable_ai_image_filtering", "false"), readRuntimeSetting("ai_scanner_url", "")) {
 				// application.RunFilter("images", string(gafd.Content), responder)
-				ai_service_url := R.GSSettings.Get("ai_scanner_url")
+				ai_service_url := readRuntimeSetting("ai_scanner_url", "")
 				filters.FilterImagesAI(gafd, ai_service_url)
 			}
 		}
 	}
 
 	ngp.DoMitm = func(host string) bool {
-		enable_filtering := R.GSSettings.Get("enable_https_filtering")
+		enable_filtering := readRuntimeSetting("enable_https_filtering", "false")
 		if enable_filtering == "true" {
 			responder := &gresponder.GSFilterResponder{Blocked: false}
 			application.RunFilter("url/https_dontbump", host, responder)
@@ -324,9 +352,9 @@ func RunGateSentry() {
 	}
 
 	ngp.TimeAccessHandler = func(gafd *gatesentryproxy.GSTimeAccessFilterData) {
-		blockedtimes := R.GSSettings.Get("blocktimes")
+		blockedtimes := readRuntimeSetting("blocktimes", "")
 		responder := &gresponder.GSFilterResponder{Blocked: false}
-		timezone := R.GSSettings.Get("timezone")
+		timezone := readRuntimeSetting("timezone", "UTC")
 		filters.RunTimeFilter(responder, blockedtimes, timezone)
 		// user := gpt.User
 		if responder.Blocked {
@@ -358,7 +386,7 @@ func RunGateSentry() {
 
 	ngp.IsAuthEnabled = func() bool {
 		// *bytesReceived = ResponseAuthError
-		temp := R.GSSettings.Get("EnableUsers")
+		temp := readRuntimeSetting("EnableUsers", "false")
 		return temp == "true"
 	}
 
@@ -439,11 +467,15 @@ func RunGateSentry() {
 
 	// if portavailable {}
 
-	capembytes := []byte(R.GSSettings.Get("capem"))
-	keypembytes := []byte(R.GSSettings.Get("keypem"))
+	capembytes := []byte(readRuntimeSetting("capem", ""))
+	keypembytes := []byte(readRuntimeSetting("keypem", ""))
 
 	gatesentryproxy.InitWithDataCerts(capembytes, keypembytes)
 	proxyListener, err := net.Listen("tcp", addr)
+	if err != nil {
+		return fmt.Errorf("listen for proxy connections: %w", err)
+	}
+	signalStartup(nil)
 	proxyHandler := gatesentryproxy.ProxyHandler{Iproxy: ngp}
 
 	// ResponseAuthError := []byte(gresponder.BuildGeneralResponsePage([]string{"Your access has been disabled."}, -1))
@@ -467,7 +499,7 @@ func RunGateSentry() {
 	// 	log.Println("Running MITM handler")
 	// 	// log.Println("GPT = ", gpt)
 
-	// 	enable_filtering := R.GSSettings.Get("enable_https_filtering")
+	// 	enable_filtering := R.GSSettings.GetOrDefault("enable_https_filtering", "")
 	// 	log.Println("MITM Handler - enable_https_filtering = " + enable_filtering)
 	// 	if enable_filtering == "true" {
 	// 		rs.Changed = true
@@ -585,7 +617,7 @@ func RunGateSentry() {
 
 	// ngp.RegisterHandler("authenabled", func(bytesReceived *[]byte, rs *gatesentryproxy.GSResponder, gpt *gatesentryproxy.GSProxyPassthru) {
 	// 	*bytesReceived = ResponseAuthError
-	// 	temp := R.GSSettings.Get("EnableUsers")
+	// 	temp := R.GSSettings.GetOrDefault("EnableUsers", "")
 	// 	enableusers := false
 	// 	if temp == "true" {
 	// 		enableusers = true
@@ -603,9 +635,9 @@ func RunGateSentry() {
 	// ngp.RegisterHandler(gatesentryproxy.FILTER_TIME, func(bytesReceived *[]byte, rs *gatesentryproxy.GSResponder, gpt *gatesentryproxy.GSProxyPassthru) {
 	// 	// url := string(*s)
 	// 	rs.Changed = false
-	// 	blockedtimes := R.GSSettings.Get("blocktimes")
+	// 	blockedtimes := R.GSSettings.GetOrDefault("blocktimes", "")
 	// 	responder := &gresponder.GSFilterResponder{Blocked: false}
-	// 	timezone := R.GSSettings.Get("timezone")
+	// 	timezone := R.GSSettings.GetOrDefault("timezone", "")
 	// 	filters.RunTimeFilter(responder, blockedtimes, timezone)
 	// 	// user := gpt.User
 	// 	if responder.Blocked {
@@ -645,7 +677,7 @@ func RunGateSentry() {
 
 	// ngp.RegisterHandler("contentscannerMedia", func(bytesReceived *[]byte, rs *gatesentryproxy.GSResponder, gpt *gatesentryproxy.GSProxyPassthru) {
 	// 	rs.Changed = false
-	// 	if R.GSSettings.Get("enable_ai_image_filtering") == "true" && R.GSSettings.Get("ai_scanner_url") != "" {
+	// 	if R.GSSettings.GetOrDefault("enable_ai_image_filtering", "") == "true" && R.GSSettings.GetOrDefault("ai_scanner_url", "") != "" {
 	// 		// convert bytes to json struct of type ContentScannerInput
 	// 		var contentScannerInput ContentScannerInput
 	// 		err := json.Unmarshal(*bytesReceived, &contentScannerInput)
@@ -687,7 +719,7 @@ func RunGateSentry() {
 	// 			b.Bytes()
 	// 			wr.Close()
 
-	// 			ai_service_url := R.GSSettings.Get("ai_scanner_url")
+	// 			ai_service_url := R.GSSettings.GetOrDefault("ai_scanner_url", "")
 	// 			resp, _ := http.Post(ai_service_url, wr.FormDataContentType(), &b)
 	// 			if resp.StatusCode == http.StatusOK {
 	// 				bytesLength := len(*bytesReceived)
@@ -819,9 +851,10 @@ func RunGateSentry() {
 
 	server := http.Server{Handler: proxyHandler}
 	log.Printf("Starting up...Listening on = %s", addr)
-	err = server.Serve(tcpKeepAliveListener{proxyListener.(*net.TCPListener)})
-	log.Fatal(err)
-
+	if err = server.Serve(tcpKeepAliveListener{proxyListener.(*net.TCPListener)}); err != nil {
+		return err
+	}
+	return nil
 }
 
 func orPanic(err error) {

@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	GatesentryTypes "bitbucket.org/abdullah_irfan/gatesentryf/types"
 	gatesentry2storage "bitbucket.org/abdullah_irfan/gatesentryf/storage"
+	GatesentryTypes "bitbucket.org/abdullah_irfan/gatesentryf/types"
 	gatesentryUtils "bitbucket.org/abdullah_irfan/gatesentryf/utils"
 )
 
@@ -25,14 +25,17 @@ func NewRuleManager(storage *gatesentry2storage.MapStore) *RuleManager {
 
 // GetRules retrieves all rules from storage
 func (rm *RuleManager) GetRules() ([]GatesentryTypes.Rule, error) {
-	rulesJSON := rm.storage.Get("rules")
+	rulesJSON, err := rm.storage.GetE("rules")
+	if err != nil {
+		return nil, err
+	}
 	if rulesJSON == "" {
 		return []GatesentryTypes.Rule{}, nil
 	}
 
 	// Try to unmarshal as RuleList first (new format)
 	var ruleList GatesentryTypes.RuleList
-	err := json.Unmarshal([]byte(rulesJSON), &ruleList)
+	err = json.Unmarshal([]byte(rulesJSON), &ruleList)
 	if err == nil {
 		// Sort by priority (lower number = higher priority)
 		sort.Slice(ruleList.Rules, func(i, j int) bool {
@@ -66,17 +69,34 @@ func (rm *RuleManager) SaveRules(rules []GatesentryTypes.Rule) error {
 		return err
 	}
 
-	rm.storage.Update("rules", string(rulesJSON))
-	return nil
+	return rm.storage.Update("rules", string(rulesJSON))
+}
+
+func decodeRules(rulesJSON string) ([]GatesentryTypes.Rule, error) {
+	if rulesJSON == "" {
+		return []GatesentryTypes.Rule{}, nil
+	}
+	var ruleList GatesentryTypes.RuleList
+	if err := json.Unmarshal([]byte(rulesJSON), &ruleList); err == nil {
+		return ruleList.Rules, nil
+	}
+	var rules []GatesentryTypes.Rule
+	if err := json.Unmarshal([]byte(rulesJSON), &rules); err != nil {
+		return nil, err
+	}
+	return rules, nil
+}
+
+func encodeRules(rules []GatesentryTypes.Rule) (string, error) {
+	b, err := json.Marshal(GatesentryTypes.RuleList{Rules: rules})
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
 }
 
 // AddRule adds a new rule and returns it with generated ID
 func (rm *RuleManager) AddRule(rule GatesentryTypes.Rule) (GatesentryTypes.Rule, error) {
-	rules, err := rm.GetRules()
-	if err != nil {
-		return rule, err
-	}
-
 	// Set metadata
 	now := time.Now().Format(time.RFC3339)
 	rule.CreatedAt = now
@@ -87,47 +107,51 @@ func (rm *RuleManager) AddRule(rule GatesentryTypes.Rule) (GatesentryTypes.Rule,
 		rule.ID = generateRuleID()
 	}
 
-	rules = append(rules, rule)
-	err = rm.SaveRules(rules)
+	err := rm.storage.UpdateValue("rules", func(current string) (string, error) {
+		rules, err := decodeRules(current)
+		if err != nil {
+			return "", err
+		}
+		return encodeRules(append(rules, rule))
+	})
 	return rule, err
 }
 
 // UpdateRule updates an existing rule
 func (rm *RuleManager) UpdateRule(ruleID string, updatedRule GatesentryTypes.Rule) error {
-	rules, err := rm.GetRules()
-	if err != nil {
-		return err
-	}
-
-	for i, rule := range rules {
-		if rule.ID == ruleID {
-			// Preserve creation time
-			updatedRule.CreatedAt = rule.CreatedAt
-			updatedRule.UpdatedAt = time.Now().Format(time.RFC3339)
-			updatedRule.ID = ruleID
-			rules[i] = updatedRule
-			return rm.SaveRules(rules)
+	return rm.storage.UpdateValue("rules", func(current string) (string, error) {
+		rules, err := decodeRules(current)
+		if err != nil {
+			return "", err
 		}
-	}
-
-	return nil
+		for i, rule := range rules {
+			if rule.ID == ruleID {
+				updatedRule.CreatedAt = rule.CreatedAt
+				updatedRule.UpdatedAt = time.Now().Format(time.RFC3339)
+				updatedRule.ID = ruleID
+				rules[i] = updatedRule
+				break
+			}
+		}
+		return encodeRules(rules)
+	})
 }
 
 // DeleteRule removes a rule by ID
 func (rm *RuleManager) DeleteRule(ruleID string) error {
-	rules, err := rm.GetRules()
-	if err != nil {
-		return err
-	}
-
-	filteredRules := []GatesentryTypes.Rule{}
-	for _, rule := range rules {
-		if rule.ID != ruleID {
-			filteredRules = append(filteredRules, rule)
+	return rm.storage.UpdateValue("rules", func(current string) (string, error) {
+		rules, err := decodeRules(current)
+		if err != nil {
+			return "", err
 		}
-	}
-
-	return rm.SaveRules(filteredRules)
+		filteredRules := make([]GatesentryTypes.Rule, 0, len(rules))
+		for _, rule := range rules {
+			if rule.ID != ruleID {
+				filteredRules = append(filteredRules, rule)
+			}
+		}
+		return encodeRules(filteredRules)
+	})
 }
 
 // GetRule retrieves a single rule by ID
@@ -220,14 +244,14 @@ func (rm *RuleManager) MatchRule(domain, user string) GatesentryTypes.RuleMatch 
 
 		match.ShouldMITM = rule.MITMAction == GatesentryTypes.MITMActionEnable
 		match.ShouldBlock = rule.Action == GatesentryTypes.RuleActionBlock
-		
+
 		if match.ShouldMITM {
-			if rule.BlockType == GatesentryTypes.BlockTypeContentType || 
-			   rule.BlockType == GatesentryTypes.BlockTypeBoth {
+			if rule.BlockType == GatesentryTypes.BlockTypeContentType ||
+				rule.BlockType == GatesentryTypes.BlockTypeBoth {
 				match.BlockContentTypes = rule.BlockedContentTypes
 			}
-			if rule.BlockType == GatesentryTypes.BlockTypeURLRegex || 
-			   rule.BlockType == GatesentryTypes.BlockTypeBoth {
+			if rule.BlockType == GatesentryTypes.BlockTypeURLRegex ||
+				rule.BlockType == GatesentryTypes.BlockTypeBoth {
 				match.BlockURLRegexes = rule.URLRegexPatterns
 			}
 		}
@@ -241,14 +265,14 @@ func (rm *RuleManager) MatchRule(domain, user string) GatesentryTypes.RuleMatch 
 // CheckContentTypeBlocked checks if a content type should be blocked based on rule
 func CheckContentTypeBlocked(contentType string, blockedTypes []string) bool {
 	contentType = strings.ToLower(strings.TrimSpace(contentType))
-	
+
 	for _, blocked := range blockedTypes {
 		blocked = strings.ToLower(strings.TrimSpace(blocked))
 		if strings.Contains(contentType, blocked) {
 			return true
 		}
 	}
-	
+
 	return false
 }
 
@@ -264,7 +288,7 @@ func CheckURLPathBlocked(urlPath string, patterns []string) bool {
 			return true
 		}
 	}
-	
+
 	return false
 }
 

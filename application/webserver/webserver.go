@@ -54,12 +54,16 @@ func CreateToken(username string) (string, error) {
 	return tokenString, err
 }
 
-func VerifyAdminUser(username string, password string, settingsStore *gatesentry2storage.MapStore) bool {
-	if gatesentryWebserverTypes.GetAdminUser(settingsStore) == username &&
-		gatesentryWebserverTypes.GetAdminPassword(settingsStore) == password {
-		return true
+func VerifyAdminUser(username string, password string, settingsStore *gatesentry2storage.MapStore) (bool, error) {
+	adminUser, err := gatesentryWebserverTypes.GetAdminUser(settingsStore)
+	if err != nil {
+		return false, err
 	}
-	return false
+	adminPassword, err := gatesentryWebserverTypes.GetAdminPassword(settingsStore)
+	if err != nil {
+		return false, err
+	}
+	return adminUser == username && adminPassword == password, nil
 }
 
 var tokenCreationHandler HttpHandlerFunc = func(w http.ResponseWriter, r *http.Request) {
@@ -163,7 +167,12 @@ func RegisterEndpointsStartServer(
 			w.Write([]byte("Error parsing json"))
 			return
 		}
-		if !VerifyAdminUser(data.Username, data.Pass, internalSettings) {
+		verified, err := VerifyAdminUser(data.Username, data.Pass, internalSettings)
+		if err != nil {
+			SendError(w, err, http.StatusInternalServerError)
+			return
+		}
+		if !verified {
 
 			SendJSON(w, struct {
 				Validated bool
@@ -205,7 +214,11 @@ func RegisterEndpointsStartServer(
 	internalServer.Get("/api/settings/{id}", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
 		requestedId := vars["id"]
-		jsonResponse := gatesentryWebserverEndpoints.GSApiSettingsGET(requestedId, internalSettings)
+		jsonResponse, err := gatesentryWebserverEndpoints.GSApiSettingsGET(requestedId, internalSettings)
+		if err != nil {
+			SendError(w, err, http.StatusInternalServerError)
+			return
+		}
 		SendJSON(w, jsonResponse)
 	})
 
@@ -222,13 +235,22 @@ func RegisterEndpointsStartServer(
 			SendError(w, err, http.StatusInternalServerError)
 			return
 		}
-		output := gatesentryWebserverEndpoints.GSApiSettingsPOST(requestedId, internalSettings, temp)
+		output, err := gatesentryWebserverEndpoints.GSApiSettingsPOST(requestedId, internalSettings, temp)
+		if err != nil {
+			SendError(w, err, http.StatusInternalServerError)
+			return
+		}
 		runtime.Reload()
 		SendJSON(w, output)
 	})
 
 	internalServer.Get("/api/users", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
-		jsonResponse := gatesentryWebserverEndpoints.GSApiUsersGET(runtime, internalSettings.Get("authusers"))
+		authUsers, err := internalSettings.GetE("authusers")
+		if err != nil {
+			SendError(w, err, http.StatusInternalServerError)
+			return
+		}
+		jsonResponse := gatesentryWebserverEndpoints.GSApiUsersGET(runtime, authUsers)
 		SendJSON(w, jsonResponse)
 	})
 
@@ -239,7 +261,11 @@ func RegisterEndpointsStartServer(
 			SendError(w, err, http.StatusInternalServerError)
 			return
 		}
-		jsonResponse := gatesentryWebserverEndpoints.GSApiUserPUT(internalSettings, userJson)
+		jsonResponse, err := gatesentryWebserverEndpoints.GSApiUserPUT(internalSettings, userJson)
+		if err != nil {
+			SendError(w, err, http.StatusInternalServerError)
+			return
+		}
 		SendJSON(w, jsonResponse)
 		runtime.Reload()
 	})
@@ -247,7 +273,11 @@ func RegisterEndpointsStartServer(
 	internalServer.Delete("/api/users/{username}", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
 		username := vars["username"]
-		jsonResponse := gatesentryWebserverEndpoints.GSApiUserDELETE(username, internalSettings)
+		jsonResponse, err := gatesentryWebserverEndpoints.GSApiUserDELETE(username, internalSettings)
+		if err != nil {
+			SendError(w, err, http.StatusInternalServerError)
+			return
+		}
 		SendJSON(w, jsonResponse)
 		runtime.Reload()
 	})
@@ -259,14 +289,22 @@ func RegisterEndpointsStartServer(
 			SendError(w, err, http.StatusInternalServerError)
 			return
 		}
-		jsonResponse := gatesentryWebserverEndpoints.GSApiUserCreate(userJson, internalSettings)
+		jsonResponse, err := gatesentryWebserverEndpoints.GSApiUserCreate(userJson, internalSettings)
+		if err != nil {
+			SendError(w, err, http.StatusInternalServerError)
+			return
+		}
 		SendJSON(w, jsonResponse)
 		runtime.Reload()
 	})
 
 	internalServer.Get("/api/consumption", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
 		data := string(runtime.GetUserGetJSON())
-		output := gatesentryWebserverEndpoints.GSApiConsumptionGET(data, internalSettings, runtime)
+		output, err := gatesentryWebserverEndpoints.GSApiConsumptionGET(data, internalSettings, runtime)
+		if err != nil {
+			SendError(w, err, http.StatusInternalServerError)
+			return
+		}
 		SendJSON(w, output)
 	})
 
@@ -276,7 +314,11 @@ func RegisterEndpointsStartServer(
 		if err != nil {
 			return
 		}
-		output := gatesentryWebserverEndpoints.GSApiConsumptionPOST(temp, internalSettings, runtime)
+		output, err := gatesentryWebserverEndpoints.GSApiConsumptionPOST(temp, internalSettings, runtime)
+		if err != nil {
+			SendError(w, err, http.StatusInternalServerError)
+			return
+		}
 		SendJSON(w, output)
 	})
 
@@ -300,7 +342,11 @@ func RegisterEndpointsStartServer(
 	})
 
 	internalServer.Get("/api/dns/custom_entries", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
-		data := internalSettings.Get("DNS_custom_entries")
+		data, err := internalSettings.GetE("DNS_custom_entries")
+		if err != nil {
+			SendError(w, err, http.StatusInternalServerError)
+			return
+		}
 		output := gatesentryWebserverEndpoints.GSApiDNSEntriesCustom(data, internalSettings, runtime)
 		SendJSON(w, output)
 	})
@@ -312,7 +358,11 @@ func RegisterEndpointsStartServer(
 			SendError(w, err, http.StatusInternalServerError)
 			return
 		}
-		output := gatesentryWebserverEndpoints.GSApiDNSSaveEntriesCustom(customEntries, internalSettings, runtime)
+		output, err := gatesentryWebserverEndpoints.GSApiDNSSaveEntriesCustom(customEntries, internalSettings, runtime)
+		if err != nil {
+			SendError(w, err, http.StatusInternalServerError)
+			return
+		}
 		SendJSON(w, output)
 		runtime.Reload()
 	})
@@ -342,12 +392,20 @@ func RegisterEndpointsStartServer(
 	})
 
 	internalServer.Get("/api/certificate/info", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
-		output := gatesentryWebserverEndpoints.GetCertificateInfo(internalSettings)
+		output, err := gatesentryWebserverEndpoints.GetCertificateInfo(internalSettings)
+		if err != nil {
+			SendError(w, err, http.StatusInternalServerError)
+			return
+		}
 		SendJSON(w, output)
 	})
 
 	internalServer.Get("/api/files/certificate", HttpHandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		output := gatesentryWebserverEndpoints.GetCertificateBytes(internalSettings)
+		output, err := gatesentryWebserverEndpoints.GetCertificateBytes(internalSettings)
+		if err != nil {
+			SendError(w, err, http.StatusInternalServerError)
+			return
+		}
 		w.Header().Set("Content-Disposition", "attachment; filename=certificate.pem")
 		w.Header().Set("Content-Type", "application/octet-stream")
 		w.Write(output)

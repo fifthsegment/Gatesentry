@@ -36,7 +36,12 @@ func GSwebserverStart(port int) {
 	basePath := GetBasePath()
 	fmt.Println("Webserver is listening on : " + ggport + " (base path: " + basePath + ")")
 	gatesentry2storage.SetBaseDir(GSBASEDIR)
-	R.GSWebSettings = gatesentry2storage.NewMapStore("GSWebSettings", true)
+	var err error
+	R.GSWebSettings, err = gatesentry2storage.OpenMapStore("GSWebSettings", true)
+	if err != nil {
+		fmt.Printf("Unable to open web settings: %v\n", err)
+		return
+	}
 
 	runtimeArgs := gatesentryWebserverTypes.InputArgs{
 		GetUserGetJSON:          R.GSUserGetDataJSON,
@@ -46,7 +51,11 @@ func GSwebserverStart(port int) {
 		GetInstallationId:       R.GetInstallationId,
 		GetTotalConsumptionData: R.GetTotalConsumptionData,
 		GetApplicationVersion:   R.GetApplicationVersion,
-		Reload:                  R.Init,
+		Reload: func() {
+			if err := R.Init(); err != nil {
+				fmt.Printf("Unable to reload GateSentry: %v\n", err)
+			}
+		},
 	}
 	runtime := gatesentryWebserverTypes.NewTemporaryRuntime(runtimeArgs)
 

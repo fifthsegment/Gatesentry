@@ -25,7 +25,7 @@ func GSApiDNSEntriesCustom(data string, settings *gatesentry2storage.MapStore, r
 	}{Data: customEntries}
 }
 
-func GSApiDNSSaveEntriesCustom(customEntries []gatesentryTypes.DNSCustomEntry, settings *gatesentry2storage.MapStore, runtime *gatesentryWebserverTypes.TemporaryRuntime) interface{} {
+func GSApiDNSSaveEntriesCustom(customEntries []gatesentryTypes.DNSCustomEntry, settings *gatesentry2storage.MapStore, runtime *gatesentryWebserverTypes.TemporaryRuntime) (interface{}, error) {
 	// read json data from request body
 
 	// check if no two entries have same domain
@@ -36,7 +36,7 @@ func GSApiDNSSaveEntriesCustom(customEntries []gatesentryTypes.DNSCustomEntry, s
 			// BadResponse(ctx, errors.New("Two entries can't have the same domain"))
 			return struct {
 				Error string `json:"error"`
-			}{Error: "Two entries can't have the same domain"}
+			}{Error: "Two entries can't have the same domain"}, nil
 		}
 		customEntriesMap[entry.Domain] = true
 	}
@@ -47,19 +47,21 @@ func GSApiDNSSaveEntriesCustom(customEntries []gatesentryTypes.DNSCustomEntry, s
 		// BadResponse(ctx, err)
 		return struct {
 			Error string `json:"message"`
-		}{Error: err.Error()}
+		}{Error: err.Error()}, nil
 	}
 
 	// save json string to settings
 	log.Println("[DNS] Saving custom entries = ", string(jsonData))
-	settings.Update("DNS_custom_entries", string(jsonData))
+	if err := settings.Update("DNS_custom_entries", string(jsonData)); err != nil {
+		return nil, err
+	}
 
 	// ctx.JSON(struct {
 	// 	Ok bool `json:"ok"`
 	// }{Ok: true})
 	return struct {
 		Ok bool `json:"ok"`
-	}{Ok: true}
+	}{Ok: true}, nil
 
 }
 

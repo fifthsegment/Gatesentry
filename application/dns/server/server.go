@@ -158,7 +158,17 @@ func StartDNSServer(basePath string, ilogger *gatesentryLogger.Log, blockedLists
 
 	logger = ilogger
 	logsPath = basePath + logsPath
-	SetExternalResolver(settings.Get("dns_resolver"))
+	readSetting := func(key, conservativeFallback string) string {
+		value, err := settings.GetE(key)
+		if err != nil {
+			log.Printf("[DNS] storage error while reading %q; retaining known-good value: %v", key, err)
+			if value == "" {
+				return conservativeFallback
+			}
+		}
+		return value
+	}
+	SetExternalResolver(readSetting("dns_resolver", "8.8.8.8:53"))
 	// InitializeLogs()
 	// go gatesentryDnsFilter.InitializeBlockedDomains(&blockedDomains, &blockedLists)
 
@@ -167,7 +177,7 @@ func StartDNSServer(basePath string, ilogger *gatesentryLogger.Log, blockedLists
 	// Example: "jvj28.com,local" → devices resolve as both
 	//   macmini.jvj28.com AND macmini.local
 	// The first zone is the primary (used for PTR targets).
-	zoneSetting := settings.Get("dns_local_zone")
+	zoneSetting := readSetting("dns_local_zone", "local")
 	if zoneSetting == "" {
 		zoneSetting = "local"
 	}
@@ -189,7 +199,7 @@ func StartDNSServer(basePath string, ilogger *gatesentryLogger.Log, blockedLists
 	// Browses common service types (_airplay._tcp, _googlecast._tcp, _printer._tcp, etc.)
 	// and feeds discovered devices into the device store.
 	// Enabled by default. Set setting "mdns_browser_enabled" to "false" to disable.
-	mdnsEnabled := settings.Get("mdns_browser_enabled")
+	mdnsEnabled := readSetting("mdns_browser_enabled", "false")
 	if mdnsEnabled != "false" {
 		mdnsBrowser = discovery.NewMDNSBrowser(deviceStore, discovery.DefaultScanInterval)
 		mdnsBrowser.Start()
@@ -198,14 +208,14 @@ func StartDNSServer(basePath string, ilogger *gatesentryLogger.Log, blockedLists
 	// Configure DDNS (Phase 4: RFC 2136 Dynamic DNS UPDATE handler).
 	// Settings: ddns_enabled, ddns_tsig_required, ddns_tsig_key_name,
 	//           ddns_tsig_key_secret, ddns_tsig_algorithm
-	ddnsEnabledStr := settings.Get("ddns_enabled")
+	ddnsEnabledStr := readSetting("ddns_enabled", "false")
 	if ddnsEnabledStr == "false" {
 		ddnsEnabled = false
 	} else {
 		ddnsEnabled = true
 	}
 
-	ddnsTSIGRequiredStr := settings.Get("ddns_tsig_required")
+	ddnsTSIGRequiredStr := readSetting("ddns_tsig_required", "true")
 	if ddnsTSIGRequiredStr == "true" {
 		ddnsTSIGRequired = true
 	} else {
@@ -216,8 +226,8 @@ func StartDNSServer(basePath string, ilogger *gatesentryLogger.Log, blockedLists
 	// The miekg/dns server automatically verifies TSIG on incoming messages
 	// when TsigSecret is set, and exposes the result via w.TsigStatus().
 	var tsigSecrets map[string]string
-	tsigKeyName := settings.Get("ddns_tsig_key_name")
-	tsigKeySecret := settings.Get("ddns_tsig_key_secret")
+	tsigKeyName := readSetting("ddns_tsig_key_name", "")
+	tsigKeySecret := readSetting("ddns_tsig_key_secret", "")
 	if tsigKeyName != "" && tsigKeySecret != "" {
 		if !strings.HasSuffix(tsigKeyName, ".") {
 			tsigKeyName += "."
