@@ -33,6 +33,9 @@
   }
 
   function nonempty(json) {
+    if (json && typeof json === "object" && json.Configured != null) {
+      return Boolean(json.Configured);
+    }
     return settingValue(json) !== "";
   }
 

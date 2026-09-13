@@ -29,6 +29,12 @@ func GSApiSettingsGET(requestedId string, settings *gatesentry2storage.MapStore)
 		return struct{ Value string }{Value: value}
 	case "blocktimes", "strictness", "timezone", "idemail", "enable_https_filtering", "capem", "keypem", "enable_dns_server", "dns_custom_entries", "ai_scanner_url", "enable_ai_image_filtering", "ai_image_filtering_mode", "ai_grok_api_key", "ai_openai_api_key", "ai_local_llm_url", "ai_local_llm_model", "ai_grok_model", "ai_openai_model", "EnableUsers", "dns_resolver":
 		value := settings.Get(requestedId)
+		if requestedId == "ai_grok_api_key" || requestedId == "ai_openai_api_key" {
+			return struct {
+				Key        string
+				Configured bool
+			}{Key: requestedId, Configured: strings.TrimSpace(value) != ""}
+		}
 		if requestedId == "ai_image_filtering_mode" && strings.TrimSpace(value) == "" {
 			value = "disabled"
 		}

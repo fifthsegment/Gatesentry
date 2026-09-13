@@ -47,10 +47,16 @@ func TestAISettingsGetAndPost(t *testing.T) {
 	if v := settingValue(t, GSApiSettingsGET("ai_image_filtering_mode", store)); v != "disabled" {
 		t.Fatalf("empty mode GET = %q, want disabled", v)
 	}
-
 	store.Update("ai_image_filtering_mode", "disabled")
 	store.Update("ai_grok_api_key", "xai-test")
 	store.Update("ai_openai_api_key", "sk-test")
+	masked := GSApiSettingsGET("ai_grok_api_key", store).(struct {
+		Key        string
+		Configured bool
+	})
+	if !masked.Configured || masked.Key != "ai_grok_api_key" {
+		t.Fatalf("masked key response = %+v", masked)
+	}
 
 	for _, key := range []string{"ai_image_filtering_mode", "ai_grok_api_key", "ai_openai_api_key", "ai_local_llm_url"} {
 		got := GSApiSettingsGET(key, store)

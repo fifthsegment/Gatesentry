@@ -13,7 +13,7 @@ const (
 // NormalizeAIImageMode maps persisted settings to a scanner mode.
 //
 // Grok and ChatGPT are remote vision APIs. They must not be invoked on the
-// proxy request path (see AI_FILTERING_PLAN.md). The legacy local scanner is
+// proxy request path. The legacy local scanner is
 // used only when no remote provider is selected and a scanner URL is set.
 func NormalizeAIImageMode(mode, enableLegacy, scannerURL string) string {
 	switch strings.ToLower(strings.TrimSpace(mode)) {
