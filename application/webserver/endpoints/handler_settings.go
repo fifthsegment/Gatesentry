@@ -3,6 +3,8 @@ package gatesentryWebserverEndpoints
 import (
 	"encoding/json"
 	"log"
+	"net/url"
+	"strings"
 	"time"
 
 	gatesentryDnsServer "bitbucket.org/abdullah_irfan/gatesentryf/dns/server"
@@ -25,8 +27,17 @@ func GSApiSettingsGET(requestedId string, settings *gatesentry2storage.MapStore)
 			value = string(valueJson)
 		}
 		return struct{ Value string }{Value: value}
-	case "blocktimes", "strictness", "timezone", "idemail", "enable_https_filtering", "capem", "keypem", "enable_dns_server", "dns_custom_entries", "ai_scanner_url", "enable_ai_image_filtering", "EnableUsers", "dns_resolver":
+	case "blocktimes", "strictness", "timezone", "idemail", "enable_https_filtering", "capem", "keypem", "enable_dns_server", "dns_custom_entries", "ai_scanner_url", "enable_ai_image_filtering", "ai_image_filtering_mode", "ai_grok_api_key", "ai_openai_api_key", "ai_local_llm_url", "ai_local_llm_model", "ai_grok_model", "ai_openai_model", "EnableUsers", "dns_resolver":
 		value := settings.Get(requestedId)
+		if requestedId == "ai_grok_api_key" || requestedId == "ai_openai_api_key" {
+			return struct {
+				Key        string
+				Configured bool
+			}{Key: requestedId, Configured: strings.TrimSpace(value) != ""}
+		}
+		if requestedId == "ai_image_filtering_mode" && strings.TrimSpace(value) == "" {
+			value = "disabled"
+		}
 		return struct {
 			Key   string
 			Value string
@@ -46,6 +57,24 @@ func GSApiSettingsGET(requestedId string, settings *gatesentry2storage.MapStore)
 }
 
 func GSApiSettingsPOST(requestedId string, settings *gatesentry2storage.MapStore, temp gatesentryWebserverTypes.Datareceiver) interface{} {
+	if requestedId == "ai_image_filtering_mode" {
+		temp.Value = strings.ToLower(strings.TrimSpace(temp.Value))
+		switch temp.Value {
+		case "disabled", "grok", "chatgpt", "local":
+		default:
+			temp.Value = "ERROR: mode must be disabled, grok, chatgpt, or local"
+			return temp
+		}
+	}
+	if requestedId == "ai_local_llm_url" {
+		v := strings.TrimSpace(temp.Value)
+		u, err := url.Parse(v)
+		if v != "" && (err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https")) {
+			temp.Value = "ERROR: Local LLM URL must be http or https with a host"
+			return temp
+		}
+		temp.Value = v
+	}
 
 	switch requestedId {
 	case "idemail":
@@ -83,6 +112,7 @@ func GSApiSettingsPOST(requestedId string, settings *gatesentry2storage.MapStore
 		requestedId == "enable_https_filtering" ||
 		requestedId == "enable_ai_image_filtering" ||
 		requestedId == "ai_scanner_url" ||
+		requestedId == "ai_image_filtering_mode" || requestedId == "ai_grok_api_key" || requestedId == "ai_openai_api_key" || requestedId == "ai_local_llm_url" || requestedId == "ai_local_llm_model" || requestedId == "ai_grok_model" || requestedId == "ai_openai_model" ||
 		requestedId == "EnableUsers" ||
 		requestedId == "strictness" ||
 		requestedId == "capem" ||
@@ -91,6 +121,13 @@ func GSApiSettingsPOST(requestedId string, settings *gatesentry2storage.MapStore
 		settings.Update(requestedId, temp.Value)
 		if requestedId == "dns_resolver" {
 			gatesentryDnsServer.SetExternalResolver(temp.Value)
+		}
+		if requestedId == "ai_image_filtering_mode" {
+			if temp.Value == "disabled" {
+				settings.Update("enable_ai_image_filtering", "false")
+			} else {
+				settings.Update("enable_ai_image_filtering", "true")
+			}
 		}
 	}
 

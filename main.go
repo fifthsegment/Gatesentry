@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"log"
 	"net"
@@ -29,7 +30,7 @@ var GSPROXYPORT = "10413"
 var GSWEBADMINPORT = "10786"
 var GSBASEDIR = ""
 var Baseendpointv2 = "https://www.gatesentryfilter.com/api/"
-var GATESENTRY_VERSION = "1.23.0"
+var GATESENTRY_VERSION = "1.24.0"
 var GS_BOUND_ADDRESS = ":"
 var R *application.GSRuntime
 
@@ -260,7 +261,23 @@ func RunGateSentry() {
 				gafd.FilterResponseAction = gatesentryproxy.ProxyActionBlockedTextContent
 			}
 		} else {
-			if R.GSSettings.Get("enable_ai_image_filtering") == "true" && R.GSSettings.Get("ai_scanner_url") != "" {
+			mode := R.GSSettings.Get("ai_image_filtering_mode")
+			if mode == filters.AIModeGrok || mode == filters.AIModeChatGPT || mode == filters.AIModeLocal {
+				model, key, baseURL := "", "", ""
+				switch mode {
+				case filters.AIModeGrok:
+					key, model = R.GSSettings.Get("ai_grok_api_key"), R.GSSettings.Get("ai_grok_model")
+				case filters.AIModeChatGPT:
+					key, model = R.GSSettings.Get("ai_openai_api_key"), R.GSSettings.Get("ai_openai_model")
+				case filters.AIModeLocal:
+					baseURL, model = R.GSSettings.Get("ai_local_llm_url"), R.GSSettings.Get("ai_local_llm_model")
+				}
+				verdict, err := filters.ClassifyImage(context.Background(), filters.VisionRequest{Provider: mode, APIKey: key, BaseURL: baseURL, Model: model, ContentType: gafd.ContentType, Image: gafd.Content})
+				if err == nil && verdict.ShouldBlock(50) {
+					gafd.FilterResponseAction = gatesentryproxy.ProxyActionBlockedMediaContent
+					gafd.FilterResponse = []byte(verdict.Reason)
+				}
+			} else if filters.ShouldRunLegacyImageScanner(R.GSSettings.Get("ai_image_filtering_mode"), R.GSSettings.Get("enable_ai_image_filtering"), R.GSSettings.Get("ai_scanner_url")) {
 				// application.RunFilter("images", string(gafd.Content), responder)
 				ai_service_url := R.GSSettings.Get("ai_scanner_url")
 				filters.FilterImagesAI(gafd, ai_service_url)

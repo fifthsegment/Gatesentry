@@ -209,6 +209,10 @@ func RegisterEndpointsStartServer(
 		SendJSON(w, jsonResponse)
 	})
 
+	internalServer.Get("/api/ai/status", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiAIStatusGET(w, r, internalSettings)
+	})
+
 	internalServer.Post("/api/settings/{id}", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
 		requestedId := vars["id"]
