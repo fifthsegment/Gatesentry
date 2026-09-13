@@ -134,7 +134,7 @@ func InitTasks() {
 				log.Println("Setting zoneinfo env variable")
 				zz := "C:\\Users\\dell\\Downloads\\gs\\zoneinfo.zip"
 				os.Setenv("ZONEINFO", zz)
-							syscall.Setenv("ZONEINFO", zz)
+				syscall.Setenv("ZONEINFO", zz)
 				log.Println(os.Getenv("ZONEINFO"))
 				log.Println(syscall.Getenv("ZONEINFO"))
 			} else {
@@ -214,7 +214,17 @@ func (R *GSRuntime) Init() {
 	}
 	R.GSSettings.SetDefault("idemail", "")
 	R.GSSettings.SetDefault("enable_ai_image_filtering", "false")
+	R.GSSettings.SetDefault("ai_image_filtering_mode", "disabled")
+	R.GSSettings.SetDefault("ai_grok_api_key", "")
+	R.GSSettings.SetDefault("ai_openai_api_key", "")
+	R.GSSettings.SetDefault("ai_local_llm_url", "")
+	R.GSSettings.SetDefault("ai_local_llm_model", "")
+	R.GSSettings.SetDefault("ai_grok_model", "")
+	R.GSSettings.SetDefault("ai_openai_model", "")
 	R.GSSettings.SetDefault("ai_scanner_url", "")
+	if seeded := gatesentry2filters.ApplyAIEnvSeeds(R.GSSettings.Get, R.GSSettings.Update, os.Getenv); len(seeded) > 0 {
+		log.Printf("[AI] seeded settings from environment: %s", strings.Join(seeded, ", "))
+	}
 
 	R.GSSettings.SetDefault("version", R.GetApplicationVersion())
 	R.GSUpdateLog.SetDefault("versions", "")

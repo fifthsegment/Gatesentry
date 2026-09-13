@@ -260,7 +260,7 @@ func RunGateSentry() {
 				gafd.FilterResponseAction = gatesentryproxy.ProxyActionBlockedTextContent
 			}
 		} else {
-			if R.GSSettings.Get("enable_ai_image_filtering") == "true" && R.GSSettings.Get("ai_scanner_url") != "" {
+			if filters.ShouldRunLegacyImageScanner(R.GSSettings.Get("ai_image_filtering_mode"), R.GSSettings.Get("enable_ai_image_filtering"), R.GSSettings.Get("ai_scanner_url")) {
 				// application.RunFilter("images", string(gafd.Content), responder)
 				ai_service_url := R.GSSettings.Get("ai_scanner_url")
 				filters.FilterImagesAI(gafd, ai_service_url)
