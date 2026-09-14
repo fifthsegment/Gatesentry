@@ -12,7 +12,12 @@ COPY . .
 RUN rm -rf application/webserver/frontend/files && mkdir -p application/webserver/frontend/files
 COPY --from=ui-builder /src/application/webserver/frontend/files/ ./application/webserver/frontend/files/
 RUN ./scripts/frontend.sh validate
-RUN go mod download
+RUN for attempt in 1 2 3; do \
+      go mod download && break; \
+      if [ "$attempt" -eq 3 ]; then exit 1; fi; \
+      echo "go mod download failed; retrying in 5 seconds ($attempt/3)" >&2; \
+      sleep 5; \
+    done
 RUN CGO_ENABLED=0 go build -buildvcs=false -trimpath -ldflags="-s -w" -o /gatesentry-bin .
 
 FROM alpine:3.22
