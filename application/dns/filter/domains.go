@@ -23,7 +23,7 @@ func InitializeFilters(blockedDomains *map[string]bool, blockedLists *[]string, 
 	mutex.Unlock()
 
 	dnsinfo.NumberDomainsBlocked = 0
-	custom_entries := settings.Get("dns_custom_entries")
+	custom_entries := settings.GetOrDefault("dns_custom_entries", "")
 	log.Println("[DNS.SERVER] Custom entries found")
 	// unmarshall json array string to array
 	custom_entries_array := []string{}

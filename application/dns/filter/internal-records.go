@@ -14,7 +14,7 @@ func InitializeInternalRecords(records *map[string]string, mutex *sync.RWMutex, 
 	mutex.Lock()
 	defer mutex.Unlock()
 	fmt.Println("Initializing internal records...")
-	internalRecordsString := settings.Get("DNS_custom_entries")
+	internalRecordsString := settings.GetOrDefault("DNS_custom_entries", "")
 	log.Println("[DNS] Internal records string = ", internalRecordsString)
 	// parse json string to struct
 	var customEntries []gatesentryTypes.DNSCustomEntry

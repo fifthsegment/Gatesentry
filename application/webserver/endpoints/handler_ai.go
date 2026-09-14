@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -111,14 +112,24 @@ func GSApiAIStatusGET(w http.ResponseWriter, _ *http.Request, settings *gatesent
 // ProbeAIStatus checks each configured endpoint. client may be nil (uses a
 // direct outbound client that bypasses HTTP_PROXY and local DNS).
 func ProbeAIStatus(settings *gatesentry2storage.MapStore, client *http.Client) AIStatusResponse {
+	readSetting := func(key, fallback string) string {
+		value, err := settings.GetE(key)
+		if err != nil {
+			log.Printf("Storage error while reading AI setting %q; retaining known-good value: %v", key, err)
+			if value == "" {
+				return fallback
+			}
+		}
+		return value
+	}
 	if client == nil {
 		resolver := ""
 		if settings != nil {
-			resolver = settings.Get("dns_resolver")
+			resolver = readSetting("dns_resolver", "")
 		}
 		client = newDirectOutboundClient(resolver, aiProbeTimeout)
 	}
-	mode := strings.ToLower(strings.TrimSpace(settings.Get("ai_image_filtering_mode")))
+	mode := strings.ToLower(strings.TrimSpace(readSetting("ai_image_filtering_mode", "")))
 	if mode == "" {
 		mode = "disabled"
 	}
@@ -128,19 +139,19 @@ func ProbeAIStatus(settings *gatesentry2storage.MapStore, client *http.Client) A
 	wg.Add(4)
 	go func() {
 		defer wg.Done()
-		grok = probeBearerModels(client, aiGrokModelsURL, settings.Get("ai_grok_api_key"))
+		grok = probeBearerModels(client, aiGrokModelsURL, readSetting("ai_grok_api_key", ""))
 	}()
 	go func() {
 		defer wg.Done()
-		chatgpt = probeBearerModels(client, aiOpenAIModelsURL, settings.Get("ai_openai_api_key"))
+		chatgpt = probeBearerModels(client, aiOpenAIModelsURL, readSetting("ai_openai_api_key", ""))
 	}()
 	go func() {
 		defer wg.Done()
-		local = probeOllama(client, settings.Get("ai_local_llm_url"))
+		local = probeOllama(client, readSetting("ai_local_llm_url", ""))
 	}()
 	go func() {
 		defer wg.Done()
-		legacy = probeHTTPReachable(client, settings.Get("ai_scanner_url"))
+		legacy = probeHTTPReachable(client, readSetting("ai_scanner_url", ""))
 	}()
 	wg.Wait()
 	out.Grok = grok

@@ -58,14 +58,16 @@ type CertInfo struct {
 	Error  string `json:"error"`
 }
 
-func GetCertificateBytes(settings *gatesentry2storage.MapStore) []byte {
-	cert := settings.Get(CERTIFICATE_KEY)
-
-	return []byte(cert)
+func GetCertificateBytes(settings *gatesentry2storage.MapStore) ([]byte, error) {
+	cert, err := settings.GetE(CERTIFICATE_KEY)
+	return []byte(cert), err
 }
 
-func GetCertificateInfo(settings *gatesentry2storage.MapStore) interface{} {
-	cert := settings.Get(CERTIFICATE_KEY)
+func GetCertificateInfo(settings *gatesentry2storage.MapStore) (interface{}, error) {
+	cert, err := settings.GetE(CERTIFICATE_KEY)
+	if err != nil {
+		return nil, err
+	}
 	name, expiry, err := getCertInfo(cert)
 
 	if err != nil {
@@ -73,14 +75,14 @@ func GetCertificateInfo(settings *gatesentry2storage.MapStore) interface{} {
 			Name:   "",
 			Expiry: "",
 			Error:  err.Error(),
-		}
+		}, nil
 	}
 
 	return CertInfo{
 		Name:   name,
 		Expiry: expiry,
 		Error:  "",
-	}
+	}, nil
 }
 
 func getCertInfo(certPEM string) (string, string, error) {

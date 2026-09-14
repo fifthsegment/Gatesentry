@@ -2,6 +2,7 @@ package gatesentryf
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"strings"
 	"time"
@@ -33,18 +34,37 @@ func (R *GSRuntime) GSUserDataSaverMonitor() {
 * Saves user bandwidth data to the disk
  */
 func (R *GSRuntime) GSUserDataSaver() {
-	tempusers := R.AuthUsers
-	b, err := json.Marshal(tempusers)
-
-	if err != nil {
-		return
+	R.usersMu.RLock()
+	consumption := make(map[string]uint64, len(R.AuthUsers))
+	for _, user := range R.AuthUsers {
+		consumption[user.User] = user.DataConsumed
 	}
+	R.usersMu.RUnlock()
 	log.Println("Saving user data")
-	// log.Println("A save of user data was succesful")
-	R.GSSettings.Update("authusers", string(b))
+	// Merge only the runtime-owned counters. Durable membership, credentials,
+	// and access flags remain owned by the atomic API/storage transaction.
+	if err := R.GSSettings.UpdateValue("authusers", func(current string) (string, error) {
+		users := []GatesentryTypes.GSUser{}
+		if current != "" {
+			if err := json.Unmarshal([]byte(current), &users); err != nil {
+				return "", fmt.Errorf("parse durable users: %w", err)
+			}
+		}
+		for i := range users {
+			if consumed, ok := consumption[users[i].User]; ok {
+				users[i].DataConsumed = consumed
+			}
+		}
+		b, err := json.Marshal(users)
+		return string(b), err
+	}); err != nil {
+		log.Printf("Unable to save user data: %v", err)
+	}
 }
 
 func (R *GSRuntime) UpdateUserData(username string, data uint64) {
+	R.usersMu.Lock()
+	defer R.usersMu.Unlock()
 	for i := 0; i < len(R.AuthUsers); i++ {
 		if R.AuthUsers[i].User == username {
 			R.AuthUsers[i].DataConsumed += data
@@ -53,6 +73,8 @@ func (R *GSRuntime) UpdateUserData(username string, data uint64) {
 }
 
 func (R *GSRuntime) GSUserGetDataJSON() []byte {
+	R.usersMu.RLock()
+	defer R.usersMu.RUnlock()
 	temp := []GatesentryTypes.GSUserPublic{}
 	for i := 0; i < len(R.AuthUsers); i++ {
 		tuser := GatesentryTypes.GSUserPublic{User: R.AuthUsers[i].User, DataConsumed: R.AuthUsers[i].DataConsumed, AllowAccess: R.AuthUsers[i].AllowAccess}
@@ -65,14 +87,22 @@ func (R *GSRuntime) GSUserGetDataJSON() []byte {
 	return b
 }
 
-func (R *GSRuntime) LoadUsers() {
+func (R *GSRuntime) LoadUsers() error {
 	log.Println("Load users")
-	usersString := R.GSSettings.Get("authusers")
+	usersString, err := R.GSSettings.GetE("authusers")
+	if err != nil {
+		return fmt.Errorf("read users: %w", err)
+	}
 
 	users := []GatesentryTypes.GSUser{}
-	json.Unmarshal([]byte(usersString), &users)
+	if err := json.Unmarshal([]byte(usersString), &users); err != nil {
+		return fmt.Errorf("parse users: %w", err)
+	}
 
+	R.usersMu.Lock()
 	R.AuthUsers = users
+	R.usersMu.Unlock()
+	return nil
 }
 
 func (R *GSRuntime) RemoveUser(data GatesentryTypes.GSUser) {
@@ -137,8 +167,13 @@ func (R *GSRuntime) AddUser(user string, pass string) bool {
 	if err != nil {
 		return false
 	}
-	R.GSSettings.Update("authusers", string(b))
-	R.LoadUsers()
+	if err := R.GSSettings.Update("authusers", string(b)); err != nil {
+		log.Printf("Unable to add user: %v", err)
+		return false
+	}
+	if err := R.LoadUsers(); err != nil {
+		log.Printf("Unable to reload users: %v", err)
+	}
 	return true
 	// R.GSSettings.Update("authusers", string(b))
 }

@@ -41,7 +41,7 @@ func TestMain(m *testing.M) {
 
 	// Start proxy server in background
 	go main()
-	
+
 	// Initialize test variables
 	proxyURL = "http://localhost:" + GSPROXYPORT
 	// GS_ADMIN_PORT override for tests
@@ -211,12 +211,12 @@ func TestProxyServer(t *testing.T) {
 
 	t.Run("Test if enabling https bumping actually bumps traffic", func(t *testing.T) {
 		redirectLogs(t)
-		enableFiltering := R.GSSettings.Get("enable_https_filtering")
+		enableFiltering := R.GSSettings.GetOrDefault("enable_https_filtering", "")
 		t.Logf("Enable filtering = %s", enableFiltering)
 		R.GSSettings.Update("enable_https_filtering", "true")
 		t.Log("Updated settings for https filtering")
 		time.Sleep(1 * time.Second)
-		enableFiltering = R.GSSettings.Get("enable_https_filtering")
+		enableFiltering = R.GSSettings.GetOrDefault("enable_https_filtering", "")
 		t.Logf("Enable filtering = %s", enableFiltering)
 		R.Init()
 		time.Sleep(1 * time.Second)
@@ -260,7 +260,7 @@ func TestProxyServer(t *testing.T) {
 	})
 
 	t.Run("Test if exception https site is not bumped", func(t *testing.T) {
-		enableFiltering := R.GSSettings.Get("enable_https_filtering")
+		enableFiltering := R.GSSettings.GetOrDefault("enable_https_filtering", "")
 		t.Logf("Enable filtering = %s", enableFiltering)
 
 		parsedProxyURL, err := url.Parse(proxyURL)
@@ -306,7 +306,7 @@ func TestProxyServer(t *testing.T) {
 		R.GSSettings.Update("enable_https_filtering", "false")
 		t.Log("Updated settings for https filtering")
 		time.Sleep(1 * time.Second)
-		enableFiltering := R.GSSettings.Get("enable_https_filtering")
+		enableFiltering := R.GSSettings.GetOrDefault("enable_https_filtering", "")
 		t.Logf("Enable filtering = %s", enableFiltering)
 		R.Init()
 		time.Sleep(1 * time.Second)
@@ -448,12 +448,12 @@ func TestProxyServer(t *testing.T) {
 
 	t.Run("Test if keyword blocking works by adding the keyword google and visiting Google", func(t *testing.T) {
 		redirectLogs(t)
-		enableFiltering := R.GSSettings.Get("enable_https_filtering")
+		enableFiltering := R.GSSettings.GetOrDefault("enable_https_filtering", "")
 		t.Logf("Enable filtering = %s", enableFiltering)
 		R.GSSettings.Update("enable_https_filtering", "true")
 		t.Log("Updated settings for https filtering")
 		time.Sleep(1 * time.Second)
-		enableFiltering = R.GSSettings.Get("enable_https_filtering")
+		enableFiltering = R.GSSettings.GetOrDefault("enable_https_filtering", "")
 		t.Logf("Enable filtering = %s", enableFiltering)
 		R.Init()
 		time.Sleep(2 * time.Second)

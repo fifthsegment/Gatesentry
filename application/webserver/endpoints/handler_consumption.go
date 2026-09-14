@@ -13,8 +13,11 @@ type Datareceiver struct {
 	Data        string `json:"Data"`
 }
 
-func GSApiConsumptionGET(data string, settings *gatesentry2storage.MapStore, runtime *gatesentryWebserverTypes.TemporaryRuntime) interface{} {
-	temp := settings.Get("EnableUsers")
+func GSApiConsumptionGET(data string, settings *gatesentry2storage.MapStore, runtime *gatesentryWebserverTypes.TemporaryRuntime) (interface{}, error) {
+	temp, err := settings.GetE("EnableUsers")
+	if err != nil {
+		return nil, err
+	}
 	enableusers := false
 	if temp == "true" {
 		enableusers = true
@@ -26,11 +29,11 @@ func GSApiConsumptionGET(data string, settings *gatesentry2storage.MapStore, run
 	return struct {
 		EnableUsers bool
 		Data        string
-	}{Data: data, EnableUsers: enableusers}
+	}{Data: data, EnableUsers: enableusers}, nil
 
 }
 
-func GSApiConsumptionPOST(temp Datareceiver, settings *gatesentry2storage.MapStore, runtime *gatesentryWebserverTypes.TemporaryRuntime) interface{} {
+func GSApiConsumptionPOST(temp Datareceiver, settings *gatesentry2storage.MapStore, runtime *gatesentryWebserverTypes.TemporaryRuntime) (interface{}, error) {
 	// data := string(R.GSUserGetDataJSON())
 	// ctx.JSON(200, struct{Data string}{Data: data})
 
@@ -38,7 +41,9 @@ func GSApiConsumptionPOST(temp Datareceiver, settings *gatesentry2storage.MapSto
 	if temp.EnableUsers {
 		enableusersstring = "true"
 	}
-	settings.Update("EnableUsers", enableusersstring)
+	if err := settings.Update("EnableUsers", enableusersstring); err != nil {
+		return nil, err
+	}
 	users := []GatesentryTypes.GSUserPublic{}
 	json.Unmarshal([]byte(temp.Data), &users)
 	// R.AuthUsers
@@ -60,5 +65,5 @@ func GSApiConsumptionPOST(temp Datareceiver, settings *gatesentry2storage.MapSto
 		runtime.UpdateUser(users[i].User, users[i])
 	}
 	// ctx.JSON(struct{ Data string }{Data: "ok"})
-	return struct{ Data string }{Data: "ok"}
+	return struct{ Data string }{Data: "ok"}, nil
 }

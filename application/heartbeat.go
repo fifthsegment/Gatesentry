@@ -1,6 +1,7 @@
 package gatesentryf
 
 import (
+	"log"
 	"strconv"
 )
 
@@ -10,14 +11,18 @@ func UpdateSentryAliveStatus(R *GSRuntime, alive bool, message string) {
 	if alive {
 		if NONALIVES != 0 {
 			NONALIVES = 0
-			R.GSSettings.Update("NonAlives", "0")
+			if err := R.GSSettings.Update("NonAlives", "0"); err != nil {
+				log.Printf("Unable to persist heartbeat recovery: %v", err)
+			}
 			R.OnHeartbeat()
 		}
 	}
 	if !alive {
 		NONALIVES++
 		num := strconv.Itoa(NONALIVES)
-		R.GSSettings.Update("NonAlives", num)
+		if err := R.GSSettings.Update("NonAlives", num); err != nil {
+			log.Printf("Unable to persist heartbeat failure: %v", err)
+		}
 	}
 	CheckActionSentryNotAlive(R, message)
 }
