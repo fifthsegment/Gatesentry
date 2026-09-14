@@ -73,7 +73,10 @@ run: build
 coverage:
 	@echo "Collecting unit-test coverage..."
 	@set -e; \
-	go test -coverprofile=coverage.txt -covermode=atomic ./application/... ./gatesentryproxy/...; \
+	go test -coverprofile=coverage.txt -covermode=atomic ./application/...; \
+	go test -vet=off -coverprofile=proxy-coverage.txt -covermode=atomic ./gatesentryproxy/...; \
+	grep -v "^mode:" proxy-coverage.txt >> coverage.txt; \
+	rm -f proxy-coverage.txt; \
 	sed -i 's|bitbucket.org/abdullah_irfan/gatesentryf/|application/|g; s|bitbucket.org/abdullah_irfan/gatesentryproxy/|gatesentryproxy/|g' coverage.txt; \
 	echo "Coverage saved to coverage.txt"
 
