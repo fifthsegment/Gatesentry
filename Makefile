@@ -1,10 +1,48 @@
-.PHONY: test test-go test-python build run clean-test install-test-deps coverage coverage-int
+.PHONY: test test-go test-python build run clean-test install-test-deps coverage coverage-int \
+	check-go check-toolchains ui-install ui-check frontend-assets validate-assets verify-go verify release-artifacts docker-build docker-smoke
 
 PYTHON ?= python3
 PIP ?= pip3
 GS_DNS_PORT ?= 10053
 COVDIR ?= /tmp/gatesentry-covdata
 COV_BIN ?= /tmp/gatesentry-cov-bin
+IMAGE ?= gatesentry:local
+REVISION ?= $(shell git rev-parse HEAD)
+
+check-toolchains:
+	./scripts/check-toolchains.sh
+
+check-go:
+	./scripts/check-toolchains.sh go
+
+ui-install: check-toolchains
+	./scripts/frontend.sh install
+
+ui-check: ui-install
+	cd ui && yarn check
+	cd ui && yarn test --run
+
+frontend-assets:
+	./scripts/frontend.sh build
+
+validate-assets:
+	./scripts/frontend.sh validate
+
+verify-go: check-go validate-assets
+	go test ./application/webserver/frontend ./application/responder
+	go test ./application/... ./gatesentryproxy/...
+	go build ./...
+
+verify: ui-check frontend-assets verify-go
+
+release-artifacts: verify
+	./scripts/build-release.sh dist
+
+docker-build:
+	docker build --build-arg VCS_REF=$(REVISION) -t $(IMAGE) .
+
+docker-smoke: docker-build
+	IMAGE=$(IMAGE) ./scripts/docker-smoke.sh
 
 clean-test:
 	@echo "Cleaning up test artifacts..."
@@ -27,8 +65,9 @@ run: build
 # ── Unit test coverage (fast, no server needed) ───────────────────────────
 coverage:
 	@echo "Collecting unit-test coverage..."
-	@go test -coverprofile=coverage.txt -covermode=atomic ./application/... ./gatesentryproxy/... 2>/dev/null; \
-	sed -i 's|bitbucket.org/abdullah_irfan/gatesentryf/|application/|g; s|bitbucket.org/abdullah_irfan/gatesentryproxy/|gatestentryproxy/|g' coverage.txt; \
+	@set -e; \
+	go test -coverprofile=coverage.txt -covermode=atomic ./application/... ./gatesentryproxy/...; \
+	sed -i 's|bitbucket.org/abdullah_irfan/gatesentryf/|application/|g; s|bitbucket.org/abdullah_irfan/gatesentryproxy/|gatesentryproxy/|g' coverage.txt; \
 	echo "Coverage saved to coverage.txt"
 
 # ── Integration-test coverage (spins up instrumented server) ─────────────

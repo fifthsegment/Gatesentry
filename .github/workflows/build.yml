@@ -1,126 +1,92 @@
-name: Build a release
+name: Build and release
 
 on:
   push:
-    branches:
-      - master
-      - main
-      - release-*
+    branches: [master, main]
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag at the checked-out revision to publish; leave empty for a dry build
+        required: false
+        type: string
 
 permissions:
-  contents: write
-  packages: write
+  contents: read
 
 jobs:
   build:
     runs-on: ubuntu-latest
-
+    outputs:
+      revision: ${{ steps.revision.outputs.revision }}
+      tag: ${{ steps.revision.outputs.tag }}
+      publish: ${{ steps.revision.outputs.publish }}
     steps:
-      - name: Check out code
-        uses: actions/checkout@v2
-
-      - name: Set up Go
-        uses: actions/setup-go@v2
+      - uses: actions/checkout@v4
         with:
-          go-version: 1.21
-
-      - name: Build
-        id: build
-        run: |
-          TAG=v$(awk -F'"' '/var GATESENTRY_VERSION =/ { print $2 }' main.go)
-          mkdir bin
-          go get -v
-          ls -la
-          cd ui && npm install && npm run build && cd ..
-          ls
-          rm -rf application/webserver/frontend/files/*
-          mv ui/dist/* application/webserver/frontend/files
-          mv application/webserver/frontend/files/fs/* application/webserver/frontend/files
-          env GOOS=linux GOARCH=amd64 go build -o gatesentry-linux
-          env GOOS=darwin GOARCH=amd64 go build -o gatesentry-macos
-          env GOOS=windows GOARCH=amd64 go build -o gatesentry-windows.exe
-          env GOOS=linux GOARCH=arm64 go build -o gatesentry-linux-arm64
-          chmod +x gatesentry-linux
-          chmod +x gatesentry-macos
-          git config user.name "GitHub Action"
-          git config user.email "fifthsegment@github.com"
-          echo "$TAG"
-          echo "tag=$TAG" >> $GITHUB_OUTPUT
-      - name: Setup Inno Setup
-        run: |
-          docker container create --name setup amake/innosetup installer.iss
-          docker cp ./scripts/installer.iss setup:/work/
-          docker cp ./gatesentry-windows.exe setup:/work/
-          docker start -i -a setup
-          docker cp setup:/work/Output/. .
-          docker rm setup
-      - name: Create Tag
-        uses: cardinalby/git-tag-action@master
+          fetch-depth: 0
+          persist-credentials: false
+      - id: revision
+        name: Verify publication revision
         env:
-          TAG: ${{ steps.build.outputs.tag }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Create Release
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: ${{ steps.build.outputs.tag }}
-          files: |
-            gatesentry-linux
-            gatesentry-macos
-            gatesentry-windows.exe
-            gatesentry-linux-arm64
-            GatesentrySetup.exe
-
-  docker:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Check out code
-        uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build Docker image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          load: true
-          tags: gatesentry:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Start container and smoke test
+          INPUT_TAG: ${{ inputs.tag }}
         run: |
-          docker run -d --rm --name gatesentry-test \
-            -p 10786:10786 \
-            -p 10413:10413 \
-            -e GATESENTRY_DNS_PORT=10053 \
-            gatesentry:latest
-
-          echo "Waiting for server..."
-          for i in $(seq 1 20); do
-            if curl -s http://localhost:10786 > /tmp/smoke-response 2>/dev/null; then
-              echo "Server healthy after ${i}s"
-              break
-            fi
-            [ $i -eq 20 ] && echo "Server never became healthy" && docker logs gatesentry-test && exit 1
-            sleep 1
-          done
-
-          if grep -q '<html' /tmp/smoke-response; then
-            echo "Docker image serves UI correctly"
-          else
-            echo "UI response missing <html>"
-            head -20 /tmp/smoke-response
-            exit 1
+          revision=$(git rev-parse HEAD)
+          tag="$INPUT_TAG"
+          if [[ "${GITHUB_REF_TYPE:-}" == tag ]]; then tag="$GITHUB_REF_NAME"; fi
+          publish=false
+          if [[ -n "$tag" ]]; then
+            git show-ref --verify --quiet "refs/tags/$tag"
+            test "$(git rev-parse "refs/tags/$tag^{commit}")" = "$revision"
+            publish=true
           fi
+          echo "revision=$revision" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "publish=$publish" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-go@v6
+        with:
+          go-version: 1.24.10
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24.21.0
+          cache: yarn
+          cache-dependency-path: ui/yarn.lock
+      - run: corepack enable && corepack prepare yarn@4.10.3 --activate
+      - run: make release-artifacts
+      - name: Verify artifact revision
+        run: test "$(cat dist/REVISION)" = "${{ steps.revision.outputs.revision }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gatesentry-${{ steps.revision.outputs.revision }}
+          path: dist/
+          if-no-files-found: error
+  docker-smoke:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Ensure checked-out triggering revision
+        run: test "$(git rev-parse HEAD)" = "${{ needs.build.outputs.revision }}"
+      - run: make docker-smoke REVISION=${{ needs.build.outputs.revision }} IMAGE=gatesentry:${{ needs.build.outputs.revision }}
 
-          if curl -s --proxy http://localhost:10413 http://example.com -o /dev/null -w "%{http_code}" | grep -q 200; then
-            echo "Proxy port 10413 working"
-          else
-            echo "Proxy test failed"
-          fi
-
-      - name: Cleanup
-        if: always()
-        run: docker stop gatesentry-test 2>/dev/null || true
+  publish:
+    if: needs.build.outputs.publish == 'true'
+    needs: [build, docker-smoke]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          name: gatesentry-${{ needs.build.outputs.revision }}
+          path: dist
+      - name: Verify downloaded artifact revision
+        run: test "$(cat dist/REVISION)" = "${{ needs.build.outputs.revision }}"
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.build.outputs.tag }}
+          files: dist/gatesentry-*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

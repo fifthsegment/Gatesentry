@@ -1,20 +1,21 @@
-FROM node:20-alpine AS ui-builder
-WORKDIR /src/ui
-COPY ui/package.json ui/yarn.lock ui/.yarnrc.yml ./
-RUN yarn install
-COPY ui/ .
-RUN yarn build
-
-FROM golang:1.24-alpine AS go-builder
-RUN apk add --no-cache bash
+FROM node:24.21.0-alpine AS ui-builder
 WORKDIR /src
 COPY . .
-RUN go mod download
-COPY --from=ui-builder /src/ui/dist/ /src/application/webserver/frontend/files/
-RUN mv /src/application/webserver/frontend/files/fs/* /src/application/webserver/frontend/files/ 2>/dev/null || true
-RUN OUTPUT=/gatesentry-bin ./build.sh --no-ui
+RUN corepack enable && corepack prepare yarn@4.10.3 --activate
+RUN ./scripts/frontend.sh
 
-FROM alpine:3.20
+FROM golang:1.24.10-alpine AS go-builder
+RUN apk add --no-cache bash git
+WORKDIR /src
+COPY . .
+COPY --from=ui-builder /src/application/webserver/frontend/files/ ./application/webserver/frontend/files/
+RUN ./scripts/frontend.sh validate
+RUN go mod download
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /gatesentry-bin .
+
+FROM alpine:3.22
+ARG VCS_REF=unknown
+LABEL org.opencontainers.image.revision=$VCS_REF
 RUN apk add --no-cache ca-certificates tzdata
 WORKDIR /usr/local/gatesentry
 COPY --from=go-builder /gatesentry-bin ./

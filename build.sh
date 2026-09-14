@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-EMBED_DIR="application/webserver/frontend/files"
 BUILD_UI=true
 OUTPUT="${OUTPUT:-bin/gatesentrybin}"
 
@@ -16,17 +15,10 @@ done
 OUTDIR=$(dirname "$OUTPUT")
 mkdir -p "$OUTDIR"
 
+./scripts/check-toolchains.sh go
+
 if $BUILD_UI; then
-  if [ -d "ui/node_modules" ]; then
-    echo "Building Svelte UI..."
-    (cd ui && npm run build)
-    echo "Copying UI dist into Go embed directory..."
-    find "${EMBED_DIR}" -mindepth 1 ! -name '.gitkeep' -delete
-    cp -r ui/dist/* "$EMBED_DIR"/
-  else
-    echo "Skipping UI build (ui/node_modules not found — run 'cd ui && npm install' first)"
-    echo "Using existing frontend files in $EMBED_DIR"
-  fi
+  ./scripts/frontend.sh
 fi
 
 echo "Building GateSentry → $OUTPUT..."

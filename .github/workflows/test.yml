@@ -2,64 +2,36 @@ name: Go Test and Coverage
 
 on:
   push:
-    branches: ["master"]
-    paths:
-      - "**.go"
-      - "ui/**"
-      - "tests/**"
-      - "Makefile"
-      - ".github/workflows/test.yml"
+    branches: [master]
   pull_request:
-    branches: ["master"]
-    paths:
-      - "**.go"
-      - "ui/**"
-      - "tests/**"
-      - "Makefile"
-      - ".github/workflows/test.yml"
+    branches: [master]
+
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Check out code
-        uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
+      - uses: actions/checkout@v4
         with:
-          go-version: ^1.21
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
+          persist-credentials: false
+      - uses: actions/setup-go@v6
         with:
-          node-version: "20"
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+          go-version: 1.24.10
+      - uses: actions/setup-node@v5
         with:
-          python-version: "3.11"
-
-      - name: Install Python test dependencies
-        run: pip install pytest dnspython requests
-
-      - name: Build frontend
-        working-directory: ui
-        run: |
-          npm install
-          npm run build
-
-      - name: Copy frontend build output
-        run: |
-          rm -rf application/webserver/frontend/files/*
-          mv ui/dist/* application/webserver/frontend/files/
-          mv application/webserver/frontend/files/fs/* application/webserver/frontend/files/
-
-      - name: Run integration tests (Go + Python)
-        run: make test
-
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4
+          node-version: 24.21.0
+          cache: yarn
+          cache-dependency-path: ui/yarn.lock
+      - run: corepack enable && corepack prepare yarn@4.10.3 --activate
+      - name: Verify reproducible build path
+        run: make verify
+      - name: Collect coverage
+        run: make coverage
+      - uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          file: ./coverage.txt
+          files: ./coverage.txt
+          fail_ci_if_error: true
+

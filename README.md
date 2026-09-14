@@ -5,6 +5,14 @@ HTTP/HTTPS proxy with SSL interception (MITM), content filtering, and a built-in
 [![Codecov](https://codecov.io/gh/fifthsegment/Gatesentry/branch/master/graph/badge.svg)](https://codecov.io/gh/fifthsegment/Gatesentry)
 [![Release](https://img.shields.io/github/v/release/fifthsegment/Gatesentry)](https://github.com/fifthsegment/Gatesentry/releases/latest)
 
+## Reproducible build
+
+GateSentry requires Go 1.24.10, Node.js 24.21.0, and Yarn 4.10.3. Enable the Yarn version declared in `ui/package.json` with Corepack, then run `make verify`. This fast path performs an immutable dependency install, UI checks and tests, a fresh dashboard build and embedded-asset sync, embedded dashboard and block-page tests, application and proxy tests, and a Go build. Any failed stage stops the build.
+
+Use `make verify-go` when the frontend assets have already been freshly synced and only Go checks are needed. `make docker-smoke` separately builds the checked-out revision into an image and exercises the dashboard and explicit proxy; it requires Docker and network access. The slower privileged integration suite remains available through `make test`.
+
+`make release-artifacts` writes cross-platform binaries, checksums, and the exact source commit to `dist/`. Ordinary branch builds only produce reviewable artifacts. Release publication requires an existing tag that resolves to the checked-out commit, and Docker publication uses the same tagged source rather than downloading another release.
+
 ## What it does
 
 Runs as a local proxy on your machine or network. Clients route traffic through it and Gatesentry can:
