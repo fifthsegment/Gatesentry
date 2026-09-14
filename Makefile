@@ -1,10 +1,55 @@
-.PHONY: test test-go test-python build run clean-test install-test-deps coverage coverage-int
+.PHONY: test test-go test-python build run clean-test install-test-deps coverage coverage-int \
+	check-go check-toolchains ui-install ui-check frontend-assets validate-assets verify-go verify release-artifacts docker-build docker-smoke
 
 PYTHON ?= python3
 PIP ?= pip3
 GS_DNS_PORT ?= 10053
 COVDIR ?= /tmp/gatesentry-covdata
 COV_BIN ?= /tmp/gatesentry-cov-bin
+IMAGE ?= gatesentry:local
+REVISION ?= $(shell git rev-parse HEAD)
+export GOTOOLCHAIN := go1.24.10
+
+check-toolchains:
+	./scripts/check-toolchains.sh
+
+check-go:
+	./scripts/check-toolchains.sh go
+
+ui-install: check-toolchains
+	./scripts/frontend.sh install
+
+ui-check: ui-install
+	cd ui && yarn check
+	cd ui && yarn test --run
+
+frontend-assets: ui-install
+	./scripts/frontend.sh sync
+
+validate-assets:
+	./scripts/frontend.sh validate
+
+verify-go: check-go validate-assets
+	go test ./application/webserver/frontend ./application/responder
+	go test ./application/...
+	go test -vet=off ./gatesentryproxy/...
+	go build -buildvcs=false ./...
+
+verify: check-toolchains
+	./scripts/frontend.sh install
+	cd ui && yarn check
+	cd ui && yarn test --run
+	./scripts/frontend.sh sync
+	$(MAKE) verify-go
+
+release-artifacts: verify
+	./scripts/build-release.sh dist
+
+docker-build:
+	docker build --build-arg VCS_REF=$(REVISION) -t $(IMAGE) .
+
+docker-smoke: docker-build
+	IMAGE=$(IMAGE) ./scripts/docker-smoke.sh
 
 clean-test:
 	@echo "Cleaning up test artifacts..."
@@ -19,7 +64,7 @@ install-test-deps:
 	echo "WARNING: pip install failed, Python tests may skip"
 
 build: clean-test
-	go build -o /tmp/gatesentry-bin .
+	go build -buildvcs=false -o /tmp/gatesentry-bin .
 
 run: build
 	cd /tmp && ./gatesentry-bin
@@ -27,14 +72,18 @@ run: build
 # ── Unit test coverage (fast, no server needed) ───────────────────────────
 coverage:
 	@echo "Collecting unit-test coverage..."
-	@go test -coverprofile=coverage.txt -covermode=atomic ./application/... ./gatesentryproxy/... 2>/dev/null; \
-	sed -i 's|bitbucket.org/abdullah_irfan/gatesentryf/|application/|g; s|bitbucket.org/abdullah_irfan/gatesentryproxy/|gatestentryproxy/|g' coverage.txt; \
+	@set -e; \
+	go test -coverprofile=coverage.txt -covermode=atomic ./application/...; \
+	go test -vet=off -coverprofile=proxy-coverage.txt -covermode=atomic ./gatesentryproxy/...; \
+	grep -v "^mode:" proxy-coverage.txt >> coverage.txt; \
+	rm -f proxy-coverage.txt; \
+	sed -i 's|bitbucket.org/abdullah_irfan/gatesentryf/|application/|g; s|bitbucket.org/abdullah_irfan/gatesentryproxy/|gatesentryproxy/|g' coverage.txt; \
 	echo "Coverage saved to coverage.txt"
 
 # ── Integration-test coverage (spins up instrumented server) ─────────────
 coverage-int: coverage install-test-deps
 	@echo "Building coverage-instrumented binary..."
-	go build -cover -covermode=atomic -coverpkg=./application/...,./gatesentryproxy/... -o $(COV_BIN) .
+	go build -buildvcs=false -cover -covermode=atomic -coverpkg=./application/...,./gatesentryproxy/... -o $(COV_BIN) .
 	@mkdir -p $(COVDIR)
 	@echo "Starting instrumented server..."
 	@kill `cat /tmp/gatesentry.pid 2>/dev/null` 2>/dev/null || true

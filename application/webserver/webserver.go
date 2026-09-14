@@ -146,6 +146,12 @@ func makeIndexHandler(basePath string) HttpHandlerFunc {
 	}
 }
 
+func registerDashboardAssetRoutes(router *mux.Router) {
+	assetHandler := gatesentryWebserverFrontend.GetAssetHandler()
+	router.PathPrefix("/fs/").Handler(assetHandler)
+	router.Path("/vite.svg").Handler(assetHandler)
+}
+
 func RegisterEndpointsStartServer(
 	Filters *[]gatesentryFilters.GSFilter,
 	runtime *gatesentryWebserverTypes.TemporaryRuntime,
@@ -468,14 +474,8 @@ func RegisterEndpointsStartServer(
 	mime.AddExtensionType(".js", "application/javascript")
 	mime.AddExtensionType(".svg", "image/svg+xml")
 
-	// Serve static assets from the embedded files/fs/ directory.
-	// GetFSHandler() returns fs.Sub(build, "files"), so files live at fs/bundle.js etc.
-	// We only strip the basePath prefix (not /fs), so the remaining path /fs/bundle.js
-	// correctly maps to fs/bundle.js in the embedded filesystem.
-	fsHandler := http.FileServer(gatesentryWebserverFrontend.GetFSHandler())
-	internalServer.sub.PathPrefix("/fs/").Handler(
-		http.StripPrefix("/fs/", fsHandler),
-	)
+	// Serve dashboard assets at the paths emitted by the shared frontend build.
+	registerDashboardAssetRoutes(internalServer.router)
 
 	baseIndexHandler := makeIndexHandler(basePath)
 	internalServer.Get("/", baseIndexHandler)

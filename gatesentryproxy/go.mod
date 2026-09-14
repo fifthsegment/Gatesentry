@@ -1,6 +1,8 @@
 module bitbucket.org/abdullah_irfan/gatesentryproxy
 
-go 1.17
+go 1.24.10
+
+toolchain go1.24.10
 
 require (
 	github.com/h2non/filetype v1.1.3

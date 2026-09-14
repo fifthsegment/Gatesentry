@@ -18,7 +18,10 @@ export default defineConfig({
     rollupOptions: {
       output: {
         entryFileNames: "fs/bundle.js", // The name of the output JavaScript file
-        assetFileNames: "fs/style.css", // The name of the output CSS file
+        // Vite emits more than one stylesheet for this application. Content
+        // hashes give each one a deterministic name instead of relying on
+        // Rollup's collision suffix (for example, style2.css).
+        assetFileNames: "fs/[name]-[hash][extname]",
         manualChunks: undefined, // Disable chunk splitting
       },
     },

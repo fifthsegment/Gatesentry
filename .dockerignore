@@ -1,7 +1,9 @@
 bin/
+dist/
 docker_root/
 pr-binaries/
 test-binaries/
+ui/dist/
 *.log
 .git/
 node_modules/

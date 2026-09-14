@@ -1,199 +1,48 @@
-name: Build PR Binaries
+name: Verify PR
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
-    branches:
-      - master
-      - main
-    paths:
-      - '**.go'
-      - 'ui/**'
-      - 'Dockerfile'
-      - 'docker-compose.yml'
-      - 'build.sh'
-      - '.dockerignore'
+    branches: [master, main]
 
 permissions:
   contents: read
-  pull-requests: write
 
 jobs:
-  build:
+  verify:
     runs-on: ubuntu-latest
-    
     steps:
-      - name: Check out code
-        uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v4
+      - uses: actions/checkout@v4
         with:
-          go-version: '1.24'
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
+          persist-credentials: false
+      - uses: actions/setup-go@v6
         with:
-          node-version: '18'
-
-      - name: Build frontend
-        run: |
-          cd ui
-          npm install
-          npm run build
-          cd ..
-          rm -rf application/webserver/frontend/files/*
-          mv ui/dist/* application/webserver/frontend/files/
-          mv application/webserver/frontend/files/fs/* application/webserver/frontend/files/
-
-      - name: Get dependencies
-        run: go get -v
-
-      - name: Build binaries for multiple platforms
-        run: |
-          mkdir -p pr-binaries
-          echo "Building Linux amd64..."
-          env GOOS=linux GOARCH=amd64 go build -o pr-binaries/gatesentry-linux-amd64
-          echo "Building Linux arm64..."
-          env GOOS=linux GOARCH=arm64 go build -o pr-binaries/gatesentry-linux-arm64
-          echo "Building macOS amd64..."
-          env GOOS=darwin GOARCH=amd64 go build -o pr-binaries/gatesentry-macos-amd64
-          echo "Building macOS arm64 (Apple Silicon)..."
-          env GOOS=darwin GOARCH=arm64 go build -o pr-binaries/gatesentry-macos-arm64
-          echo "Building Windows amd64..."
-          env GOOS=windows GOARCH=amd64 go build -o pr-binaries/gatesentry-windows-amd64.exe
-          
-          chmod +x pr-binaries/gatesentry-*
-          ls -lh pr-binaries/
-
-      - name: Smoke test Linux binary
-        run: |
-          echo "Starting Gatesentry for smoke test..."
-          GATESENTRY_DNS_PORT=10053 ./pr-binaries/gatesentry-linux-amd64 &
-          GS_PID=$!
-          trap "kill $GS_PID 2>/dev/null || true" EXIT
-
-          for i in $(seq 1 20); do
-            if curl -s http://localhost:10786 > /tmp/smoke-response 2>/dev/null; then
-              echo "Server healthy after ${i}s"
-              break
-            fi
-            [ $i -eq 20 ] && echo "Server never became healthy" && kill $GS_PID && exit 1
-            sleep 1
-          done
-
-          if grep -q '<html' /tmp/smoke-response; then
-            echo "UI serves HTML correctly"
-          else
-            echo "UI response missing <html>"
-            head -20 /tmp/smoke-response
-            exit 1
-          fi
-
-      - name: Upload binaries as artifacts
-        uses: actions/upload-artifact@v4
+          go-version: 1.24.10
+          cache-dependency-path: |
+            go.sum
+            application/go.sum
+            gatesentryproxy/go.sum
+      - uses: actions/setup-node@v5
         with:
-          name: gatesentry-pr-${{ github.event.pull_request.number }}
-          path: pr-binaries/*
+          node-version: 24
+      - id: yarn-cache
+        name: Enable Yarn 4.10.3
+        run: |
+          corepack enable
+          corepack prepare yarn@4.10.3 --activate
+          echo "dir=$(cd ui && yarn config get cacheFolder)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v4
+        with:
+          path: ${{ steps.yarn-cache.outputs.dir }}
+          key: ${{ runner.os }}-yarn-${{ hashFiles('ui/yarn.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-yarn-
+      - name: Verify source and build
+        run: make verify
+      - name: Build revision artifacts
+        run: make release-artifacts
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gatesentry-pr-${{ github.event.pull_request.number }}-${{ github.sha }}
+          path: dist/
+          if-no-files-found: error
           retention-days: 30
-
-      - name: Generate download links and comment
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
-            const path = require('path');
-            
-            // Get file sizes
-            const binariesDir = 'pr-binaries';
-            const files = fs.readdirSync(binariesDir);
-            
-            let fileList = '';
-            files.forEach(file => {
-              const stats = fs.statSync(path.join(binariesDir, file));
-              const sizeMB = (stats.size / (1024 * 1024)).toFixed(2);
-              fileList += `- \`${file}\` (${sizeMB} MB)\n`;
-            });
-            
-            const runId = context.runId;
-            const repo = context.repo;
-            const prNumber = context.payload.pull_request.number;
-            const sha = context.payload.pull_request.head.sha.substring(0, 7);
-            
-            // Create comment body
-            const commentBody = `## 🚀 PR Build Artifacts
-            
-            Test binaries have been built for this PR (commit ${sha}).
-            
-            ### Available Binaries:
-            ${fileList}
-            
-            ### Download Instructions:
-            
-            1. **Via GitHub Actions UI:**
-               - Go to the [Actions tab](https://github.com/${repo.owner}/${repo.repo}/actions/runs/${runId})
-               - Scroll down to "Artifacts" section
-               - Download \`gatesentry-pr-${prNumber}\`
-            
-            2. **Via GitHub CLI:**
-               \`\`\`bash
-               gh run download ${runId} -n gatesentry-pr-${prNumber} -R ${repo.owner}/${repo.repo}
-               \`\`\`
-            
-            ### Quick Test (Linux/macOS):
-            \`\`\`bash
-            chmod +x gatesentry-*
-            ./gatesentry-linux-amd64
-            \`\`\`
-            
-            ### Quick Test (Windows):
-            \`\`\`powershell
-            .\\gatesentry-windows-amd64.exe
-            \`\`\`
-            
-            ---
-            
-            📝 *Binaries are kept for 30 days and automatically deleted afterwards.*`;
-            
-            // Find existing comment
-            const { data: comments } = await github.rest.issues.listComments({
-              owner: repo.owner,
-              repo: repo.repo,
-              issue_number: prNumber
-            });
-            
-            const botComment = comments.find(comment => 
-              comment.user.login === 'github-actions[bot]' && 
-              comment.body.includes('PR Build Artifacts')
-            );
-            
-            // Update or create comment
-            if (botComment) {
-              await github.rest.issues.updateComment({
-                owner: repo.owner,
-                repo: repo.repo,
-                comment_id: botComment.id,
-                body: commentBody
-              });
-              console.log('Updated existing comment');
-            } else {
-              await github.rest.issues.createComment({
-                owner: repo.owner,
-                repo: repo.repo,
-                issue_number: prNumber,
-                body: commentBody
-              });
-              console.log('Created new comment');
-            }
-
-      - name: Build summary
-        run: |
-          echo "## Build Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "✅ Successfully built binaries for PR #${{ github.event.pull_request.number }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Binaries:" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          ls -lh pr-binaries/ | tail -n +2 | awk '{print "- " $9 " (" $5 ")"}' >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Artifacts are available for download from the Actions tab." >> $GITHUB_STEP_SUMMARY
