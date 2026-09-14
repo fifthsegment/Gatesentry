@@ -29,4 +29,3 @@ done
 grep -Eqi '<!doctype html|<html' "$response" || { echo "error: dashboard smoke response is not HTML" >&2; exit 1; }
 curl --fail --silent --show-error --proxy "http://127.0.0.1:$proxy_port" http://example.com/ >/dev/null
 echo "Docker dashboard and explicit proxy smoke checks passed"
-

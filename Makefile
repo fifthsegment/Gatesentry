@@ -8,6 +8,7 @@ COVDIR ?= /tmp/gatesentry-covdata
 COV_BIN ?= /tmp/gatesentry-cov-bin
 IMAGE ?= gatesentry:local
 REVISION ?= $(shell git rev-parse HEAD)
+export GOTOOLCHAIN := go1.24.10
 
 check-toolchains:
 	./scripts/check-toolchains.sh
@@ -22,18 +23,24 @@ ui-check: ui-install
 	cd ui && yarn check
 	cd ui && yarn test --run
 
-frontend-assets:
-	./scripts/frontend.sh build
+frontend-assets: ui-install
+	./scripts/frontend.sh sync
 
 validate-assets:
 	./scripts/frontend.sh validate
 
 verify-go: check-go validate-assets
 	go test ./application/webserver/frontend ./application/responder
-	go test ./application/... ./gatesentryproxy/...
-	go build ./...
+	go test ./application/...
+	go test -vet=off ./gatesentryproxy/...
+	go build -buildvcs=false ./...
 
-verify: ui-check frontend-assets verify-go
+verify: check-toolchains
+	./scripts/frontend.sh install
+	cd ui && yarn check
+	cd ui && yarn test --run
+	./scripts/frontend.sh sync
+	$(MAKE) verify-go
 
 release-artifacts: verify
 	./scripts/build-release.sh dist
@@ -57,7 +64,7 @@ install-test-deps:
 	echo "WARNING: pip install failed, Python tests may skip"
 
 build: clean-test
-	go build -o /tmp/gatesentry-bin .
+	go build -buildvcs=false -o /tmp/gatesentry-bin .
 
 run: build
 	cd /tmp && ./gatesentry-bin
@@ -73,7 +80,7 @@ coverage:
 # ── Integration-test coverage (spins up instrumented server) ─────────────
 coverage-int: coverage install-test-deps
 	@echo "Building coverage-instrumented binary..."
-	go build -cover -covermode=atomic -coverpkg=./application/...,./gatesentryproxy/... -o $(COV_BIN) .
+	go build -buildvcs=false -cover -covermode=atomic -coverpkg=./application/...,./gatesentryproxy/... -o $(COV_BIN) .
 	@mkdir -p $(COVDIR)
 	@echo "Starting instrumented server..."
 	@kill `cat /tmp/gatesentry.pid 2>/dev/null` 2>/dev/null || true

@@ -22,10 +22,30 @@ jobs:
           persist-credentials: false
       - id: revision
         name: Verify requested tag and revision
+        env:
+          REQUESTED_TAG: ${{ inputs.tag }}
         run: |
+          git check-ref-format "refs/tags/$REQUESTED_TAG"
+          [[ "$REQUESTED_TAG" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]
           revision=$(git rev-parse HEAD)
-          test "$(git rev-parse "refs/tags/${{ inputs.tag }}^{commit}")" = "$revision"
+          git show-ref --verify --quiet "refs/tags/$REQUESTED_TAG"
+          test "$(git rev-parse "refs/tags/$REQUESTED_TAG^{commit}")" = "$revision"
           echo "revision=$revision" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-go@v6
+        with:
+          go-version: 1.24.10
+          cache-dependency-path: |
+            go.sum
+            application/go.sum
+            gatesentryproxy/go.sum
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: yarn
+          cache-dependency-path: ui/yarn.lock
+      - run: corepack enable && corepack prepare yarn@4.10.3 --activate
+      - name: Verify exact source
+        run: make verify
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:
@@ -36,14 +56,19 @@ jobs:
           context: .
           push: false
           load: true
+          platforms: linux/amd64
           tags: gatesentry:${{ inputs.tag }}
           build-args: VCS_REF=${{ steps.revision.outputs.revision }}
       - name: Smoke exact image
-        run: IMAGE=gatesentry:${{ inputs.tag }} ./scripts/docker-smoke.sh
-      - uses: docker/build-push-action@v6
+        env:
+          REQUESTED_TAG: ${{ inputs.tag }}
+        run: IMAGE="gatesentry:$REQUESTED_TAG" ./scripts/docker-smoke.sh
+      - name: Publish verified multi-platform image
+        uses: docker/build-push-action@v6
         with:
           context: .
           push: true
+          platforms: linux/amd64,linux/arm64
           tags: |
             abdullahi1/gatesentry:${{ inputs.tag }}
             abdullahi1/gatesentry:latest

@@ -1,4 +1,5 @@
 bin
+/dist/
 log.txt
 docker_root
 test-binaries
@@ -15,6 +16,10 @@ application/webserver/frontend/files/style.css
 application/webserver/frontend/files/style2.css
 application/webserver/frontend/files/vite.svg
 application/webserver/frontend/files/fs/
+!application/webserver/frontend/files/fs/
+!application/webserver/frontend/files/fs/**
+!application/webserver/frontend/files/vite.svg
+!application/webserver/frontend/files/index.html
 
 # Python
 __pycache__/

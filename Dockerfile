@@ -1,4 +1,5 @@
 FROM node:24.21.0-alpine AS ui-builder
+RUN apk add --no-cache bash
 WORKDIR /src
 COPY . .
 RUN corepack enable && corepack prepare yarn@4.10.3 --activate
@@ -8,10 +9,11 @@ FROM golang:1.24.10-alpine AS go-builder
 RUN apk add --no-cache bash git
 WORKDIR /src
 COPY . .
+RUN rm -rf application/webserver/frontend/files && mkdir -p application/webserver/frontend/files
 COPY --from=ui-builder /src/application/webserver/frontend/files/ ./application/webserver/frontend/files/
 RUN ./scripts/frontend.sh validate
 RUN go mod download
-RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /gatesentry-bin .
+RUN CGO_ENABLED=0 go build -buildvcs=false -trimpath -ldflags="-s -w" -o /gatesentry-bin .
 
 FROM alpine:3.22
 ARG VCS_REF=unknown

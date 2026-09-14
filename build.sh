@@ -16,11 +16,12 @@ OUTDIR=$(dirname "$OUTPUT")
 mkdir -p "$OUTDIR"
 
 ./scripts/check-toolchains.sh go
+export GOTOOLCHAIN=go1.24.10
 
 if $BUILD_UI; then
   ./scripts/frontend.sh
 fi
 
 echo "Building GateSentry → $OUTPUT..."
-go build -ldflags="-s -w" -o "$OUTPUT" .
+go build -buildvcs=false -trimpath -ldflags="-s -w" -o "$OUTPUT" .
 echo "Build successful: $OUTPUT"

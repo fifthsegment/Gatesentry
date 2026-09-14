@@ -7,7 +7,7 @@ HTTP/HTTPS proxy with SSL interception (MITM), content filtering, and a built-in
 
 ## Reproducible build
 
-GateSentry requires Go 1.24.10, Node.js 24.21.0, and Yarn 4.10.3. Enable the Yarn version declared in `ui/package.json` with Corepack, then run `make verify`. This fast path performs an immutable dependency install, UI checks and tests, a fresh dashboard build and embedded-asset sync, embedded dashboard and block-page tests, application and proxy tests, and a Go build. Any failed stage stops the build.
+GateSentry builds with Go 1.24.10, Node.js 24.x, and Yarn 4.10.3. Enable the exact Yarn version declared in `ui/package.json` with `corepack enable && corepack prepare yarn@4.10.3 --activate`, then run `make verify`. This fast path performs an immutable dependency install, UI checks and tests, a fresh dashboard build and embedded-asset sync, embedded dashboard and block-page tests, application and proxy tests, and a Go build. Any failed stage stops the build.
 
 Use `make verify-go` when the frontend assets have already been freshly synced and only Go checks are needed. `make docker-smoke` separately builds the checked-out revision into an image and exercises the dashboard and explicit proxy; it requires Docker and network access. The slower privileged integration suite remains available through `make test`.
 
@@ -40,7 +40,15 @@ There are 2 ways to run Gatesentry, either using the docker image or using the s
 1.  Downloading Gatesentry:
 
     Navigate to the 'Releases' section of this repository.
-    Identify and download the appropriate file for your operating system, named either gatesentry-linux or gatesentry-mac.
+    Download the binary for your operating system and CPU:
+
+    | Operating system | x86-64 / amd64 | ARM64 |
+    | ---------------- | -------------- | ----- |
+    | Linux | `gatesentry-linux-amd64` | `gatesentry-linux-arm64` |
+    | macOS | `gatesentry-darwin-amd64` | `gatesentry-darwin-arm64` |
+    | Windows | `gatesentry-windows-amd64.exe` | Not currently published |
+
+    Releases currently provide the Windows binary directly; a Windows installer is not published.
 
 2.  Installation:
 
@@ -50,16 +58,16 @@ There are 2 ways to run Gatesentry, either using the docker image or using the s
     Open a terminal window and navigate to the directory containing the downloaded binary.
     Run the following command to grant execution permissions to the binary file:
 
-        chmod +x gatesentry-{platform}
+        chmod +x gatesentry-{os}-{arch}
 
-    Replace `{platform}` with your operating system (linux or mac).
+    Replace `{os}` with `linux` or `darwin` and `{arch}` with `amd64` or `arm64`.
     Proceed to execute the binary file to initiate the server.
 
     **Running as a Service (Optional)**
 
     If you want Gatesentry to keep running in the background on your machine, install it as :
 
-    `./gatesentry-{platform} -service install`
+    `./gatesentry-{os}-{arch} -service install`
 
     Next, on linux you can use your system service runner to start or stop it, for example for ubuntu:
 
@@ -69,16 +77,16 @@ There are 2 ways to run Gatesentry, either using the docker image or using the s
 
     **For Windows**
 
-    The installer (GatesentrySetup.exe) contains instructions.
+    Download `gatesentry-windows-amd64.exe` and run it from PowerShell or Command Prompt.
 
     **Running as a Service**
 
-    The installer (GatesentrySetup.exe) should automatically install a service. You can look for it by searching for gatesentry in your Service manager (open it by running `services.msc`)
+    Run `gatesentry-windows-amd64.exe -service install` from an elevated PowerShell or Command Prompt, then look for GateSentry in the Windows Services manager (`services.msc`).
 
 3.  Start the server:
 
     ```
-    ./gatesentry-{platform}
+    ./gatesentry-{os}-{arch}
     ```
 
     The proxy listens on port 10413, admin UI on port 10786.
@@ -88,12 +96,12 @@ There are 2 ways to run Gatesentry, either using the docker image or using the s
 **Linux / macOS:**
 
 ```
-./gatesentry-{platform} -service install
+./gatesentry-{os}-{arch} -service install
 service gatesentry start
 service gatesentry stop
 ```
 
-**Windows:** Run `GatesentrySetup.exe`. The installer registers a Windows service automatically.
+**Windows:** Run `gatesentry-windows-amd64.exe -service install` from an elevated shell, then manage GateSentry through `services.msc`.
 
 | Port  | Purpose                        |
 | ----- | ------------------------------ |

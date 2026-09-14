@@ -23,7 +23,7 @@ jobs:
             gatesentryproxy/go.sum
       - uses: actions/setup-node@v5
         with:
-          node-version: 24.21.0
+          node-version: 24
           cache: yarn
           cache-dependency-path: ui/yarn.lock
       - run: corepack enable && corepack prepare yarn@4.10.3 --activate
@@ -33,8 +33,7 @@ jobs:
         run: make release-artifacts
       - uses: actions/upload-artifact@v4
         with:
-          name: gatesentry-pr-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}
+          name: gatesentry-pr-${{ github.event.pull_request.number }}-${{ github.sha }}
           path: dist/
           if-no-files-found: error
           retention-days: 30
-
