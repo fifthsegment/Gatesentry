@@ -55,9 +55,11 @@ jobs:
             test "$(git rev-parse "refs/tags/$tag^{commit}")" = "$revision"
             publish=true
           fi
-          echo "revision=$revision" >> "$GITHUB_OUTPUT"
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "publish=$publish" >> "$GITHUB_OUTPUT"
+          {
+            echo "revision=$revision"
+            echo "tag=$tag"
+            echo "publish=$publish"
+          } >> "$GITHUB_OUTPUT"
       - uses: actions/setup-go@v6
         with:
           go-version: 1.24.10
