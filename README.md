@@ -5,6 +5,8 @@ HTTP/HTTPS proxy with SSL interception (MITM), content filtering, and a built-in
 [![Codecov](https://codecov.io/gh/fifthsegment/Gatesentry/branch/master/graph/badge.svg)](https://codecov.io/gh/fifthsegment/Gatesentry)
 [![Release](https://img.shields.io/github/v/release/fifthsegment/Gatesentry)](https://github.com/fifthsegment/Gatesentry/releases/latest)
 
+[Security policy and vulnerability reporting](SECURITY.md) · [Privacy, AI data handling, backups, and filtering limits](SECURITY.md#local-data-and-privacy)
+
 ## Reproducible build
 
 GateSentry builds with Go 1.24.10, Node.js 24.x, and Yarn 4.10.3. Enable the exact Yarn version declared in `ui/package.json` with `corepack enable && corepack prepare yarn@4.10.3 --activate`, then run `make verify`. This fast path performs an immutable dependency install, UI checks and tests, a fresh dashboard build and embedded-asset sync, embedded dashboard and block-page tests, application and proxy tests, and a Go build. Any failed stage stops the build.
@@ -17,11 +19,11 @@ Use `make verify-go` when the frontend assets have already been freshly synced a
 
 Runs as a local proxy on your machine or network. Clients route traffic through it and Gatesentry can:
 
-- Inspect and filter HTTPS traffic (MITM with a generated CA certificate)
+- Inspect and filter HTTPS traffic when advanced MITM is enabled, routed, and configured with a trusted CA certificate
 - Block domains via DNS (runs its own DNS server, pulls blocklists from external sources)
 - Match URLs and content against keyword, MIME, and domain rules
 - Apply time-based and per-user access schedules
-- Log all traffic and display stats in the web UI
+- Log DNS and proxy decisions and display stats in the web UI
 
 Useful as a network-wide content filter, a privacy guard, a parental control layer, or a sinkhole for known-bad domains.
 
@@ -33,7 +35,7 @@ There are 2 ways to run Gatesentry, either using the docker image or using the s
 
 ### Method 1: Using Docker
 
-1. Use the [docker-compose.yml](https://github.com/fifthsegment/Gatesentry/blob/master/docker-compose.yml) file from the root of this repo as a template, copy and paste it to any directory on your computer, then run the following command in a terminal `docker compose up`
+1. Use the [docker-compose.yml](docker-compose.yml) file from the root of this repo as a template, copy and paste it to any directory on your computer, then run the following command in a terminal `docker compose up`
 
 ### Method 2: Using the Gatesentry binary directly
 
@@ -105,11 +107,10 @@ service gatesentry stop
 
 | Port  | Purpose                        |
 | ----- | ------------------------------ |
-| 10413 | Explicit proxy                 |
-| 10414 | Transparent proxy (optional)   |
-| 10786 | Web admin panel                |
-| 53    | DNS server                     |
-| 80    | Block page server              |
+| 10413 | Explicit proxy (all interfaces) |
+| 10414 | Transparent proxy (Linux; optional routing required) |
+| 10786 | Plain-HTTP web admin panel (all interfaces) |
+| 53    | DNS server (TCP and UDP; all interfaces by default) |
 
 ### Default credentials
 
@@ -120,9 +121,18 @@ Password: admin
 
 Change the password after first login.
 
+Restrict these listeners to trusted clients with the host firewall. Do not
+expose the admin UI directly to the Internet. The supplied Docker Compose file
+uses host networking, so the host firewall controls its exposure. See the
+[security and hardening guidance](SECURITY.md#administrative-exposure-and-hardening).
+
 ### DNS
 
-The DNS server blocks domains from external blocklists. Use `dns_resolver` in settings to choose an upstream (defaults to `8.8.8.8:53`).
+DNS-first onboarding is the simple default. The DNS server blocks domains from
+external blocklists. Use `dns_resolver` in settings to choose an upstream
+(defaults to `8.8.8.8:53`). DNS filtering acts on domains; it cannot inspect or
+explain URL, MIME, keyword, or image-content decisions. See the
+[filtering coverage limits](SECURITY.md#filtering-coverage-limits).
 
 ## Transparent Proxy Mode (Linux only)
 
@@ -170,7 +180,7 @@ ip route add local 0.0.0.0/0 dev lo table 100
 - Auto-starts on Linux with graceful fallback
 - Protocol auto-detection (HTTP vs HTTPS)
 - SSL Bump support for HTTPS filtering
-- All existing filters work in transparent mode
+- Applies filters supported by the detected proxy path; review the [HTTPS and protocol limitations](SECURITY.md#filtering-coverage-limits)
 
 ## Local Development
 
