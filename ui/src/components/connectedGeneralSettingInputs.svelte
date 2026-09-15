@@ -52,7 +52,7 @@
         createNotificationSuccess({ subtitle: $_("Setting updated") }, $_),
       );
     }
-    if (keyName === "admin_password") {
+    if (keyName === "admin_password" || keyName === "admin_username") {
       store.logout();
       gsNavigate("/login");
       return;

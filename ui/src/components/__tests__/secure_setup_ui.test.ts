@@ -19,6 +19,8 @@ test("login never persists administrator password", () => {
   expect(loginSource).not.toContain(`localStorage.getItem("password"`);
   expect(loginSource).toContain("/api/setup/status");
   expect(appSource).toContain('gsNavigate("/setup")');
-  expect(generalSettingsSource).toContain('keyName === "admin_password"');
+  expect(generalSettingsSource).toContain(
+    'keyName === "admin_password" || keyName === "admin_username"',
+  );
   expect(generalSettingsSource).toContain('gsNavigate("/login")');
 });

@@ -60,6 +60,12 @@ type bootstrapFile struct {
 
 type AuthManager struct{ store *gatesentry2storage.MapStore }
 
+type sessionClaims struct {
+	Username   string `json:"username"`
+	Generation uint64 `json:"generation"`
+	jwt.RegisteredClaims
+}
+
 func randomSecret() (string, error) {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
@@ -100,23 +106,53 @@ func validatePassword(password string) error {
 }
 
 func validateBootstrapAuthorization(value string) error {
-	if len(value) < 32 || len(value) > 1024 {
-		return errors.New("bootstrap authorization must contain between 32 and 1024 bytes")
+	decoded, err := base64.RawURLEncoding.DecodeString(value)
+	if err != nil || len(decoded) != 32 {
+		return errors.New("bootstrap authorization must be 32 random bytes encoded as unpadded base64url")
+	}
+	return nil
+}
+
+func validateAuthState(state authState) error {
+	if state.Version != 1 || state.JWTSecret == "" || state.SessionGeneration == 0 {
+		return errors.New("unsupported authentication state")
+	}
+	if state.BootstrapComplete {
+		// Legacy GateSentry accepted an empty administrator username. Preserve it
+		// during migration so upgrading cannot silently lock out that owner. New
+		// setup and credential changes still require a non-empty username.
+		if state.PasswordHash == "" || state.BootstrapTokenDigest != "" {
+			return errors.New("authentication state is inconsistent")
+		}
+	} else if state.Username != "" || state.PasswordHash != "" {
+		return errors.New("authentication state is inconsistent")
 	}
 	return nil
 }
 
 func loadBootstrapFile(path string) (bootstrapFile, error) {
 	var cfg bootstrapFile
-	info, err := os.Stat(path)
+	info, err := os.Lstat(path)
 	if err != nil {
 		return cfg, errors.New("cannot read bootstrap secret file")
 	}
-	if !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 {
+	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 {
 		return cfg, errors.New("bootstrap secret file must be a regular file with mode 0600 or stricter")
 	}
-	b, err := os.ReadFile(path)
+	file, err := os.Open(path)
 	if err != nil {
+		return cfg, errors.New("cannot read bootstrap secret file")
+	}
+	openedInfo, statErr := file.Stat()
+	if statErr != nil || !openedInfo.Mode().IsRegular() || openedInfo.Mode().Perm()&0077 != 0 || !os.SameFile(info, openedInfo) {
+		if closeErr := file.Close(); closeErr != nil {
+			return cfg, errors.New("cannot close bootstrap secret file")
+		}
+		return cfg, errors.New("bootstrap secret file must be a regular file with mode 0600 or stricter")
+	}
+	b, readErr := io.ReadAll(file)
+	closeErr := file.Close()
+	if readErr != nil || closeErr != nil {
 		return cfg, errors.New("cannot read bootstrap secret file")
 	}
 	dec := json.NewDecoder(strings.NewReader(string(b)))
@@ -153,23 +189,23 @@ func NewAuthManager(store *gatesentry2storage.MapStore, bootstrapPath string) (*
 		if err := json.Unmarshal([]byte(rawState), &state); err != nil {
 			return nil, fmt.Errorf("parse authentication state: %w", err)
 		}
-		if state.Version != 1 || state.JWTSecret == "" {
-			return nil, errors.New("unsupported authentication state")
-		}
-		if state.BootstrapComplete && (state.Username == "" || state.PasswordHash == "" || state.BootstrapTokenDigest != "") {
-			return nil, errors.New("authentication state is inconsistent")
-		}
-		if !state.BootstrapComplete && (state.Username != "" || state.PasswordHash != "") {
-			return nil, errors.New("authentication state is inconsistent")
-		}
-		// A completed installation never needs the bootstrap file again. This
-		// also lets operators remove a first-run Docker secret before restart.
-		if state.BootstrapComplete {
-			return a, nil
+		if err := validateAuthState(state); err != nil {
+			return nil, err
 		}
 	}
 	var cfg bootstrapFile
-	if bootstrapPath != "" {
+	// A completed installation never reads bootstrap input again. This lets
+	// operators remove the first-run secret and prevents stale mounted input
+	// from affecting established credentials.
+	stateComplete := rawState != ""
+	if stateComplete {
+		var state authState
+		if err := json.Unmarshal([]byte(rawState), &state); err != nil {
+			return nil, fmt.Errorf("parse authentication state: %w", err)
+		}
+		stateComplete = state.BootstrapComplete
+	}
+	if bootstrapPath != "" && !stateComplete {
 		cfg, err = loadBootstrapFile(bootstrapPath)
 		if err != nil {
 			return nil, err
@@ -195,11 +231,8 @@ func NewAuthManager(store *gatesentry2storage.MapStore, bootstrapPath string) (*
 			if err := json.Unmarshal([]byte(raw), &state); err != nil {
 				return fmt.Errorf("parse authentication state: %w", err)
 			}
-			if state.Version != 1 || state.JWTSecret == "" {
-				return errors.New("unsupported authentication state")
-			}
-			if state.BootstrapComplete {
-				return nil
+			if err := validateAuthState(state); err != nil {
+				return err
 			}
 		} else {
 			state = authState{Version: 1, SessionGeneration: 1, JWTSecret: newJWTSecret}
@@ -217,6 +250,18 @@ func NewAuthManager(store *gatesentry2storage.MapStore, bootstrapPath string) (*
 		}
 		_, hasLegacyUser := legacyFields["admin_username"]
 		_, hasLegacyPassword := legacyFields["admin_password"]
+		if state.BootstrapComplete {
+			if hasLegacyUser || hasLegacyPassword {
+				delete(legacyFields, "admin_username")
+				delete(legacyFields, "admin_password")
+				clean, err := json.Marshal(legacyFields)
+				if err != nil {
+					return err
+				}
+				values["general_settings"] = string(clean)
+			}
+			return nil
+		}
 		if hasLegacyUser || hasLegacyPassword {
 			if !hasLegacyUser || !hasLegacyPassword {
 				return errors.New("legacy administrator credentials are incomplete")
@@ -226,8 +271,11 @@ func NewAuthManager(store *gatesentry2storage.MapStore, bootstrapPath string) (*
 				return fmt.Errorf("hash legacy administrator password: %w", err)
 			}
 			state.BootstrapComplete, state.Username, state.PasswordHash = true, general.AdminUser, string(hash)
-			general.AdminUser, general.AdminPassword = "", ""
-			clean, err := json.Marshal(general)
+			state.BootstrapTokenDigest = ""
+			state.SessionGeneration++
+			delete(legacyFields, "admin_username")
+			delete(legacyFields, "admin_password")
+			clean, err := json.Marshal(legacyFields)
 			if err != nil {
 				return err
 			}
@@ -271,15 +319,8 @@ func (a *AuthManager) read() (authState, error) {
 	if err := json.Unmarshal([]byte(raw), &state); err != nil {
 		return state, fmt.Errorf("parse authentication state: %w", err)
 	}
-	if state.Version != 1 || state.JWTSecret == "" {
-		return state, errors.New("unsupported authentication state")
-	}
-	if state.BootstrapComplete {
-		if state.Username == "" || state.PasswordHash == "" || state.BootstrapTokenDigest != "" {
-			return state, errors.New("authentication state is inconsistent")
-		}
-	} else if state.Username != "" || state.PasswordHash != "" {
-		return state, errors.New("authentication state is inconsistent")
+	if err := validateAuthState(state); err != nil {
+		return state, err
 	}
 	return state, nil
 }
@@ -318,6 +359,9 @@ func (a *AuthManager) Bootstrap(username, password, authorization string, truste
 		var state authState
 		if err := json.Unmarshal([]byte(raw), &state); err != nil {
 			return "", fmt.Errorf("parse authentication state: %w", err)
+		}
+		if err := validateAuthState(state); err != nil {
+			return "", err
 		}
 		if state.BootstrapComplete {
 			return "", errSetupComplete
@@ -374,7 +418,10 @@ func (a *AuthManager) CreateToken(username string) (string, error) {
 		return "", errInvalidLogin
 	}
 	now := time.Now()
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{"username": username, "generation": state.SessionGeneration, "nbf": now.Unix(), "exp": now.Add(time.Hour).Unix()})
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, sessionClaims{
+		Username: username, Generation: state.SessionGeneration,
+		RegisteredClaims: jwt.RegisteredClaims{IssuedAt: jwt.NewNumericDate(now), NotBefore: jwt.NewNumericDate(now), ExpiresAt: jwt.NewNumericDate(now.Add(time.Hour))},
+	})
 	return token.SignedString([]byte(state.JWTSecret))
 }
 
@@ -383,7 +430,8 @@ func (a *AuthManager) VerifyToken(tokenString string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+	claims := &sessionClaims{}
+	token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
 		if token.Method.Alg() != jwt.SigningMethodHS256.Alg() {
 			return nil, errors.New("unexpected signing method")
 		}
@@ -392,16 +440,11 @@ func (a *AuthManager) VerifyToken(tokenString string) (string, error) {
 	if err != nil || !token.Valid {
 		return "", errInvalidLogin
 	}
-	claims, ok := token.Claims.(jwt.MapClaims)
-	if !ok {
+	if claims.IssuedAt == nil || claims.NotBefore == nil || claims.ExpiresAt == nil ||
+		claims.Username != state.Username || claims.Generation != state.SessionGeneration || !state.BootstrapComplete {
 		return "", errInvalidLogin
 	}
-	username, ok := claims["username"].(string)
-	generation, okGen := claims["generation"].(float64)
-	if !ok || !okGen || username != state.Username || uint64(generation) != state.SessionGeneration || !state.BootstrapComplete {
-		return "", errInvalidLogin
-	}
-	return username, nil
+	return claims.Username, nil
 }
 
 func (a *AuthManager) ChangeCredentials(username, password string) error {
@@ -411,6 +454,9 @@ func (a *AuthManager) ChangeCredentials(username, password string) error {
 	return a.store.UpdateValue(authStateKey, func(raw string) (string, error) {
 		var state authState
 		if err := json.Unmarshal([]byte(raw), &state); err != nil {
+			return "", err
+		}
+		if err := validateAuthState(state); err != nil {
 			return "", err
 		}
 		if !state.BootstrapComplete {
@@ -439,6 +485,9 @@ func (a *AuthManager) ChangeCredentialsAndGeneral(username, password string, gen
 	return a.store.UpdateMap(func(values map[string]string) error {
 		var state authState
 		if err := json.Unmarshal([]byte(values[authStateKey]), &state); err != nil {
+			return err
+		}
+		if err := validateAuthState(state); err != nil {
 			return err
 		}
 		if !state.BootstrapComplete {
@@ -477,6 +526,14 @@ func (a *AuthManager) ChangeCredentialsAndGeneral(username, password string, gen
 }
 
 func requestIsLoopback(r *http.Request) bool {
+	// The admin listener has no configured trusted-proxy list. A connection
+	// arriving through any forwarding-aware proxy must therefore use the
+	// one-time authorization, even when the immediate TCP peer is loopback.
+	for _, header := range []string{"Forwarded", "X-Forwarded-For", "X-Real-IP"} {
+		if strings.TrimSpace(r.Header.Get(header)) != "" {
+			return false
+		}
+	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		return false

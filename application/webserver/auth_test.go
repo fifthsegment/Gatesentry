@@ -14,7 +14,12 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
+
+	"github.com/golang-jwt/jwt/v5"
 )
+
+const testBootstrapAuthorization = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
 
 func authStore(t *testing.T) *gatesentry2storage.MapStore {
 	t.Helper()
@@ -128,6 +133,8 @@ func TestLegacyMigrationPreservesPreviouslyAcceptedCredentialShapes(t *testing.T
 		name, username, password string
 	}{
 		{name: "empty password", username: "owner", password: ""},
+		{name: "empty username", username: "", password: "legacy-password"},
+		{name: "empty username and password", username: "", password: ""},
 		{name: "oversized password", username: "owner", password: strings.Repeat("p", 100)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -148,14 +155,94 @@ func TestLegacyMigrationPreservesPreviouslyAcceptedCredentialShapes(t *testing.T
 			if ok, err := auth.Verify(tc.username, tc.password); err != nil || !ok {
 				t.Fatalf("legacy login = %v, %v", ok, err)
 			}
+			token, err := auth.CreateToken(tc.username)
+			if err != nil {
+				t.Fatalf("create migrated session: %v", err)
+			}
+			if got, err := auth.VerifyToken(token); err != nil || got != tc.username {
+				t.Fatalf("verify migrated session = %q, %v", got, err)
+			}
 		})
+	}
+}
+
+func TestLegacyMigrationPreservesUnrelatedGeneralSettings(t *testing.T) {
+	store := authStore(t)
+	legacy := `{"log_location":"./log.db","admin_username":"admin","admin_password":"admin","future_setting":{"enabled":true}}`
+	if err := store.Update("general_settings", legacy); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewAuthManager(store, ""); err != nil {
+		t.Fatal(err)
+	}
+	var migrated map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(store.GetOrDefault("general_settings", "")), &migrated); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := migrated["future_setting"]; !ok {
+		t.Fatal("migration removed an unrelated general setting")
+	}
+	if _, ok := migrated["admin_username"]; ok {
+		t.Fatal("migration retained legacy username")
+	}
+	if _, ok := migrated["admin_password"]; ok {
+		t.Fatal("migration retained legacy password")
+	}
+}
+
+func TestLegacyMigrationConsumesPersistedAuthorization(t *testing.T) {
+	store := authStore(t)
+	path := filepath.Join(t.TempDir(), "bootstrap.json")
+	if err := os.WriteFile(path, []byte(`{"authorization":"`+testBootstrapAuthorization+`"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewAuthManager(store, path); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Update("general_settings", `{"log_location":"./log.db","admin_username":"admin","admin_password":"admin"}`); err != nil {
+		t.Fatal(err)
+	}
+	auth, err := NewAuthManager(store, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	complete, requiresAuthorization, err := auth.Status()
+	if err != nil || !complete || requiresAuthorization {
+		t.Fatalf("migrated status: complete=%v authorization=%v err=%v", complete, requiresAuthorization, err)
+	}
+	if ok, err := auth.Verify("admin", "admin"); err != nil || !ok {
+		t.Fatalf("migrated login = %v, %v", ok, err)
+	}
+}
+
+func TestCompletedStateRemovesStaleLegacyCredentialsWithoutReadingBootstrap(t *testing.T) {
+	store := authStore(t)
+	auth, err := NewAuthManager(store, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := auth.Bootstrap("owner", "long-secure-password", "", true); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Update("general_settings", `{"log_location":"./log.db","admin_username":"stale","admin_password":"stale-secret","future_setting":true}`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewAuthManager(store, filepath.Join(t.TempDir(), "missing-bootstrap.json")); err != nil {
+		t.Fatal(err)
+	}
+	raw := store.GetOrDefault("general_settings", "")
+	if strings.Contains(raw, "admin_username") || strings.Contains(raw, "admin_password") || !strings.Contains(raw, "future_setting") {
+		t.Fatalf("stale credential cleanup = %s", raw)
+	}
+	if ok, err := auth.Verify("owner", "long-secure-password"); err != nil || !ok {
+		t.Fatalf("established credentials changed: %v, %v", ok, err)
 	}
 }
 
 func TestBootstrapAuthorizationAndSecretFile(t *testing.T) {
 	store := authStore(t)
 	path := filepath.Join(t.TempDir(), "bootstrap.json")
-	if err := os.WriteFile(path, []byte("{\"authorization\":\"one-time-bootstrap-authorization-1234\"}"), 0600); err != nil {
+	if err := os.WriteFile(path, []byte(`{"authorization":"`+testBootstrapAuthorization+`"}`), 0600); err != nil {
 		t.Fatal(err)
 	}
 	auth, err := NewAuthManager(store, path)
@@ -168,13 +255,13 @@ func TestBootstrapAuthorizationAndSecretFile(t *testing.T) {
 	if err := auth.Bootstrap("owner", "long-secure-password", "", false); !errors.Is(err, errSetupAuth) {
 		t.Fatalf("missing auth = %v", err)
 	}
-	if err := auth.Bootstrap("owner", "long-secure-password", "one-time-bootstrap-authorization-1234", false); err != nil {
+	if err := auth.Bootstrap("owner", "long-secure-password", testBootstrapAuthorization, false); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(store.GetOrDefault(authStateKey, ""), "one-time-bootstrap-authorization-1234") {
+	if strings.Contains(store.GetOrDefault(authStateKey, ""), testBootstrapAuthorization) {
 		t.Fatal("bootstrap secret persisted")
 	}
-	if err := auth.Bootstrap("owner", "long-secure-password", "one-time-bootstrap-authorization-1234", false); !errors.Is(err, errSetupComplete) {
+	if err := auth.Bootstrap("owner", "long-secure-password", testBootstrapAuthorization, false); !errors.Is(err, errSetupComplete) {
 		t.Fatalf("reused auth = %v", err)
 	}
 }
@@ -203,9 +290,16 @@ func TestUnattendedBootstrapAndTrustBoundary(t *testing.T) {
 	for _, addr := range []string{"127.0.0.1:1234", "[::1]:1234"} {
 		r := httptest.NewRequest("POST", "/api/setup", nil)
 		r.RemoteAddr = addr
-		r.Header.Set("X-Forwarded-For", "203.0.113.2")
 		if !requestIsLoopback(r) {
 			t.Fatalf("loopback rejected: %s", addr)
+		}
+	}
+	for _, header := range []string{"Forwarded", "X-Forwarded-For", "X-Real-IP"} {
+		r := httptest.NewRequest("POST", "/api/setup", nil)
+		r.RemoteAddr = "127.0.0.1:1234"
+		r.Header.Set(header, "203.0.113.2")
+		if requestIsLoopback(r) {
+			t.Fatalf("forwarded loopback request trusted: %s", header)
 		}
 	}
 	r := httptest.NewRequest("POST", "/api/setup", nil)
@@ -243,7 +337,7 @@ func TestUnattendedBootstrapRejectsMissingAndConflictingInput(t *testing.T) {
 	t.Run("persisted authorization conflicts with credentials", func(t *testing.T) {
 		store := authStore(t)
 		tokenPath := filepath.Join(t.TempDir(), "token.json")
-		if err := os.WriteFile(tokenPath, []byte(`{"authorization":"one-time-bootstrap-authorization-1234"}`), 0600); err != nil {
+		if err := os.WriteFile(tokenPath, []byte(`{"authorization":"`+testBootstrapAuthorization+`"}`), 0600); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := NewAuthManager(store, tokenPath); err != nil {
@@ -266,7 +360,7 @@ func TestUnattendedBootstrapRejectsMissingAndConflictingInput(t *testing.T) {
 func TestSetupHTTPTrustAuthorizationAndSecretRedaction(t *testing.T) {
 	store := authStore(t)
 	path := filepath.Join(t.TempDir(), "bootstrap.json")
-	const secret = "one-time-bootstrap-authorization-1234"
+	const secret = testBootstrapAuthorization
 	if err := os.WriteFile(path, []byte(`{"authorization":"`+secret+`"}`), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -365,6 +459,41 @@ func TestAuthenticationMiddlewareRejectsPreSetupAndInvalidatedSessions(t *testin
 	}
 }
 
+func TestSessionRequiresBoundedRegisteredClaims(t *testing.T) {
+	store := authStore(t)
+	auth, err := NewAuthManager(store, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := auth.Bootstrap("owner", "long-secure-password", "", true); err != nil {
+		t.Fatal(err)
+	}
+	state, err := auth.read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name   string
+		claims sessionClaims
+	}{
+		{name: "missing registered claims", claims: sessionClaims{Username: state.Username, Generation: state.SessionGeneration}},
+		{name: "missing expiration", claims: sessionClaims{
+			Username: state.Username, Generation: state.SessionGeneration,
+			RegisteredClaims: jwt.RegisteredClaims{IssuedAt: jwt.NewNumericDate(time.Now()), NotBefore: jwt.NewNumericDate(time.Now())},
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			token, err := jwt.NewWithClaims(jwt.SigningMethodHS256, tc.claims).SignedString([]byte(state.JWTSecret))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := auth.VerifyToken(token); err == nil {
+				t.Fatal("session without all bounded registered claims was accepted")
+			}
+		})
+	}
+}
+
 func TestHashFailureDoesNotCompleteSetup(t *testing.T) {
 	store := authStore(t)
 	auth, err := NewAuthManager(store, "")
@@ -380,6 +509,42 @@ func TestHashFailureDoesNotCompleteSetup(t *testing.T) {
 	complete, _, err := auth.Status()
 	if err != nil || complete {
 		t.Fatalf("complete=%v err=%v", complete, err)
+	}
+}
+
+func TestBootstrapPersistenceFailureDoesNotGrantAccess(t *testing.T) {
+	dir := t.TempDir()
+	old := gatesentry2storage.GSBASEDIR
+	gatesentry2storage.SetBaseDir(dir + string(os.PathSeparator))
+	t.Cleanup(func() { gatesentry2storage.SetBaseDir(old) })
+	store, err := gatesentry2storage.OpenMapStore("settings", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Update("general_settings", `{"log_location":"./log.db"}`); err != nil {
+		t.Fatal(err)
+	}
+	auth, err := NewAuthManager(store, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Replacing the storage directory with a regular file forces the atomic
+	// write to fail before its rename commit point.
+	path := filepath.Join(dir, "settings")
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Dir(path)); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Dir(path), []byte("unwritable"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := auth.Bootstrap("owner", "long-secure-password", "", true); err == nil {
+		t.Fatal("expected bootstrap persistence error")
+	}
+	if ok, err := auth.Verify("owner", "long-secure-password"); err == nil || ok {
+		t.Fatalf("credentials became usable after failed persistence: ok=%v err=%v", ok, err)
 	}
 }
 
@@ -412,10 +577,11 @@ func TestMalformedAndUnsafeBootstrapFiles(t *testing.T) {
 		{"malformed", "{", 0600},
 		{"empty", "{}", 0600},
 		{"incomplete credentials", "{\"username\":\"owner\"}", 0600},
-		{"unknown field", "{\"authorization\":\"one-time-bootstrap-authorization-1234\",\"extra\":true}", 0600},
+		{"unknown field", `{"authorization":"` + testBootstrapAuthorization + `","extra":true}`, 0600},
 		{"short authorization", "{\"authorization\":\"short\"}", 0600},
-		{"ambiguous", "{\"authorization\":\"one-time-bootstrap-authorization-1234\",\"username\":\"owner\",\"password\":\"long-secure-password\"}", 0600},
-		{"permissions", "{\"authorization\":\"one-time-bootstrap-authorization-1234\"}", 0644},
+		{"weak authorization", "{\"authorization\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}", 0600},
+		{"ambiguous", `{"authorization":"` + testBootstrapAuthorization + `","username":"owner","password":"long-secure-password"}`, 0600},
+		{"permissions", `{"authorization":"` + testBootstrapAuthorization + `"}`, 0644},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -424,11 +590,25 @@ func TestMalformedAndUnsafeBootstrapFiles(t *testing.T) {
 			if err := os.WriteFile(path, []byte(tc.body), tc.mode); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := NewAuthManager(store, path); err == nil || strings.Contains(err.Error(), "one-time-bootstrap-authorization-1234") || strings.Contains(err.Error(), "long-secure-password") {
+			if _, err := NewAuthManager(store, path); err == nil || strings.Contains(err.Error(), testBootstrapAuthorization) || strings.Contains(err.Error(), "long-secure-password") {
 				t.Fatalf("error = %v", err)
 			}
 		})
 	}
+	t.Run("symlink", func(t *testing.T) {
+		dir := t.TempDir()
+		target := filepath.Join(dir, "target.json")
+		path := filepath.Join(dir, "bootstrap.json")
+		if err := os.WriteFile(target, []byte(`{"authorization":"`+testBootstrapAuthorization+`"}`), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(target, path); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := NewAuthManager(authStore(t), path); err == nil {
+			t.Fatal("expected symlink bootstrap file error")
+		}
+	})
 }
 
 func TestInconsistentAuthenticationStateIsRejected(t *testing.T) {

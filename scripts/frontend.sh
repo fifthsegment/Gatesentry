@@ -55,6 +55,9 @@ build_and_sync() {
   validate_blockpage_assets
   rm -rf "$DIST_DIR"
   (cd "$UI_DIR" && yarn build)
+  # Vite can preserve trailing blanks from dependency template literals. Strip
+  # them deterministically so generated assets pass the repository diff check.
+  sed -i 's/[[:blank:]]\+$//' "$DIST_DIR/fs/bundle.js"
   validate_assets "$DIST_DIR"
 
   local stage old

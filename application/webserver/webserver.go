@@ -264,7 +264,11 @@ func RegisterEndpointsStartServer(
 					return
 				}
 				submitted.AdminUser, submitted.AdminPassword = "", ""
-				clean, _ := json.Marshal(submitted)
+				clean, err := json.Marshal(submitted)
+				if err != nil {
+					SendError(w, errors.New("unable to encode updated settings"), http.StatusInternalServerError)
+					return
+				}
 				temp.Value = string(clean)
 				runtime.Reload()
 				SendJSON(w, temp)
