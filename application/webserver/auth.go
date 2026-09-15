@@ -1,6 +1,7 @@
 package gatesentryWebserver
 
 import (
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -38,8 +39,9 @@ func passwordHashInput(password string) []byte {
 	if len(password) <= 72 {
 		return []byte(password)
 	}
-	sum := sha256.Sum256([]byte(password))
-	return sum[:]
+	prehash := hmac.New(sha256.New, []byte("GateSentry legacy password prehash v1"))
+	_, _ = prehash.Write([]byte(password))
+	return prehash.Sum(nil)
 }
 
 type authState struct {
