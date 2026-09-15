@@ -12,7 +12,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
@@ -20,7 +19,6 @@ import (
 	gatesentryWebserverTypes "bitbucket.org/abdullah_irfan/gatesentryf/webserver/types"
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
-	"golang.org/x/sys/unix"
 )
 
 const authStateKey = "admin_auth"
@@ -152,11 +150,10 @@ func validateAuthState(state authState) error {
 
 func loadBootstrapFile(path string) (bootstrapFile, error) {
 	var cfg bootstrapFile
-	fd, err := unix.Open(path, unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
+	file, err := openBootstrapFile(path)
 	if err != nil {
 		return cfg, errors.New("cannot read bootstrap secret file")
 	}
-	file := os.NewFile(uintptr(fd), path)
 	openedInfo, statErr := file.Stat()
 	if statErr != nil || !openedInfo.Mode().IsRegular() || openedInfo.Mode().Perm()&0077 != 0 {
 		if closeErr := file.Close(); closeErr != nil {
