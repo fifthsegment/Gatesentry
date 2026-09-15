@@ -20,6 +20,7 @@ import (
 )
 
 const testBootstrapAuthorization = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+const weakBootstrapAuthorization = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 
 func authStore(t *testing.T) *gatesentry2storage.MapStore {
 	t.Helper()
@@ -622,7 +623,7 @@ func TestMalformedAndUnsafeBootstrapFiles(t *testing.T) {
 		{"incomplete credentials", "{\"username\":\"owner\"}", 0600},
 		{"unknown field", `{"authorization":"` + testBootstrapAuthorization + `","extra":true}`, 0600},
 		{"short authorization", "{\"authorization\":\"short\"}", 0600},
-		{"weak authorization", "{\"authorization\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}", 0600},
+		{"weak authorization", `{"authorization":"` + weakBootstrapAuthorization + `"}`, 0600},
 		{"ambiguous", `{"authorization":"` + testBootstrapAuthorization + `","username":"owner","password":"long-secure-password"}`, 0600},
 		{"permissions", `{"authorization":"` + testBootstrapAuthorization + `"}`, 0644},
 	}

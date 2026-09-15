@@ -116,6 +116,17 @@ func validateBootstrapAuthorization(value string) error {
 	if err != nil || len(decoded) != 32 {
 		return errors.New("bootstrap authorization must be 32 random bytes encoded as unpadded base64url")
 	}
+	// Length and encoding alone accept obvious low-entropy inputs such as 32
+	// repeated bytes. Require enough byte diversity to reject accidental or
+	// hand-authored weak values while retaining a negligible false-rejection
+	// probability for a token generated from crypto/rand.
+	distinct := make(map[byte]struct{}, len(decoded))
+	for _, b := range decoded {
+		distinct[b] = struct{}{}
+	}
+	if len(distinct) < 16 {
+		return errors.New("bootstrap authorization must be generated from a cryptographically secure random source")
+	}
 	return nil
 }
 
