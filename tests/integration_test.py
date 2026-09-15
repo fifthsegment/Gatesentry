@@ -31,8 +31,18 @@ def proxy_url():
 
 
 @pytest.fixture(scope="session")
-def admin_auth():
-    return ("admin", "admin")
+def admin_auth(base_url):
+    credentials = ("integration-admin", "integration-admin-password")
+    status = requests.get(f"{base_url}/api/setup/status", timeout=10)
+    assert status.status_code == 200
+    if not status.json()["complete"]:
+        setup = requests.post(
+            f"{base_url}/api/setup",
+            json={"username": credentials[0], "password": credentials[1]},
+            timeout=10,
+        )
+        assert setup.status_code == 200
+    return credentials
 
 
 # ── Shared client fixture (one per session) ─────────────────────────────
@@ -160,7 +170,7 @@ class TestServerLiveness:
 
 
 class TestUIPages:
-    SPA_PAGES = ["/login", "/stats", "/users", "/dns", "/settings", "/rules"]
+    SPA_PAGES = ["/login", "/setup", "/stats", "/users", "/dns", "/settings", "/rules"]
 
     @pytest.mark.parametrize("page", SPA_PAGES)
     def test_spa_page_loads(self, base_url, page):
@@ -175,14 +185,14 @@ class TestUIPages:
 
 
 class TestAuthentication:
-    def test_login_returns_token(self, base_url):
+    def test_default_login_is_rejected(self, base_url):
         r = requests.post(
             f"{base_url}/api/auth/token",
             json={"username": "admin", "pass": "admin"},
             timeout=10,
         )
         assert r.status_code == 200
-        assert "Jwtoken" in r.json()
+        assert r.json().get("Validated") is False
 
     def test_token_verify_valid(self, client):
         r = client.api_get("/api/auth/verify")

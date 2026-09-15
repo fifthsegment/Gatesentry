@@ -5,10 +5,9 @@
     Content,
     SideNav,
   } from "carbon-components-svelte";
-  import { afterUpdate, onMount } from "svelte";
-
   import { Router, Route } from "svelte-routing";
   import Login from "./routes/login/login.svelte";
+  import Setup from "./routes/setup/setup.svelte";
   import Logs from "./routes/logs/logs.svelte";
   import Headermenu from "./components/headermenu.svelte";
   import Sidenavmenu from "./components/sidenavmenu.svelte";
@@ -46,25 +45,54 @@
   const setupResult = setup();
 
   let isSideNavOpen = false;
-  let version = "-";
   let userProfilePanelOpen = false;
   let tokenVerified = false;
+  let tokenChecking = false;
+  let setupChecked = false;
+  let setupChecking = false;
+  let setupRequired = false;
   // setupI18n();
 
   $: loggedIn = $store.api.loggedIn;
 
   $: {
     if (loaded) {
-      if (!tokenVerified) {
+      if (!setupChecked && !setupChecking) {
+        setupChecking = true;
+        fetch(getBasePath() + "/api/setup/status")
+          .then((response) => {
+            if (!response.ok) throw new Error("setup status failed");
+            return response.json();
+          })
+          .then((status) => {
+            setupRequired = !status.complete;
+            setupChecked = true;
+            if (setupRequired) {
+              store.logout();
+              gsNavigate("/setup");
+            }
+          })
+          .catch(() => {
+            // Keep the current page in a fail-closed loading state. A status
+            // outage does not mean setup is available, and the setup form
+            // presents its own retry-safe error when opened directly.
+            setupChecked = false;
+          })
+          .finally(() => setupChecking = false);
+      }
+      if (setupChecked && !setupRequired && !tokenVerified && !tokenChecking) {
+        tokenChecking = true;
         $store.api.verifyToken().then((isValid) => {
           tokenVerified = true;
           if (isValid) {
             store.refresh();
+          } else if (setupChecked && !setupRequired) {
+            gsNavigate("/login");
           }
-        });
+        }).finally(() => tokenChecking = false);
       }
 
-      if (!loggedIn) {
+      if (setupChecked && tokenVerified && !setupRequired && !loggedIn) {
         gsNavigate("/login");
       }
     }
@@ -97,6 +125,7 @@
     <Content>
       <div>
         <Route path="/login" component={Login} />
+        <Route path="/setup" component={Setup} />
         <Route path="/dns" component={Dns}></Route>
         <Route path="/logs" component={Logs} />
         <Route path="/settings">

@@ -2,7 +2,6 @@
   import {
     Button,
     ButtonSet,
-    Checkbox,
     Column,
     FluidForm,
     Grid,
@@ -12,22 +11,30 @@
   } from "carbon-components-svelte";
   import { ChevronRight, Close } from "carbon-icons-svelte";
   import { store } from "../../store/apistore";
-  import { gsNavigate } from "../../lib/navigate";
-  import { afterUpdate } from "svelte";
+  import { getBasePath, gsNavigate } from "../../lib/navigate";
+  import { afterUpdate, onMount } from "svelte";
   import { notificationstore } from "../../store/notifications";
   import { createNotificationError } from "../../lib/utils";
   import { _ } from "svelte-i18n";
   import DownloadCertificateLink from "../../components/downloadCertificateLink.svelte";
 
-  let username: string = localStorage.getItem("username") || "";
-  let password: string = localStorage.getItem("password") || "";
-  let rememberMe: boolean =
-    (localStorage.getItem("rememberMe") || "") == "true";
+  let username: string = "";
+  let password: string = "";
   let isEnabled: boolean = true;
   let loggedIn: boolean = false;
 
   let invalidMessage: string = "";
   let invalid: boolean = false;
+  onMount(async () => {
+    try {
+      const response = await fetch(getBasePath() + "/api/setup/status");
+      if (!response.ok) return;
+      const status = await response.json();
+      if (!status.complete) gsNavigate("/setup");
+    } catch (ignoredError) {
+      // App.svelte owns the full-page status error flow.
+    }
+  });
   let handleLogin = (e) => {
     e.preventDefault();
     var datatosend = { username: username, pass: password };
@@ -40,7 +47,7 @@
           ),
         );
         return;
-      } else if (data?.Validated && data.Validated == "true") {
+      } else if (data?.Validated === true || data?.Validated === "true") {
         localStorage.removeItem("jwt");
         localStorage.setItem("jwt", data.Jwtoken);
         store.loginSuccesful(data.Jwtoken);
@@ -58,16 +65,6 @@
 
   $: {
     isEnabled = username.length > 0 || password.length > 0;
-
-    if (rememberMe) {
-      localStorage.setItem("username", username);
-      localStorage.setItem("password", password);
-      localStorage.setItem("rememberMe", "true");
-    } else {
-      localStorage.removeItem("username");
-      localStorage.removeItem("password");
-      localStorage.removeItem("rememberMe");
-    }
 
     loggedIn = $store.api.loggedIn;
   }
@@ -111,15 +108,6 @@
                 placeholder="Enter password..."
                 bind:value={password}
                 invalidText={invalidMessage}
-              />
-              <Checkbox
-                id="remember-me"
-                labelText="Remember me"
-                style="margin:1em;"
-                checked={rememberMe}
-                on:change={() => {
-                  rememberMe = !rememberMe;
-                }}
               />
               <ButtonSet style="align-items:right ">
                 <Button

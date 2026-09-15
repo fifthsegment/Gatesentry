@@ -42,6 +42,7 @@ class AppAPI {
         this.setLoggedIn(this.jwtToken);
         return true;
       } else {
+        this.setLoggedOut();
         return false;
       }
     });
@@ -152,6 +153,7 @@ class AppAPI {
         value: settingValue,
       };
       this.doCall(url, "post", datatosend).then(function (json) {
+        if (json === undefined) throw new Error("Setting update failed");
         resolve(true);
       })
         .catch(function (err) {
@@ -204,10 +206,11 @@ class AppAPI {
       const response = await fetch(that.baseURL + endpoint, additionalHeaders);
       if (response.status === 401) {
         that.onUnauthorizedcallMe();
-      } else if (response.status === 200) {
-        const json = await response.json();
-        return json;
+        throw new Error("Authentication required");
+      } else if (!response.ok) {
+        throw new Error("GateSentry request failed with status " + response.status);
       }
+      return await response.json();
     } catch (err) {
       console.error("Gatesentry API error : [Path " + endpoint + "] [Method " + method + "]", err);
       throw err;

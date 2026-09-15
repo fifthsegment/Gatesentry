@@ -10,6 +10,10 @@ services:
 
     volumes:
       - ./docker_root:/usr/local/gatesentry/gatesentry
+      # Optional first run only: chmod 600 ./secrets/gatesentry-bootstrap.json
+      # - ./secrets/gatesentry-bootstrap.json:/run/secrets/gatesentry-bootstrap.json:ro
 
     environment:
       - TZ=Asia/Singapore
+      # Set only while the read-only bootstrap file is mounted, then remove it.
+      # - GATESENTRY_BOOTSTRAP_FILE=/run/secrets/gatesentry-bootstrap.json

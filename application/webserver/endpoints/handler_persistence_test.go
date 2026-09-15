@@ -119,7 +119,7 @@ func TestConcurrentUserMutationsDoNotLoseUnrelatedChanges(t *testing.T) {
 	}
 }
 
-func TestConcurrentGeneralSettingsUpdatesPreservePasswords(t *testing.T) {
+func TestGeneralSettingsCannotPersistCredentials(t *testing.T) {
 	dir := t.TempDir()
 	old := gatesentry2storage.GSBASEDIR
 	gatesentry2storage.SetBaseDir(dir + string(os.PathSeparator))
@@ -128,61 +128,16 @@ func TestConcurrentGeneralSettingsUpdatesPreservePasswords(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	initialJSON, err := json.Marshal(gatesentryWebserverTypes.GSGeneral_Settings{
-		LogLocation:   "initial.db",
-		AdminPassword: "initial-password",
-		AdminUser:     "admin",
-	})
-	if err != nil {
+	if err := store.Update("general_settings", `{"log_location":"initial.db"}`); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.Update("general_settings", string(initialJSON)); err != nil {
+	value, _ := json.Marshal(gatesentryWebserverTypes.GSGeneral_Settings{LogLocation: "updated.db", AdminPassword: "plaintext-password", AdminUser: "owner"})
+	if _, err := GSApiSettingsPOST("general_settings", store, gatesentryWebserverTypes.Datareceiver{Value: string(value)}); err != nil {
 		t.Fatal(err)
 	}
-
-	const updates = 40
-	var wg sync.WaitGroup
-	for i := 0; i < updates; i++ {
-		i := i
-		wg.Add(2)
-		go func() {
-			defer wg.Done()
-			value, err := json.Marshal(gatesentryWebserverTypes.GSGeneral_Settings{
-				LogLocation:   fmt.Sprintf("explicit-%02d.db", i),
-				AdminPassword: fmt.Sprintf("password-%02d", i),
-				AdminUser:     "admin",
-			})
-			if err != nil {
-				t.Error(err)
-				return
-			}
-			if _, err := GSApiSettingsPOST("general_settings", store, gatesentryWebserverTypes.Datareceiver{Value: string(value)}); err != nil {
-				t.Errorf("explicit password update: %v", err)
-			}
-		}()
-		go func() {
-			defer wg.Done()
-			value, err := json.Marshal(gatesentryWebserverTypes.GSGeneral_Settings{
-				LogLocation: fmt.Sprintf("preserve-%02d.db", i),
-				AdminUser:   "admin",
-			})
-			if err != nil {
-				t.Error(err)
-				return
-			}
-			if _, err := GSApiSettingsPOST("general_settings", store, gatesentryWebserverTypes.Datareceiver{Value: string(value)}); err != nil {
-				t.Errorf("password-preserving update: %v", err)
-			}
-		}()
-	}
-	wg.Wait()
-
-	var got gatesentryWebserverTypes.GSGeneral_Settings
-	if err := json.Unmarshal([]byte(store.GetOrDefault("general_settings", "")), &got); err != nil {
-		t.Fatal(err)
-	}
-	if !strings.HasPrefix(got.AdminPassword, "password-") {
-		t.Fatalf("password-preserving update restored stale password %q", got.AdminPassword)
+	raw := store.GetOrDefault("general_settings", "")
+	if strings.Contains(raw, "plaintext-password") || strings.Contains(raw, "owner") {
+		t.Fatalf("credentials persisted through generic settings: %s", raw)
 	}
 }
 

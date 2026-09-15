@@ -26,6 +26,7 @@ func GSApiSettingsGET(requestedId string, settings *gatesentry2storage.MapStore)
 			return nil, err
 		}
 		general_settings_parsed.AdminPassword = ""
+		general_settings_parsed.AdminUser = ""
 		valueJson, err := json.Marshal(general_settings_parsed)
 		if err != nil {
 			return nil, err
@@ -109,14 +110,8 @@ func GSApiSettingsPOST(requestedId string, settings *gatesentry2storage.MapStore
 		if err := json.Unmarshal([]byte(temp.Value), &submitted); err != nil {
 			return nil, err
 		}
+		submitted.AdminPassword, submitted.AdminUser = "", ""
 		if err := settings.UpdateValue(requestedId, func(current string) (string, error) {
-			if submitted.AdminPassword == "" {
-				existing := gatesentryWebserverTypes.GSGeneral_Settings{}
-				if err := json.Unmarshal([]byte(current), &existing); err != nil {
-					return "", err
-				}
-				submitted.AdminPassword = existing.AdminPassword
-			}
 			valueJSON, err := json.Marshal(submitted)
 			if err != nil {
 				return "", err

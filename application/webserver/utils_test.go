@@ -26,6 +26,14 @@ func TestParseJSONRequest(t *testing.T) {
 	}
 }
 
+func TestParseJSONRequestRejectsTrailingValue(t *testing.T) {
+	req := httptest.NewRequest("POST", "/", bytes.NewBufferString(`{"field":"value"}{"field":"second"}`))
+	var data DummyData
+	if err := ParseJSONRequest(req, &data); err == nil {
+		t.Fatal("expected trailing JSON value to be rejected")
+	}
+}
+
 func TestSendError(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	err := errors.New("some error")

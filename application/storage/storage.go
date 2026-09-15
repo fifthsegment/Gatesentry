@@ -269,6 +269,28 @@ type MapStore struct {
 	baseStore *Store
 }
 
+// UpdateMap atomically transforms and persists the complete map. The callback
+// receives a copy and may update several related keys in one durable commit.
+func (m *MapStore) UpdateMap(update func(map[string]string) error) error {
+	m.baseStore.pathMu.Lock()
+	defer m.baseStore.pathMu.Unlock()
+	if err := m.baseStore.loadLocked(); err != nil {
+		return err
+	}
+	values, err := parseMap(m.baseStore.Get())
+	if err != nil {
+		return err
+	}
+	if err := update(values); err != nil {
+		return err
+	}
+	data, err := json.Marshal(values)
+	if err != nil {
+		return fmt.Errorf("serialize map storage: %w", err)
+	}
+	return m.baseStore.setLocked(data)
+}
+
 func OpenMapStore(name string, encrypt bool) (*MapStore, error) {
 	s, err := OpenStore(name, encrypt)
 	m := &MapStore{baseStore: s}
