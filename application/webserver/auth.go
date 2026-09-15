@@ -58,7 +58,13 @@ type bootstrapFile struct {
 	Password      string `json:"password,omitempty"`
 }
 
-type AuthManager struct{ store *gatesentry2storage.MapStore }
+type authStateStore interface {
+	GetE(string) (string, error)
+	UpdateMap(func(map[string]string) error) error
+	UpdateValue(string, func(string) (string, error)) error
+}
+
+type AuthManager struct{ store authStateStore }
 
 type sessionClaims struct {
 	Username   string `json:"username"`

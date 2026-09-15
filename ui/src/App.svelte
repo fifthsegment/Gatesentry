@@ -50,35 +50,41 @@
   let tokenChecking = false;
   let setupChecked = false;
   let setupChecking = false;
+  let setupStatusFailed = false;
   let setupRequired = false;
   // setupI18n();
 
   $: loggedIn = $store.api.loggedIn;
 
+  function checkSetupStatus() {
+    if (setupChecking) return;
+    setupStatusFailed = false;
+    setupChecking = true;
+    fetch(getBasePath() + "/api/setup/status")
+      .then((response) => {
+        if (!response.ok) throw new Error("setup status failed");
+        return response.json();
+      })
+      .then((status) => {
+        setupRequired = !status.complete;
+        setupChecked = true;
+        if (setupRequired) {
+          store.logout();
+          gsNavigate("/setup");
+        }
+      })
+      .catch(() => {
+        // Leave routing in a stable fail-closed state. Only the explicit retry
+        // below starts another request.
+        setupStatusFailed = true;
+      })
+      .finally(() => setupChecking = false);
+  }
+
   $: {
     if (loaded) {
-      if (!setupChecked && !setupChecking) {
-        setupChecking = true;
-        fetch(getBasePath() + "/api/setup/status")
-          .then((response) => {
-            if (!response.ok) throw new Error("setup status failed");
-            return response.json();
-          })
-          .then((status) => {
-            setupRequired = !status.complete;
-            setupChecked = true;
-            if (setupRequired) {
-              store.logout();
-              gsNavigate("/setup");
-            }
-          })
-          .catch(() => {
-            // Keep the current page in a fail-closed loading state. A status
-            // outage does not mean setup is available, and the setup form
-            // presents its own retry-safe error when opened directly.
-            setupChecked = false;
-          })
-          .finally(() => setupChecking = false);
+      if (!setupChecked && !setupChecking && !setupStatusFailed) {
+        checkSetupStatus();
       }
       if (setupChecked && !setupRequired && !tokenVerified && !tokenChecking) {
         tokenChecking = true;
@@ -116,6 +122,12 @@
   {#await setupResult}
     Loading...
   {:then}
+    {#if setupStatusFailed}
+      <main class="setup-status-error">
+        <p role="alert">Unable to read GateSentry setup status.</p>
+        <button type="button" on:click={checkSetupStatus}>Retry status check</button>
+      </main>
+    {:else}
     <Globalheader bind:isSideNavOpen bind:userProfilePanelOpen />
 
     <SideNav bind:isOpen={isSideNavOpen} rail>
@@ -169,8 +181,14 @@
 
       <Notifications />
     </Content>
+    {/if}
   {:catch error}
     <!-- <p style="color: red">{error.message}</p> -->
     Error: Unable to load localization.
   {/await}
 </Router>
+
+<style>
+  .setup-status-error { max-width: 32rem; margin: 15vh auto; padding: 1rem; }
+  .setup-status-error p { margin-bottom: 1rem; }
+</style>

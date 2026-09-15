@@ -548,6 +548,49 @@ func TestBootstrapPersistenceFailureDoesNotGrantAccess(t *testing.T) {
 	}
 }
 
+type postRenameFailureStore struct {
+	delegate *gatesentry2storage.MapStore
+	blocked  error
+}
+
+func (s *postRenameFailureStore) GetE(key string) (string, error) {
+	value, err := s.delegate.GetE(key)
+	if s.blocked != nil {
+		return value, s.blocked
+	}
+	return value, err
+}
+
+func (s *postRenameFailureStore) UpdateMap(update func(map[string]string) error) error {
+	return s.delegate.UpdateMap(update)
+}
+
+func (s *postRenameFailureStore) UpdateValue(key string, update func(string) (string, error)) error {
+	if err := s.delegate.UpdateValue(key, update); err != nil {
+		return err
+	}
+	s.blocked = errors.New("injected post-rename directory sync failure")
+	return s.blocked
+}
+
+func TestBootstrapPostRenameDurabilityFailureDoesNotGrantAccess(t *testing.T) {
+	store := authStore(t)
+	auth, err := NewAuthManager(store, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	auth.store = &postRenameFailureStore{delegate: store}
+	if err := auth.Bootstrap("owner", "long-secure-password", "", true); err == nil {
+		t.Fatal("expected post-rename durability error")
+	}
+	if ok, err := auth.Verify("owner", "long-secure-password"); err == nil || ok {
+		t.Fatalf("credentials became usable after durability failure: ok=%v err=%v", ok, err)
+	}
+	if _, err := auth.CreateToken("owner"); err == nil {
+		t.Fatal("session creation succeeded after durability failure")
+	}
+}
+
 func TestLegacyHashFailurePreservesPlaintextForRetry(t *testing.T) {
 	store := authStore(t)
 	legacy := `{"log_location":"./log.db","admin_username":"admin","admin_password":"admin"}`

@@ -26,6 +26,7 @@ type Store struct {
 	data          []byte
 	path          string
 	loadErr       error
+	durabilityErr error
 	pathMu        *sync.RWMutex
 }
 
@@ -115,6 +116,14 @@ func (s *Store) Load() error {
 func (s *Store) loadLocked() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// A rename followed by a directory open, sync, or close failure leaves the
+	// visible file newer than the last state known to be durable. Keep this
+	// process fail closed instead of accepting that uncertain state on a later
+	// refresh. Reopening the store after a process restart re-evaluates the file
+	// that actually survived.
+	if s.durabilityErr != nil {
+		return s.durabilityErr
+	}
 	data, err := os.ReadFile(s.path)
 	if errors.Is(err, os.ErrNotExist) {
 		s.data = nil
@@ -166,7 +175,8 @@ var openDirectory = func(path string) (*os.File, error) { return os.Open(path) }
 // are always mode 0600. Failures before rename leave the destination intact.
 // Once rename succeeds, committed is true even when syncing or closing the
 // directory fails: the new destination is visible, though crash durability is
-// uncertain and the caller still receives the material filesystem error.
+// uncertain and the caller still receives the material filesystem error. The
+// Store quarantines that state until it is reopened after restart.
 func atomicWrite(path string, data []byte) (committed bool, err error) {
 	dir := filepath.Dir(path)
 	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".tmp-*")
@@ -233,8 +243,14 @@ func (s *Store) persistLocked(data []byte) (err error) {
 		// Rename is the commit point. Keep memory consistent with the visible
 		// destination even when the following directory durability step fails.
 		s.data = append([]byte(nil), data...)
+		if err != nil {
+			s.durabilityErr = fmt.Errorf("storage durability is uncertain until restart: %w", err)
+		}
 	}
 	if err != nil {
+		if s.durabilityErr != nil {
+			return fmt.Errorf("persist storage %q: %w", s.Id, s.durabilityErr)
+		}
 		return fmt.Errorf("persist storage %q: %w", s.Id, err)
 	}
 	return nil
@@ -337,7 +353,8 @@ func parseMap(data []byte) (map[string]string, error) {
 }
 
 // UpdateValue atomically reads, transforms, and persists one value while the
-// map lock is held. The previous value remains in memory and on disk on error.
+// map lock is held. Pre-rename errors preserve the previous value. A
+// post-rename durability error quarantines the visible replacement.
 func (m *MapStore) UpdateValue(key string, update func(string) (string, error)) error {
 	m.baseStore.pathMu.Lock()
 	defer m.baseStore.pathMu.Unlock()
