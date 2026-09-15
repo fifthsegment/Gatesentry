@@ -1,52 +1,9 @@
 package gatesentryWebserverTypes
 
 import (
-	"encoding/json"
-
 	gatesentryLogger "bitbucket.org/abdullah_irfan/gatesentryf/logger"
-	gatesentry2storage "bitbucket.org/abdullah_irfan/gatesentryf/storage"
 	GatesentryTypes "bitbucket.org/abdullah_irfan/gatesentryf/types"
 )
-
-// create an initializer for above struct
-
-// func (s *SettingsStore) GetAdminPassword() string {
-// 	general_settings := s.GetOrDefault("general_settings", "")
-// 	general_settings_parsed := GSGeneral_Settings{}
-// 	json.Unmarshal([]byte(general_settings), &general_settings_parsed)
-// 	return general_settings_parsed.AdminPassword
-// }
-
-// func (s *SettingsStore) GetAdminUser() string {
-// 	general_settings := s.GetOrDefault("general_settings", "")
-// 	general_settings_parsed := GSGeneral_Settings{}
-// 	json.Unmarshal([]byte(general_settings), &general_settings_parsed)
-// 	return general_settings_parsed.AdminUser
-// }
-
-func GetAdminUser(s *gatesentry2storage.MapStore) (string, error) {
-	general_settings, err := s.GetE("general_settings")
-	if err != nil {
-		return "", err
-	}
-	general_settings_parsed := GSGeneral_Settings{}
-	if err := json.Unmarshal([]byte(general_settings), &general_settings_parsed); err != nil {
-		return "", err
-	}
-	return general_settings_parsed.AdminUser, nil
-}
-
-func GetAdminPassword(s *gatesentry2storage.MapStore) (string, error) {
-	general_settings, err := s.GetE("general_settings")
-	if err != nil {
-		return "", err
-	}
-	general_settings_parsed := GSGeneral_Settings{}
-	if err := json.Unmarshal([]byte(general_settings), &general_settings_parsed); err != nil {
-		return "", err
-	}
-	return general_settings_parsed.AdminPassword, nil
-}
 
 type User struct {
 	Name string `json:"name"`
@@ -60,8 +17,8 @@ type Login struct {
 
 type GSGeneral_Settings struct {
 	LogLocation   string `json:"log_location"`
-	AdminPassword string `json:"admin_password"`
-	AdminUser     string `json:"admin_username"`
+	AdminPassword string `json:"admin_password,omitempty"`
+	AdminUser     string `json:"admin_username,omitempty"`
 }
 
 type Datareceiver struct {

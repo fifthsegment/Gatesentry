@@ -61,7 +61,7 @@ func GSwebserverStart(port int) {
 
 	// gatesentryWebserver.RegisterEndpoints(app, settings, &R.Filters, R.Logger, runtime, R.BoundAddress)
 
-	gatesentryWebserver.RegisterEndpointsStartServer(
+	if err := gatesentryWebserver.RegisterEndpointsStartServer(
 		&R.Filters,
 		runtime,
 		R.Logger,
@@ -71,7 +71,9 @@ func GSwebserverStart(port int) {
 		R.GSSettings,
 		NewRuleManager(R.GSSettings),
 		basePath,
-	)
+	); err != nil {
+		fmt.Printf("Webserver stopped: %v\n", err)
+	}
 
 	// app.Listen(":" + strconv.Itoa(GSWebServerPort))
 }

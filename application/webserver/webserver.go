@@ -2,13 +2,14 @@ package gatesentryWebserver
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
 	"mime"
 	"net/http"
+	"os"
 	"strings"
-	"time"
 
 	gatesentryFilters "bitbucket.org/abdullah_irfan/gatesentryf/filters"
 	gatesentry2logger "bitbucket.org/abdullah_irfan/gatesentryf/logger"
@@ -18,12 +19,8 @@ import (
 	gatesentryWebserverFrontend "bitbucket.org/abdullah_irfan/gatesentryf/webserver/frontend"
 	gatesentryWebserverTypes "bitbucket.org/abdullah_irfan/gatesentryf/webserver/types"
 
-	"github.com/golang-jwt/jwt/v5"
-
 	"github.com/gorilla/mux"
 )
-
-var hmacSampleSecret = []byte("I7JE72S9XJ48ANXMI78ASDNMQ839")
 
 type User struct {
 	Username string `json:"username"`
@@ -40,82 +37,89 @@ type OkResponse struct {
 	Response string `json:"Response"`
 }
 
-func CreateToken(username string) (string, error) {
-
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"username": username,
-		"nbf":      time.Now().Unix(),
-		"exp":      time.Now().Add(time.Hour * 1).Unix(),
-	})
-
-	// Sign and get the complete encoded token as a string using the secret
-	tokenString, err := token.SignedString(hmacSampleSecret)
-
-	return tokenString, err
-}
-
-func VerifyAdminUser(username string, password string, settingsStore *gatesentry2storage.MapStore) (bool, error) {
-	adminUser, err := gatesentryWebserverTypes.GetAdminUser(settingsStore)
-	if err != nil {
-		return false, err
-	}
-	adminPassword, err := gatesentryWebserverTypes.GetAdminPassword(settingsStore)
-	if err != nil {
-		return false, err
-	}
-	return adminUser == username && adminPassword == password, nil
-}
-
-var tokenCreationHandler HttpHandlerFunc = func(w http.ResponseWriter, r *http.Request) {
-	// get username from context
-	username, ok := r.Context().Value("username").(string)
-	if !ok {
-		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte("Error getting username"))
-		return
-	}
-	token, err := CreateToken(username)
-	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte("Error creating token"))
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Write([]byte(`{"Jwtoken": "` + token + `", "Validated": "true"}`))
-
-}
-
-var authenticationMiddleware mux.MiddlewareFunc = func(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		tokenString := r.Header.Get("Authorization")
-		// Check if tokenString starts with "Bearer ", and if so, remove it
-		if strings.HasPrefix(tokenString, "Bearer ") {
-			tokenString = strings.TrimPrefix(tokenString, "Bearer ")
-		}
-		if tokenString == "" {
-			SendError(w, errors.New("Missing token auth"), http.StatusUnauthorized)
-			return
-		}
-
-		token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-			// Don't forget to validate the alg is what you expect:
-
-			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-				return nil, fmt.Errorf("Unexpected signing method: %v", token.Header["alg"])
+func authenticationMiddlewareFor(auth *AuthManager) mux.MiddlewareFunc {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			tokenString := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+			if tokenString == "" {
+				SendError(w, errors.New("missing authentication"), http.StatusUnauthorized)
+				return
 			}
-
-			return hmacSampleSecret, nil
+			username, err := auth.VerifyToken(tokenString)
+			if err != nil {
+				SendError(w, errors.New("invalid authentication"), http.StatusUnauthorized)
+				return
+			}
+			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), "username", username)))
 		})
+	}
+}
 
-		if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
-			ctx := context.WithValue(r.Context(), "username", claims["username"].(string))
-			log.Println("Logged in with username = ", claims["username"])
-			next.ServeHTTP(w, r.WithContext(ctx))
-		} else {
-			SendError(w, err, http.StatusUnauthorized)
+func tokenCreationHandlerFor(auth *AuthManager) HttpHandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		username, ok := r.Context().Value("username").(string)
+		if !ok {
+			SendError(w, errors.New("missing username"), http.StatusInternalServerError)
 			return
 		}
-	})
+		token, err := auth.CreateToken(username)
+		if err != nil {
+			SendError(w, errors.New("unable to create session"), http.StatusInternalServerError)
+			return
+		}
+		SendJSON(w, struct {
+			Jwtoken   string
+			Validated bool
+			Username  string
+		}{Jwtoken: token, Validated: true, Username: username})
+	}
+}
+
+func setupStatusHandlerFor(auth *AuthManager) HttpHandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		complete, requiresAuthorization, err := auth.Status()
+		if err != nil {
+			SendError(w, errors.New("unable to read setup status"), http.StatusInternalServerError)
+			return
+		}
+		if !complete {
+			requiresAuthorization = requiresAuthorization || !requestIsLoopback(r)
+		}
+		SendJSON(w, struct {
+			Complete              bool `json:"complete"`
+			RequiresAuthorization bool `json:"requires_authorization"`
+		}{complete, requiresAuthorization})
+	}
+}
+
+func setupHandlerFor(auth *AuthManager) HttpHandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		var data struct {
+			Username      string `json:"username"`
+			Password      string `json:"password"`
+			Authorization string `json:"authorization"`
+		}
+		if err := ParseJSONRequest(r, &data); err != nil {
+			SendError(w, errors.New("invalid setup request"), http.StatusBadRequest)
+			return
+		}
+		if err := auth.Bootstrap(data.Username, data.Password, data.Authorization, requestIsLoopback(r)); err != nil {
+			status := http.StatusForbidden
+			if errors.Is(err, errSetupComplete) {
+				status = http.StatusConflict
+			} else if !errors.Is(err, errSetupAuth) {
+				status = http.StatusBadRequest
+			}
+			SendError(w, errors.New("setup could not be completed"), status)
+			return
+		}
+		SendJSON(w, struct {
+			Complete bool `json:"complete"`
+		}{true})
+	}
 }
 
 var verifyAuthHandler HttpHandlerFunc = func(w http.ResponseWriter, r *http.Request) {
@@ -129,7 +133,8 @@ var verifyAuthHandler HttpHandlerFunc = func(w http.ResponseWriter, r *http.Requ
 		Validated bool
 		Jwtoken   string
 		Message   string
-	}{Validated: true, Jwtoken: "", Message: `Username : ` + username})
+		Username  string
+	}{Validated: true, Jwtoken: "", Message: `Username : ` + username, Username: username})
 }
 
 var indexHandler = makeIndexHandler("/")
@@ -162,20 +167,28 @@ func RegisterEndpointsStartServer(
 	internalSettings *gatesentry2storage.MapStore,
 	ruleManager gatesentryWebserverEndpoints.RuleManagerInterface,
 	basePath string,
-) {
+) error {
+	auth, err := NewAuthManager(internalSettings, os.Getenv("GATESENTRY_BOOTSTRAP_FILE"))
+	if err != nil {
+		return fmt.Errorf("initialize administrator authentication: %w", err)
+	}
+	authenticationMiddleware := authenticationMiddlewareFor(auth)
+	tokenCreationHandler := tokenCreationHandlerFor(auth)
 
 	internalServer := NewGsWeb(basePath)
+	internalServer.Get("/api/setup/status", setupStatusHandlerFor(auth))
+	internalServer.Post("/api/setup", setupHandlerFor(auth))
 
 	internalServer.Post("/api/auth/token", HttpHandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
 		var data User
 		if err := ParseJSONRequest(r, &data); err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			w.Write([]byte("Error parsing json"))
+			SendError(w, errors.New("invalid login request"), http.StatusBadRequest)
 			return
 		}
-		verified, err := VerifyAdminUser(data.Username, data.Pass, internalSettings)
+		verified, err := auth.Verify(data.Username, data.Pass)
 		if err != nil {
-			SendError(w, err, http.StatusInternalServerError)
+			SendError(w, errors.New("unable to verify login"), http.StatusInternalServerError)
 			return
 		}
 		if !verified {
@@ -240,6 +253,29 @@ func RegisterEndpointsStartServer(
 		if err != nil {
 			SendError(w, err, http.StatusInternalServerError)
 			return
+		}
+		if requestedId == "general_settings" {
+			var submitted gatesentryWebserverTypes.GSGeneral_Settings
+			if err := json.Unmarshal([]byte(temp.Value), &submitted); err != nil {
+				SendError(w, errors.New("invalid general settings"), http.StatusBadRequest)
+				return
+			}
+			if submitted.AdminUser != "" || submitted.AdminPassword != "" {
+				if err := auth.ChangeCredentialsAndGeneral(submitted.AdminUser, submitted.AdminPassword, submitted); err != nil {
+					SendError(w, errors.New("unable to update administrator credentials"), http.StatusBadRequest)
+					return
+				}
+				submitted.AdminUser, submitted.AdminPassword = "", ""
+				clean, err := json.Marshal(submitted)
+				if err != nil {
+					SendError(w, errors.New("unable to encode updated settings"), http.StatusInternalServerError)
+					return
+				}
+				temp.Value = string(clean)
+				runtime.Reload()
+				SendJSON(w, temp)
+				return
+			}
 		}
 		output, err := gatesentryWebserverEndpoints.GSApiSettingsPOST(requestedId, internalSettings, temp)
 		if err != nil {
@@ -328,7 +364,7 @@ func RegisterEndpointsStartServer(
 		SendJSON(w, output)
 	})
 
-	internalServer.Get("/api/logs/{id}", HttpHandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	internalServer.Get("/api/logs/{id}", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
 		queryParams := r.URL.Query()
 		searchValue := queryParams.Get("search")
 
@@ -340,7 +376,7 @@ func RegisterEndpointsStartServer(
 
 		output := gatesentryWebserverEndpoints.ApiLogsGET(logger)
 		SendJSON(w, output)
-	}))
+	})
 
 	internalServer.Get("/api/dns/info", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
 		output := gatesentryWebserverEndpoints.GSApiDNSInfo(dnsServerInfo)
@@ -480,6 +516,7 @@ func RegisterEndpointsStartServer(
 	baseIndexHandler := makeIndexHandler(basePath)
 	internalServer.Get("/", baseIndexHandler)
 	internalServer.Get("/login", baseIndexHandler)
+	internalServer.Get("/setup", baseIndexHandler)
 	internalServer.Get("/stats", baseIndexHandler)
 	internalServer.Get("/users", baseIndexHandler)
 	internalServer.Get("/dns", baseIndexHandler)
@@ -495,6 +532,6 @@ func RegisterEndpointsStartServer(
 	internalServer.Get("/devices", baseIndexHandler)
 	internalServer.Get("/ai", baseIndexHandler)
 
-	internalServer.ListenAndServe(":" + port)
+	return internalServer.ListenAndServe(":" + port)
 
 }

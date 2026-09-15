@@ -10,6 +10,8 @@ require (
 	github.com/badoux/checkmail v1.2.1
 	github.com/golang-jwt/jwt/v5 v5.3.0
 	github.com/gorilla/mux v1.8.1
+	golang.org/x/crypto v0.14.0
+	golang.org/x/sys v0.13.0
 	github.com/kardianos/service v1.2.0
 	github.com/kataras/iris/v12 v12.2.0-alpha8
 	github.com/miekg/dns v1.1.43
@@ -69,9 +71,7 @@ require (
 	github.com/vmihailenco/msgpack/v5 v5.3.5 // indirect
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
 	github.com/yosssi/ace v0.0.5 // indirect
-	golang.org/x/crypto v0.14.0 // indirect
 	golang.org/x/net v0.17.0 // indirect
-	golang.org/x/sys v0.13.0 // indirect
 	golang.org/x/text v0.31.0 // indirect
 	golang.org/x/time v0.0.0-20220224211638-0e9765cccd65 // indirect
 	google.golang.org/protobuf v1.27.1 // indirect

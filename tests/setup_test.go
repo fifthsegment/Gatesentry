@@ -1,7 +1,9 @@
 package tests
 
 import (
+	"bytes"
 	"crypto/tls"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -23,8 +25,8 @@ const (
 	httpsBumpSite                   = "https://www.google.com"
 	httpBlockedSite                 = "http://www.snapads.com"
 	httpsBlockedSite                = "https://www.snapads.com"
-	gatesentryAdminUsername         = "admin"
-	gatesentryAdminPassword         = "admin"
+	gatesentryAdminUsername         = "integration-admin"
+	gatesentryAdminPassword         = "integration-admin-password"
 	testUserUsername                = "testuser123"
 	testUserPassword                = "testpassword123"
 	defaultTimeout                  = 30 * time.Second
@@ -63,6 +65,27 @@ func TestMain(m *testing.M) {
 	if !serverReady {
 		fmt.Println("SKIP: Gatesentry server not running. Start it with 'make test'.")
 		os.Exit(0)
+	}
+
+	// Integration servers start with an empty settings directory. Complete the
+	// loopback-only setup once so the rest of this suite exercises normal admin
+	// APIs with non-default credentials.
+	setupBody, err := json.Marshal(map[string]string{
+		"username": gatesentryAdminUsername,
+		"password": gatesentryAdminPassword,
+	})
+	if err != nil {
+		panic(err)
+	}
+	setupResponse, err := client.Post(gatesentryWebserverBaseEndpoint+"/setup", "application/json", bytes.NewReader(setupBody))
+	if err != nil {
+		fmt.Println("Unable to complete first-run setup:", err)
+		os.Exit(1)
+	}
+	setupResponse.Body.Close()
+	if setupResponse.StatusCode != http.StatusOK && setupResponse.StatusCode != http.StatusConflict {
+		fmt.Println("Unable to complete first-run setup: status", setupResponse.StatusCode)
+		os.Exit(1)
 	}
 
 	// Run tests

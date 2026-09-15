@@ -45,7 +45,9 @@
       closeIcon={UserAvatarFilledAlt}
     >
       <HeaderPanelLinks>
-        <HeaderPanelDivider>Logged in as admin</HeaderPanelDivider>
+        <HeaderPanelDivider>
+          {$store.api.username ? `Logged in as ${$store.api.username}` : "Logged in"}
+        </HeaderPanelDivider>
         <HeaderPanelLink
           on:click={() => {
             modalOpen = true;

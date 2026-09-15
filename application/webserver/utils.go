@@ -3,6 +3,7 @@ package gatesentryWebserver
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 )
 
@@ -27,8 +28,9 @@ func ParseJSONRequest(r *http.Request, v interface{}) error {
 		}
 	}
 
-	// Check for remaining data in the body
-	if decoder.More() {
+	// Require exactly one JSON value. Decoder.More reports array/object members
+	// and does not reject a second top-level JSON value.
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
 		return errors.New("request body contains unexpected extra data")
 	}
 

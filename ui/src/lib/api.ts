@@ -21,11 +21,13 @@ class AppAPI {
   onUnauthorizedcallMe: () => void;
   loggedIn: boolean;
   jwtToken: string;
+  username: string;
 
   constructor() {
     const jwt = localStorage.getItem("jwt");
     const basePath = getBasePath();
     this.baseURL = basePath + "/api";
+    this.username = "";
 
     this.headers = {
       Authorization: `Bearer ${jwt}`,
@@ -36,24 +38,28 @@ class AppAPI {
   }
 
   verifyToken(): Promise<boolean> {
-    return this.doCallRaw("/auth/verify").then((response) => {
+    return this.doCallRaw("/auth/verify").then(async (response) => {
       if (response.status === 200) {
+        const data = await response.json();
         this.jwtToken = localStorage.getItem("jwt") || "";
-        this.setLoggedIn(this.jwtToken);
+        this.setLoggedIn(this.jwtToken, data.Username || "");
         return true;
       } else {
+        this.setLoggedOut();
         return false;
       }
     });
   }
 
-  setLoggedIn(jwtToken: string) {
+  setLoggedIn(jwtToken: string, username: string) {
     this.jwtToken = jwtToken;
+    this.username = username;
     this.loggedIn = true;
   }
 
   setLoggedOut() {
     localStorage.removeItem("jwt");
+    this.username = "";
     this.loggedIn = false;
   }
 
@@ -152,6 +158,7 @@ class AppAPI {
         value: settingValue,
       };
       this.doCall(url, "post", datatosend).then(function (json) {
+        if (json === undefined) throw new Error("Setting update failed");
         resolve(true);
       })
         .catch(function (err) {
@@ -204,10 +211,11 @@ class AppAPI {
       const response = await fetch(that.baseURL + endpoint, additionalHeaders);
       if (response.status === 401) {
         that.onUnauthorizedcallMe();
-      } else if (response.status === 200) {
-        const json = await response.json();
-        return json;
+        throw new Error("Authentication required");
+      } else if (!response.ok) {
+        throw new Error("GateSentry request failed with status " + response.status);
       }
+      return await response.json();
     } catch (err) {
       console.error("Gatesentry API error : [Path " + endpoint + "] [Method " + method + "]", err);
       throw err;

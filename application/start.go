@@ -2,7 +2,10 @@ package gatesentryf
 
 import (
 	"fmt"
+	"os"
 	"strconv"
+
+	gatesentryWebserver "bitbucket.org/abdullah_irfan/gatesentryf/webserver"
 )
 
 var R *GSRuntime
@@ -21,6 +24,11 @@ func Start(webadminport int) (*GSRuntime, error) {
 	}
 	if err := R.Init(); err != nil {
 		return nil, err
+	}
+	// Validate and apply first-run authentication before any network service
+	// starts. Unsafe or malformed unattended configuration must fail startup.
+	if _, err := gatesentryWebserver.NewAuthManager(R.GSSettings, os.Getenv("GATESENTRY_BOOTSTRAP_FILE")); err != nil {
+		return nil, fmt.Errorf("initialize administrator authentication: %w", err)
 	}
 	LoadFilters()
 	// RegisterProxyHandlers();

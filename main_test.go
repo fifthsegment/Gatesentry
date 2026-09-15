@@ -1,6 +1,7 @@
 package main
 
 import (
+	application "bitbucket.org/abdullah_irfan/gatesentryf"
 	"bytes"
 	"crypto/tls"
 	"encoding/json"
@@ -10,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -27,8 +29,8 @@ const (
 	httpsBumpSite                   = "https://www.google.com"
 	httpBlockedSite                 = "http://www.snapads.com"
 	httpsBlockedSite                = "https://www.snapads.com"
-	gatesentryAdminUsername         = "admin"
-	gatesentryAdminPassword         = "admin"
+	gatesentryAdminUsername         = "integration-admin"
+	gatesentryAdminPassword         = "integration-admin-password"
 	testUserUsername                = "testuser123"
 	testUserPassword                = "testpassword123"
 	defaultTimeout                  = 30 * time.Second
@@ -38,6 +40,30 @@ const (
 func TestMain(m *testing.M) {
 	// Use a non-privileged port for tests (port 80 requires root)
 	os.Setenv("GS_ADMIN_PORT", "10786")
+	os.Setenv("GS_BASE_PATH", "/")
+	application.SetBasePath("/")
+	// main stores state beside the test binary. Go may reuse that temporary
+	// binary directory across invocations, so make this run a fresh install.
+	testDataDir, err := filepath.Abs(filepath.Join(filepath.Dir(os.Args[0]), "gatesentry"))
+	if err != nil {
+		panic(err)
+	}
+	if err := os.RemoveAll(testDataDir); err != nil {
+		panic(err)
+	}
+	bootstrapDir, err := os.MkdirTemp("", "gatesentry-bootstrap-test-")
+	if err != nil {
+		panic(err)
+	}
+	bootstrapPath := bootstrapDir + string(os.PathSeparator) + "bootstrap.json"
+	bootstrapJSON, err := json.Marshal(map[string]string{"username": gatesentryAdminUsername, "password": gatesentryAdminPassword})
+	if err != nil {
+		panic(err)
+	}
+	if err := os.WriteFile(bootstrapPath, bootstrapJSON, 0600); err != nil {
+		panic(err)
+	}
+	os.Setenv("GATESENTRY_BOOTSTRAP_FILE", bootstrapPath)
 
 	// Start proxy server in background
 	go main()
@@ -49,7 +75,7 @@ func TestMain(m *testing.M) {
 	if testPort == "" {
 		testPort = GSWEBADMINPORT
 	}
-	// Default GS_BASE_PATH is "/gatesentry", so the API lives under that prefix
+	// Keep this process isolated from any service already using /gatesentry.
 	basePath := os.Getenv("GS_BASE_PATH")
 	if basePath == "" {
 		basePath = "/gatesentry"
@@ -77,6 +103,7 @@ func TestMain(m *testing.M) {
 
 	// Run tests
 	code := m.Run()
+	os.RemoveAll(bootstrapDir)
 
 	// Cleanup would go here if needed
 	os.Exit(code)

@@ -16,6 +16,7 @@
     createNotificationSuccess,
   } from "../lib/utils";
   import { onDestroy, onMount } from "svelte";
+  import { gsNavigate } from "../lib/navigate";
 
   const SETTING_GENERAL_SETTINGS = "general_settings";
   let data = null;
@@ -50,6 +51,11 @@
       notificationstore.add(
         createNotificationSuccess({ subtitle: $_("Setting updated") }, $_),
       );
+    }
+    if (keyName === "admin_password" || keyName === "admin_username") {
+      store.logout();
+      gsNavigate("/login");
+      return;
     }
     await loadAPIData();
   };

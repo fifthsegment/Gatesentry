@@ -460,7 +460,7 @@ func TestAtomicWriteOperationFailuresAreReturned(t *testing.T) {
 	}
 }
 
-func TestDirectorySyncFailureCommitsVisibleSnapshotWithoutRollback(t *testing.T) {
+func TestDirectorySyncFailureQuarantinesVisibleSnapshotUntilRestart(t *testing.T) {
 	store, path := testMapStore(t, false)
 	if err := store.Update("key", "old"); err != nil {
 		t.Fatal(err)
@@ -492,8 +492,11 @@ func TestDirectorySyncFailureCommitsVisibleSnapshotWithoutRollback(t *testing.T)
 	if writes != 1 {
 		t.Fatalf("temporary payload writes = %d, want 1; rollback must not run after commit", writes)
 	}
-	if got := store.GetOrDefault("key", ""); got != "value" {
-		t.Fatalf("memory = %q, want committed value", got)
+	if value, err := store.GetE("key"); err == nil || value != "value" {
+		t.Fatalf("quarantined read = %q, %v; want committed snapshot with error", value, err)
+	}
+	if got := store.GetOrDefault("key", "fallback"); got != "fallback" {
+		t.Fatalf("compatibility read = %q, want fail-closed fallback", got)
 	}
 	reopened, err := OpenMapStore("settings", false)
 	if err != nil {
@@ -504,6 +507,30 @@ func TestDirectorySyncFailureCommitsVisibleSnapshotWithoutRollback(t *testing.T)
 	}
 	if _, err := os.Stat(path); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestDirectoryOpenFailureQuarantinesVisibleSnapshotUntilRestart(t *testing.T) {
+	store, _ := testMapStore(t, false)
+	if err := store.Update("key", "old"); err != nil {
+		t.Fatal(err)
+	}
+	oldOpen := openDirectory
+	openDirectory = func(string) (*os.File, error) { return nil, errors.New("injected directory open failure") }
+	err := store.Update("key", "new")
+	openDirectory = oldOpen
+	if err == nil || !strings.Contains(err.Error(), "open storage directory for sync") {
+		t.Fatalf("error = %v", err)
+	}
+	if value, readErr := store.GetE("key"); readErr == nil || value != "new" {
+		t.Fatalf("quarantined read = %q, %v; want committed snapshot with error", value, readErr)
+	}
+	reopened, err := OpenMapStore("settings", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := reopened.GetE("key"); err != nil || got != "new" {
+		t.Fatalf("reopened read = %q, %v", got, err)
 	}
 }
 

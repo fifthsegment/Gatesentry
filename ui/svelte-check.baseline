@@ -48,4 +48,4 @@ WARNING "src/routes/rules/rform.svelte" 109:5 "A11y: visible, non-interactive el
 WARNING "src/routes/rules/rform.svelte" 134:5 "A11y: <div> with click handler must have an ARIA role"
 WARNING "src/routes/rules/rform.svelte" 134:5 "A11y: visible, non-interactive elements with an on:click event must be accompanied by an on:keydown, on:keyup, or on:keypress event."
 WARNING "src/routes/users/usermodal.svelte" 17:14 "Component has unused export property 'showForm'. If it is for external reference only, please consider using `export const showForm`"
-COMPLETED 586 FILES 22 ERRORS 28 WARNINGS 17 FILES_WITH_PROBLEMS
+COMPLETED 590 FILES 22 ERRORS 28 WARNINGS 17 FILES_WITH_PROBLEMS

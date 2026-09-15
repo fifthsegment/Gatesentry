@@ -26,6 +26,7 @@ type Store struct {
 	data          []byte
 	path          string
 	loadErr       error
+	durabilityErr error
 	pathMu        *sync.RWMutex
 }
 
@@ -115,6 +116,14 @@ func (s *Store) Load() error {
 func (s *Store) loadLocked() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// A rename followed by a directory open, sync, or close failure leaves the
+	// visible file newer than the last state known to be durable. Keep this
+	// process fail closed instead of accepting that uncertain state on a later
+	// refresh. Reopening the store after a process restart re-evaluates the file
+	// that actually survived.
+	if s.durabilityErr != nil {
+		return s.durabilityErr
+	}
 	data, err := os.ReadFile(s.path)
 	if errors.Is(err, os.ErrNotExist) {
 		s.data = nil
@@ -166,7 +175,8 @@ var openDirectory = func(path string) (*os.File, error) { return os.Open(path) }
 // are always mode 0600. Failures before rename leave the destination intact.
 // Once rename succeeds, committed is true even when syncing or closing the
 // directory fails: the new destination is visible, though crash durability is
-// uncertain and the caller still receives the material filesystem error.
+// uncertain and the caller still receives the material filesystem error. The
+// Store quarantines that state until it is reopened after restart.
 func atomicWrite(path string, data []byte) (committed bool, err error) {
 	dir := filepath.Dir(path)
 	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".tmp-*")
@@ -177,12 +187,12 @@ func atomicWrite(path string, data []byte) (committed bool, err error) {
 	closed := false
 	defer func() {
 		if !closed {
-			if closeErr := closeFile(tmp); err == nil && closeErr != nil {
-				err = fmt.Errorf("close temporary storage file: %w", closeErr)
+			if closeErr := closeFile(tmp); closeErr != nil {
+				err = errors.Join(err, fmt.Errorf("close temporary storage file: %w", closeErr))
 			}
 		}
-		if removeErr := os.Remove(tmpName); err == nil && removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
-			err = fmt.Errorf("clean temporary storage file: %w", removeErr)
+		if removeErr := os.Remove(tmpName); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+			err = errors.Join(err, fmt.Errorf("clean temporary storage file: %w", removeErr))
 		}
 	}()
 	if err = tmp.Chmod(0600); err != nil {
@@ -194,10 +204,11 @@ func atomicWrite(path string, data []byte) (committed bool, err error) {
 	if err = syncFile(tmp); err != nil {
 		return false, fmt.Errorf("sync temporary storage file: %w", err)
 	}
-	if err = closeFile(tmp); err != nil {
-		return false, fmt.Errorf("close temporary storage file: %w", err)
-	}
+	closeErr := closeFile(tmp)
 	closed = true
+	if closeErr != nil {
+		return false, fmt.Errorf("close temporary storage file: %w", closeErr)
+	}
 	if err = renameFile(tmpName, path); err != nil {
 		return false, fmt.Errorf("replace storage file: %w", err)
 	}
@@ -207,8 +218,11 @@ func atomicWrite(path string, data []byte) (committed bool, err error) {
 		return true, fmt.Errorf("open storage directory for sync: %w", err)
 	}
 	if err = syncFile(directory); err != nil {
-		_ = closeFile(directory)
-		return true, fmt.Errorf("sync storage directory: %w", err)
+		syncErr := fmt.Errorf("sync storage directory: %w", err)
+		if closeErr := closeFile(directory); closeErr != nil {
+			return true, errors.Join(syncErr, fmt.Errorf("close storage directory: %w", closeErr))
+		}
+		return true, syncErr
 	}
 	if err = closeFile(directory); err != nil {
 		return true, fmt.Errorf("close storage directory: %w", err)
@@ -229,8 +243,14 @@ func (s *Store) persistLocked(data []byte) (err error) {
 		// Rename is the commit point. Keep memory consistent with the visible
 		// destination even when the following directory durability step fails.
 		s.data = append([]byte(nil), data...)
+		if err != nil {
+			s.durabilityErr = fmt.Errorf("storage durability is uncertain until restart: %w", err)
+		}
 	}
 	if err != nil {
+		if s.durabilityErr != nil {
+			return fmt.Errorf("persist storage %q: %w", s.Id, s.durabilityErr)
+		}
 		return fmt.Errorf("persist storage %q: %w", s.Id, err)
 	}
 	return nil
@@ -267,6 +287,32 @@ func (s *Store) Get() []byte {
 // its snapshot under that shared path lock before reading or writing.
 type MapStore struct {
 	baseStore *Store
+}
+
+// UpdateMap atomically transforms and persists the complete map. The callback
+// receives a copy and may update several related keys in one durable commit.
+func (m *MapStore) UpdateMap(update func(map[string]string) error) error {
+	m.baseStore.pathMu.Lock()
+	defer m.baseStore.pathMu.Unlock()
+	if err := m.baseStore.loadLocked(); err != nil {
+		return err
+	}
+	original := m.baseStore.Get()
+	values, err := parseMap(original)
+	if err != nil {
+		return err
+	}
+	if err := update(values); err != nil {
+		return err
+	}
+	data, err := json.Marshal(values)
+	if err != nil {
+		return fmt.Errorf("serialize map storage: %w", err)
+	}
+	if bytes.Equal(data, original) {
+		return nil
+	}
+	return m.baseStore.setLocked(data)
 }
 
 func OpenMapStore(name string, encrypt bool) (*MapStore, error) {
@@ -307,7 +353,8 @@ func parseMap(data []byte) (map[string]string, error) {
 }
 
 // UpdateValue atomically reads, transforms, and persists one value while the
-// map lock is held. The previous value remains in memory and on disk on error.
+// map lock is held. Pre-rename errors preserve the previous value. A
+// post-rename durability error quarantines the visible replacement.
 func (m *MapStore) UpdateValue(key string, update func(string) (string, error)) error {
 	m.baseStore.pathMu.Lock()
 	defer m.baseStore.pathMu.Unlock()

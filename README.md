@@ -33,6 +33,8 @@ Useful as a network-wide content filter, a privacy guard, a parental control lay
 
 There are 2 ways to run Gatesentry, either using the docker image or using the single file binary directly.
 
+Fresh installations require one-time administrator setup. See [Secure first-run administration](docs/secure-first-run.md) before exposing the dashboard or configuring unattended Docker startup.
+
 ### Method 1: Using Docker
 
 1. Use the [docker-compose.yml](docker-compose.yml) file from the root of this repo as a template, copy and paste it to any directory on your computer, then run the following command in a terminal `docker compose up`
