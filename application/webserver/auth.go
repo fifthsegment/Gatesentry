@@ -20,6 +20,7 @@ import (
 	gatesentryWebserverTypes "bitbucket.org/abdullah_irfan/gatesentryf/webserver/types"
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
+	"golang.org/x/sys/unix"
 )
 
 const authStateKey = "admin_auth"
@@ -151,19 +152,13 @@ func validateAuthState(state authState) error {
 
 func loadBootstrapFile(path string) (bootstrapFile, error) {
 	var cfg bootstrapFile
-	info, err := os.Lstat(path)
+	fd, err := unix.Open(path, unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
 	if err != nil {
 		return cfg, errors.New("cannot read bootstrap secret file")
 	}
-	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 {
-		return cfg, errors.New("bootstrap secret file must be a regular file with mode 0600 or stricter")
-	}
-	file, err := os.Open(path)
-	if err != nil {
-		return cfg, errors.New("cannot read bootstrap secret file")
-	}
+	file := os.NewFile(uintptr(fd), path)
 	openedInfo, statErr := file.Stat()
-	if statErr != nil || !openedInfo.Mode().IsRegular() || openedInfo.Mode().Perm()&0077 != 0 || !os.SameFile(info, openedInfo) {
+	if statErr != nil || !openedInfo.Mode().IsRegular() || openedInfo.Mode().Perm()&0077 != 0 {
 		if closeErr := file.Close(); closeErr != nil {
 			return cfg, errors.New("cannot close bootstrap secret file")
 		}

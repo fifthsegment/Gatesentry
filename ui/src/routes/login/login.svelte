@@ -26,6 +26,11 @@
   let invalidMessage: string = "";
   let invalid: boolean = false;
   onMount(async () => {
+    // Older GateSentry releases could persist these values. Remove them before
+    // login so an upgrade does not leave administrator credentials in browser
+    // storage, even when the setup status request fails.
+    localStorage.removeItem("password");
+    localStorage.removeItem("rememberMe");
     try {
       const response = await fetch(getBasePath() + "/api/setup/status");
       if (!response.ok) return;

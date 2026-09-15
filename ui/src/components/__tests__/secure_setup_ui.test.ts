@@ -17,6 +17,8 @@ test("setup page contains one-time credential form", () => {
 test("login never persists administrator password", () => {
   expect(loginSource).not.toContain(`localStorage.setItem("password"`);
   expect(loginSource).not.toContain(`localStorage.getItem("password"`);
+  expect(loginSource).toContain(`localStorage.removeItem("password")`);
+  expect(loginSource).toContain(`localStorage.removeItem("rememberMe")`);
   expect(loginSource).toContain("/api/setup/status");
   expect(appSource).toContain('gsNavigate("/setup")');
   expect(appSource).toContain("!setupStatusFailed");
