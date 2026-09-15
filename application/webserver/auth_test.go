@@ -4,6 +4,7 @@ import (
 	gatesentry2storage "bitbucket.org/abdullah_irfan/gatesentryf/storage"
 	gatesentryWebserverTypes "bitbucket.org/abdullah_irfan/gatesentryf/webserver/types"
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -457,6 +458,53 @@ func TestAuthenticationMiddlewareRejectsPreSetupAndInvalidatedSessions(t *testin
 	}
 	if ok, err := auth.Verify("renamed-owner", "replacement-password"); err != nil || !ok {
 		t.Fatalf("renamed login = %v, %v", ok, err)
+	}
+}
+
+func TestAuthenticationResponsesIncludeVerifiedUsername(t *testing.T) {
+	auth, err := NewAuthManager(authStore(t), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := auth.Bootstrap("owner", "long-secure-password", "", true); err != nil {
+		t.Fatal(err)
+	}
+
+	request := httptest.NewRequest(http.MethodPost, "/api/auth/token", nil)
+	request = request.WithContext(context.WithValue(request.Context(), "username", "owner"))
+	response := httptest.NewRecorder()
+	tokenCreationHandlerFor(auth)(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("token response status = %d", response.Code)
+	}
+	var tokenResponse struct {
+		Jwtoken   string
+		Validated bool
+		Username  string
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &tokenResponse); err != nil {
+		t.Fatal(err)
+	}
+	if !tokenResponse.Validated || tokenResponse.Jwtoken == "" || tokenResponse.Username != "owner" {
+		t.Fatalf("token response = %+v", tokenResponse)
+	}
+
+	request = httptest.NewRequest(http.MethodGet, "/api/auth/verify", nil)
+	request = request.WithContext(context.WithValue(request.Context(), "username", "owner"))
+	response = httptest.NewRecorder()
+	verifyAuthHandler(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("verify response status = %d", response.Code)
+	}
+	var verifyResponse struct {
+		Validated bool
+		Username  string
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &verifyResponse); err != nil {
+		t.Fatal(err)
+	}
+	if !verifyResponse.Validated || verifyResponse.Username != "owner" {
+		t.Fatalf("verify response = %+v", verifyResponse)
 	}
 }
 

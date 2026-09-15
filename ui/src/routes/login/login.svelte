@@ -55,7 +55,7 @@
       } else if (data?.Validated === true || data?.Validated === "true") {
         localStorage.removeItem("jwt");
         localStorage.setItem("jwt", data.Jwtoken);
-        store.loginSuccesful(data.Jwtoken);
+        store.loginSuccesful(data.Jwtoken, data.Username || "");
       } else {
         invalidMessage = $_("Invalid username or password");
         invalid = true;

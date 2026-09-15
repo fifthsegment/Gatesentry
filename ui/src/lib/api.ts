@@ -21,11 +21,13 @@ class AppAPI {
   onUnauthorizedcallMe: () => void;
   loggedIn: boolean;
   jwtToken: string;
+  username: string;
 
   constructor() {
     const jwt = localStorage.getItem("jwt");
     const basePath = getBasePath();
     this.baseURL = basePath + "/api";
+    this.username = "";
 
     this.headers = {
       Authorization: `Bearer ${jwt}`,
@@ -36,10 +38,11 @@ class AppAPI {
   }
 
   verifyToken(): Promise<boolean> {
-    return this.doCallRaw("/auth/verify").then((response) => {
+    return this.doCallRaw("/auth/verify").then(async (response) => {
       if (response.status === 200) {
+        const data = await response.json();
         this.jwtToken = localStorage.getItem("jwt") || "";
-        this.setLoggedIn(this.jwtToken);
+        this.setLoggedIn(this.jwtToken, data.Username || "");
         return true;
       } else {
         this.setLoggedOut();
@@ -48,13 +51,15 @@ class AppAPI {
     });
   }
 
-  setLoggedIn(jwtToken: string) {
+  setLoggedIn(jwtToken: string, username: string) {
     this.jwtToken = jwtToken;
+    this.username = username;
     this.loggedIn = true;
   }
 
   setLoggedOut() {
     localStorage.removeItem("jwt");
+    this.username = "";
     this.loggedIn = false;
   }
 

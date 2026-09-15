@@ -71,7 +71,8 @@ func tokenCreationHandlerFor(auth *AuthManager) HttpHandlerFunc {
 		SendJSON(w, struct {
 			Jwtoken   string
 			Validated bool
-		}{token, true})
+			Username  string
+		}{Jwtoken: token, Validated: true, Username: username})
 	}
 }
 
@@ -132,7 +133,8 @@ var verifyAuthHandler HttpHandlerFunc = func(w http.ResponseWriter, r *http.Requ
 		Validated bool
 		Jwtoken   string
 		Message   string
-	}{Validated: true, Jwtoken: "", Message: `Username : ` + username})
+		Username  string
+	}{Validated: true, Jwtoken: "", Message: `Username : ` + username, Username: username})
 }
 
 var indexHandler = makeIndexHandler("/")

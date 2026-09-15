@@ -1,5 +1,11 @@
 <script lang="ts">
   import { Button, Column, FluidForm, Grid, PasswordInput, Row, TextInput } from "carbon-components-svelte";
+  import {
+    MAX_PASSWORD_BYTES,
+    MIN_PASSWORD_BYTES,
+    passwordHasValidByteLength,
+    utf8ByteLength,
+  } from "../../lib/credentials";
   import { getBasePath, gsNavigate } from "../../lib/navigate";
 
   let username = "";
@@ -11,6 +17,8 @@
   let submitting = false;
   let statusLoaded = false;
   let statusFailed = false;
+  $: passwordBytes = utf8ByteLength(password);
+  $: passwordLengthValid = passwordHasValidByteLength(password);
 
   async function loadStatus() {
     statusFailed = false;
@@ -33,6 +41,10 @@
   async function submit(event) {
     event.preventDefault();
     error = "";
+    if (!passwordLengthValid) {
+      error = `Password must contain between ${MIN_PASSWORD_BYTES} and ${MAX_PASSWORD_BYTES} UTF-8 bytes.`;
+      return;
+    }
     if (password !== confirmation) { error = "Passwords do not match."; return; }
     submitting = true;
     try {
@@ -60,12 +72,23 @@
         {#if error}<p class="error" role="alert">{error}</p>{/if}
         {#if statusFailed}<Button type="button" kind="secondary" on:click={loadStatus}>Retry status check</Button>{/if}
         <TextInput required autocomplete="username" labelText="Administrator username" bind:value={username} />
-        <PasswordInput required autocomplete="new-password" maxlength={72} labelText="Password" helperText="Use 12 to 72 characters." bind:value={password} />
-        <PasswordInput required autocomplete="new-password" maxlength={72} labelText="Confirm password" bind:value={confirmation} />
+        <PasswordInput
+          required
+          autocomplete="new-password"
+          labelText="Password"
+          helperText={`Use ${MIN_PASSWORD_BYTES} to ${MAX_PASSWORD_BYTES} UTF-8 bytes.`}
+          invalid={password.length > 0 && !passwordLengthValid}
+          invalidText={`Password must contain between ${MIN_PASSWORD_BYTES} and ${MAX_PASSWORD_BYTES} UTF-8 bytes.`}
+          bind:value={password}
+        />
+        <p class:invalid-length={password.length > 0 && !passwordLengthValid} aria-live="polite">
+          Current password length: {passwordBytes} UTF-8 bytes.
+        </p>
+        <PasswordInput required autocomplete="new-password" labelText="Confirm password" bind:value={confirmation} />
         {#if requiresAuthorization}
           <PasswordInput required autocomplete="off" labelText="Bootstrap authorization" bind:value={authorization} />
         {/if}
-        <Button type="submit" disabled={!statusLoaded || submitting || !username || password.length < 12 || password.length > 72 || password !== confirmation}>Complete setup</Button>
+        <Button type="submit" disabled={!statusLoaded || submitting || !username || !passwordLengthValid || password !== confirmation}>Complete setup</Button>
       </Column>
     </FluidForm>
   </div>
@@ -75,4 +98,5 @@
   .setup-card { border: 1px solid; max-width: 30rem; background: white; margin: 15vh auto 0; padding: 1rem; }
   h2, p { margin-bottom: 1rem; }
   .error { color: #da1e28; }
+  .invalid-length { color: #da1e28; }
 </style>

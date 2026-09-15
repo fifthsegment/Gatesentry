@@ -5,7 +5,8 @@
   import HttpsToggle from "../../components/httpsToggle.svelte";
   import ConnectedCertificateComposed from "../../components/connectedCertificateComposed.svelte";
   import ConnectedSettingInput from "../../components/connectedSettingInput.svelte";
-  import { Breadcrumb, BreadcrumbItem } from "carbon-components-svelte";
+  import { Breadcrumb, BreadcrumbItem, TextInput } from "carbon-components-svelte";
+  import { store } from "../../store/apistore";
 </script>
 
 <Breadcrumb style="margin-bottom: 10px;">
@@ -25,9 +26,8 @@
   helperText=""
 />
 <br />
-<ConnectedGeneralSettingInput
-  keyName="admin_username"
-  helperText={""}
+<TextInput
+  value={$store.api.username}
   type="text"
   title={$_("Admin username")}
   labelText={$_("Admin username")}

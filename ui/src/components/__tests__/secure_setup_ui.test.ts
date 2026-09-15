@@ -4,6 +4,8 @@ import setupSource from "../../routes/setup/setup.svelte?raw";
 import loginSource from "../../routes/login/login.svelte?raw";
 import appSource from "../../App.svelte?raw";
 import generalSettingsSource from "../connectedGeneralSettingInputs.svelte?raw";
+import headerSource from "../headerrightnav.svelte?raw";
+import settingsSource from "../../routes/settings/settings.svelte?raw";
 
 test("setup page contains one-time credential form", () => {
   const { js } = compile(setupSource, { generate: "dom" });
@@ -11,6 +13,9 @@ test("setup page contains one-time credential form", () => {
   expect(setupSource).toContain("Confirm password");
   expect(setupSource).toContain("Bootstrap authorization");
   expect(setupSource).toContain("!statusLoaded");
+  expect(setupSource).toContain("passwordHasValidByteLength");
+  expect(setupSource).toContain("UTF-8 bytes");
+  expect(setupSource).not.toContain("maxlength={72}");
   expect(setupSource).toContain('window.location.assign(getBasePath() + "/login")');
 });
 
@@ -27,4 +32,13 @@ test("login never persists administrator password", () => {
     'keyName === "admin_password" || keyName === "admin_username"',
   );
   expect(generalSettingsSource).toContain('gsNavigate("/login")');
+});
+
+test("authenticated administrator identity is displayed from the verified session", () => {
+  expect(headerSource).not.toContain("Logged in as admin");
+  expect(headerSource).toContain("$store.api.username");
+  expect(loginSource).toContain('data.Username || ""');
+  expect(loginSource).not.toContain("data.Username || username");
+  expect(settingsSource).toContain("value={$store.api.username}");
+  expect(settingsSource).not.toContain('keyName="admin_username"');
 });

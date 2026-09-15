@@ -10,9 +10,9 @@ const { subscribe, update } = writable({ api: api });
 
 export const store = {
   subscribe,
-  loginSuccesful: (jwtToken: string) =>
+  loginSuccesful: (jwtToken: string, username: string) =>
     update((s) => {
-      s.api.setLoggedIn(jwtToken);
+      s.api.setLoggedIn(jwtToken, username);
       return s;
     }),
   logout: () =>
