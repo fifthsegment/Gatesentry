@@ -67,6 +67,13 @@ var ErrNoPolicy = errors.New("no policy document")
 // in the persisted policy document.
 var ErrUnknownGroup = errors.New("unknown policy group")
 
+// ErrGroupExists is returned when a create operation would overwrite an
+// existing policy record.
+var ErrGroupExists = errors.New("policy group already exists")
+
+// ErrGroupNotFound is returned when an update or delete targets no group.
+var ErrGroupNotFound = errors.New("policy group not found")
+
 func (s *Service) loadDocument() (PolicyDocument, error) {
 	var doc PolicyDocument
 	if s.storage == nil {
@@ -168,6 +175,71 @@ func (s *Service) SaveGroups(groups []PolicyGroup) error {
 			next[g.ID] = g
 		}
 		snap.Groups = next
+		return nil
+	})
+}
+
+// CreateGroup creates one ordinary policy record without replacing any other
+// group. Template application uses this so reapplying a starter cannot
+// silently overwrite edits made after the first application.
+func (s *Service) CreateGroup(group PolicyGroup) error {
+	if strings.TrimSpace(group.ID) == "" {
+		return errors.New("policy group needs an id")
+	}
+	if strings.TrimSpace(group.Name) == "" {
+		return errors.New("policy group needs a name")
+	}
+	now := time.Now().UTC()
+	if group.CreatedAt.IsZero() {
+		group.CreatedAt = now
+	}
+	group.UpdatedAt = now
+	return s.update(func(snap *PolicySnapshot) error {
+		if _, exists := snap.Groups[group.ID]; exists {
+			return fmt.Errorf("%w: %s", ErrGroupExists, group.ID)
+		}
+		snap.Groups[group.ID] = group
+		return nil
+	})
+}
+
+// UpdateGroup edits one ordinary policy record while preserving its stable ID
+// and creation time. Other groups and assignments remain in the transaction.
+func (s *Service) UpdateGroup(groupID string, group PolicyGroup) error {
+	if strings.TrimSpace(groupID) == "" {
+		return errors.New("policy group needs an id")
+	}
+	if strings.TrimSpace(group.Name) == "" {
+		return errors.New("policy group needs a name")
+	}
+	return s.update(func(snap *PolicySnapshot) error {
+		current, exists := snap.Groups[groupID]
+		if !exists {
+			return fmt.Errorf("%w: %s", ErrGroupNotFound, groupID)
+		}
+		group.ID = groupID
+		group.CreatedAt = current.CreatedAt
+		group.UpdatedAt = time.Now().UTC()
+		snap.Groups[groupID] = group
+		return nil
+	})
+}
+
+// DeleteGroup removes one policy record and assignments that point to it.
+func (s *Service) DeleteGroup(groupID string) error {
+	if strings.TrimSpace(groupID) == "" {
+		return errors.New("policy group needs an id")
+	}
+	return s.update(func(snap *PolicySnapshot) error {
+		if _, exists := snap.Groups[groupID]; !exists {
+			return fmt.Errorf("%w: %s", ErrGroupNotFound, groupID)
+		}
+		delete(snap.Groups, groupID)
+		for deviceID, assignedGroupID := range snap.Assignments {
+			if assignedGroupID == groupID {
+				delete(snap.Assignments, deviceID)
+			}
+		}
 		return nil
 	})
 }

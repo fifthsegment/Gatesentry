@@ -6,11 +6,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 
 	gatesentryDnsServer "bitbucket.org/abdullah_irfan/gatesentryf/dns/server"
 	gatesentryPolicy "bitbucket.org/abdullah_irfan/gatesentryf/policy"
 	gatesentry2storage "bitbucket.org/abdullah_irfan/gatesentryf/storage"
+	"github.com/gorilla/mux"
 )
 
 func policyTestService(t *testing.T) (*gatesentryPolicy.Service, func()) {
@@ -146,4 +148,122 @@ func TestPolicyEndpointsUnavailableWithoutService(t *testing.T) {
 	if recorder.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want 503 when the policy service is unavailable", recorder.Code)
 	}
+}
+
+func TestPolicyTemplatesPreviewAndApply(t *testing.T) {
+	_, cleanup := policyTestService(t)
+	defer cleanup()
+
+	preview := httptest.NewRequest(http.MethodGet, "/api/policy/templates", nil)
+	previewRecorder := httptest.NewRecorder()
+	GSApiPolicyTemplatesGet(previewRecorder, preview)
+	if previewRecorder.Code != http.StatusOK {
+		t.Fatalf("template preview status = %d, body = %s", previewRecorder.Code, previewRecorder.Body.String())
+	}
+	var previewBody struct {
+		Templates []gatesentryPolicy.PolicyTemplate `json:"templates"`
+	}
+	if err := json.Unmarshal(previewRecorder.Body.Bytes(), &previewBody); err != nil {
+		t.Fatal(err)
+	}
+	if len(previewBody.Templates) != 7 {
+		t.Fatalf("template count = %d, want 7", len(previewBody.Templates))
+	}
+	for _, template := range previewBody.Templates {
+		if len(template.Protections) == 0 || len(template.Limitations) == 0 {
+			t.Fatalf("template %s omitted preview details", template.ID)
+		}
+	}
+
+	apply := httptest.NewRequest(http.MethodPost, "/api/policy/templates/child/apply", nil)
+	apply = mux.SetURLVars(apply, map[string]string{"id": "child"})
+	applyRecorder := httptest.NewRecorder()
+	GSApiPolicyTemplateApply(applyRecorder, apply)
+	if applyRecorder.Code != http.StatusCreated {
+		t.Fatalf("template apply status = %d, body = %s", applyRecorder.Code, applyRecorder.Body.String())
+	}
+	if got := policySnapshotGroup(t, "template-child"); got.Name != "Child" {
+		t.Fatalf("applied group = %+v", got)
+	}
+
+	apply = httptest.NewRequest(http.MethodPost, "/api/policy/templates/child/apply", nil)
+	apply = mux.SetURLVars(apply, map[string]string{"id": "child"})
+	applyRecorder = httptest.NewRecorder()
+	GSApiPolicyTemplateApply(applyRecorder, apply)
+	if applyRecorder.Code != http.StatusConflict {
+		t.Fatalf("reapply status = %d, body = %s", applyRecorder.Code, applyRecorder.Body.String())
+	}
+
+	missing := httptest.NewRequest(http.MethodPost, "/api/policy/templates/missing/apply", nil)
+	missing = mux.SetURLVars(missing, map[string]string{"id": "missing"})
+	missingRecorder := httptest.NewRecorder()
+	GSApiPolicyTemplateApply(missingRecorder, missing)
+	if missingRecorder.Code != http.StatusNotFound {
+		t.Fatalf("missing template status = %d", missingRecorder.Code)
+	}
+}
+
+func TestPolicyGroupCRUDPreservesCustomizedRecords(t *testing.T) {
+	service, cleanup := policyTestService(t)
+	defer cleanup()
+
+	create := httptest.NewRequest(http.MethodPost, "/api/policy/groups", strings.NewReader("{\"name\":\"Custom\",\"description\":\"review me\",\"action\":\"block\",\"domains\":[\"*.example.test\"]}"))
+	createRecorder := httptest.NewRecorder()
+	GSApiPolicyGroupCreate(createRecorder, create)
+	if createRecorder.Code != http.StatusCreated {
+		t.Fatalf("create status = %d, body = %s", createRecorder.Code, createRecorder.Body.String())
+	}
+	var created struct {
+		Group gatesentryPolicy.PolicyGroup `json:"group"`
+	}
+	if err := json.Unmarshal(createRecorder.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	if created.Group.ID == "" || created.Group.Name != "Custom" {
+		t.Fatalf("created group = %+v", created.Group)
+	}
+
+	update := httptest.NewRequest(http.MethodPut, "/api/policy/groups/"+created.Group.ID, strings.NewReader("{\"name\":\"Custom edited\",\"description\":\"changed\",\"action\":\"allow\",\"domains\":[\"allowed.example.test\"]}"))
+	update = mux.SetURLVars(update, map[string]string{"id": created.Group.ID})
+	updateRecorder := httptest.NewRecorder()
+	GSApiPolicyGroupUpdate(updateRecorder, update)
+	if updateRecorder.Code != http.StatusOK {
+		t.Fatalf("update status = %d, body = %s", updateRecorder.Code, updateRecorder.Body.String())
+	}
+	if service.Snapshot().Groups[created.Group.ID].Name != "Custom edited" {
+		t.Fatal("updated group was not reloaded into the service")
+	}
+
+	if err := service.SetDeviceAssignment("device-1", created.Group.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.Reload(); err != nil {
+		t.Fatal(err)
+	}
+	remove := httptest.NewRequest(http.MethodDelete, "/api/policy/groups/"+created.Group.ID, nil)
+	remove = mux.SetURLVars(remove, map[string]string{"id": created.Group.ID})
+	removeRecorder := httptest.NewRecorder()
+	GSApiPolicyGroupDelete(removeRecorder, remove)
+	if removeRecorder.Code != http.StatusOK {
+		t.Fatalf("delete status = %d, body = %s", removeRecorder.Code, removeRecorder.Body.String())
+	}
+	if _, exists := service.Snapshot().Groups[created.Group.ID]; exists {
+		t.Fatal("deleted group remains")
+	}
+	if _, exists := service.Snapshot().Assignments["device-1"]; exists {
+		t.Fatal("deleting group left a device assignment")
+	}
+}
+
+func policySnapshotGroup(t *testing.T, groupID string) gatesentryPolicy.PolicyGroup {
+	t.Helper()
+	svc := gatesentryDnsServer.GetPolicyService()
+	if svc == nil {
+		t.Fatal("policy service unavailable")
+	}
+	group, ok := svc.Snapshot().Groups[groupID]
+	if !ok {
+		t.Fatalf("group %s not found", groupID)
+	}
+	return group
 }
