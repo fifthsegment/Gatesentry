@@ -69,6 +69,7 @@ type GSRuntime struct {
 	GSWebSettings               *gatesentry2storage.MapStore
 	GSSettings                  *gatesentry2storage.MapStore
 	GSUpdateLog                 *gatesentry2storage.MapStore
+	GSDevices                   *gatesentry2storage.MapStore
 	Logger                      *gatesentry2logger.Log
 	Proxy                       *gatesentry2proxy.GSProxy
 	AuthUsers                   []GatesentryTypes.GSUser
@@ -217,6 +218,15 @@ func (R *GSRuntime) Init() error {
 	R.GSSettings, err = gatesentry2storage.OpenMapStore("GSSettings", true)
 	if err != nil {
 		return fmt.Errorf("open settings storage: %w", err)
+	}
+	// Content migrations run before default seeding so missing optional
+	// settings are filled from current defaults rather than migration code.
+	if err := MigrateSettings(R.GSSettings); err != nil {
+		return fmt.Errorf("migrate settings storage: %w", err)
+	}
+	R.GSDevices, err = gatesentry2storage.OpenMapStore("GSDevices", true)
+	if err != nil {
+		return fmt.Errorf("open device storage: %w", err)
 	}
 	R.GSUpdateLog, err = gatesentry2storage.OpenMapStore("GSUpdateLog", false)
 	if err != nil {

@@ -97,7 +97,6 @@ func GSApiDeviceSetName(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-
 	device.ManualName = req.Name
 	if req.Owner != "" {
 		device.Owner = req.Owner
@@ -107,7 +106,10 @@ func GSApiDeviceSetName(w http.ResponseWriter, r *http.Request) {
 	}
 	device.Persistent = true // Named devices should survive restarts
 
-	ds.UpsertDevice(device)
+	if _, err := ds.UpsertDeviceE(device); err != nil {
+		http.Error(w, `{"error":"Unable to persist device assignment"}`, http.StatusInternalServerError)
+		return
+	}
 
 	log.Printf("[Devices API] Device %s named: %q (owner=%q, category=%q)", id, req.Name, req.Owner, req.Category)
 
@@ -136,7 +138,10 @@ func GSApiDeviceDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ds.RemoveDevice(id)
+	if err := ds.RemoveDeviceE(id); err != nil {
+		http.Error(w, `{"error":"Unable to persist device removal"}`, http.StatusInternalServerError)
+		return
+	}
 
 	log.Printf("[Devices API] Device %s (%s) removed", id, device.GetDisplayName())
 

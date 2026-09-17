@@ -14,7 +14,7 @@ var (
 	blocklists = []string{}
 )
 
-func DNSServerThread(baseDir string, logger *gatesentry2logger.Log, c <-chan int, settings *gatesentry2storage.MapStore, info *gatesentryTypes.DnsServerInfo) {
+func DNSServerThread(baseDir string, logger *gatesentry2logger.Log, c <-chan int, settings *gatesentry2storage.MapStore, devices *gatesentry2storage.MapStore, info *gatesentryTypes.DnsServerInfo) {
 	defer func() {
 		if r := recover(); r != nil {
 			fmt.Println("Recovered from panic:", r)
@@ -27,7 +27,7 @@ func DNSServerThread(baseDir string, logger *gatesentry2logger.Log, c <-chan int
 			log.Println("[DNS.SERVER] Received message:", msg)
 			if msg == 1 {
 				// Start the DNS server
-				go gatesentryDnsServer.StartDNSServer(baseDir, logger, blocklists, settings, R.DnsServerInfo)
+				go gatesentryDnsServer.StartDNSServer(baseDir, logger, blocklists, settings, devices, R.DnsServerInfo)
 				log.Println("[DNS.SERVER] started")
 			} else if msg == 2 {
 				log.Println("[DNS.SERVER] Stopping DNS server")

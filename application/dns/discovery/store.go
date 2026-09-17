@@ -63,6 +63,9 @@ func reverseIPv6(ipStr string) string {
 // DeviceStore is a thread-safe store for discovered devices and DNS records.
 type DeviceStore struct {
 	mu sync.RWMutex
+	// persistence stores the durable user-managed assignment subset when
+	// attached. It is nil until AttachPersistence succeeds.
+	persistence *Persistence
 
 	// devices maps device ID → Device
 	devices map[string]*Device
@@ -327,8 +330,21 @@ func (ds *DeviceStore) FindDeviceByIP(ip string) *Device {
 // its DNS records. The device is matched by ID if it already exists.
 // Returns the device ID.
 func (ds *DeviceStore) UpsertDevice(device *Device) string {
+	// Compatibility path used by discovery sources: observed identity churn
+	// is persisted only through the durable subset, and persistence errors
+	// are logged rather than dropped.
+	id, err := ds.UpsertDeviceE(device)
+	if err != nil {
+		log.Printf("[Discovery] unable to persist device assignment: %v", err)
+	}
+	return id
+}
+
+// UpsertDeviceE adds or updates a device and persists the durable assignment
+// subset when persistence is attached. The method returns persistence errors;
+// user-facing mutations must surface them instead of silently losing data.
+func (ds *DeviceStore) UpsertDeviceE(device *Device) (string, error) {
 	ds.mu.Lock()
-	defer ds.mu.Unlock()
 
 	if device.ID == "" {
 		device.ID = generateID()
@@ -392,16 +408,41 @@ func (ds *DeviceStore) UpsertDevice(device *Device) string {
 	ds.devices[device.ID] = device
 	ds.rebuildIndexes()
 
-	return device.ID
+	persisted := *device
+	ds.mu.Unlock()
+	if ds.persistence == nil {
+		return device.ID, nil
+	}
+	err := ds.persistence.persistIfChanged(persisted)
+	return device.ID, err
 }
 
 // RemoveDevice removes a device by ID and rebuilds indexes.
 func (ds *DeviceStore) RemoveDevice(id string) {
+	// Errors are logged by the error-returning variant; this compatibility
+	// method must retain its existing signature for discovery callers.
+	_ = ds.RemoveDeviceE(id)
+}
+
+// RemoveDeviceE removes a device and persists the removal when persistence is
+// attached. It returns persistence errors so user-facing mutation paths can
+// fail visibly instead of silently losing a durable assignment.
+func (ds *DeviceStore) RemoveDeviceE(id string) error {
+	var device *Device
 	ds.mu.Lock()
-	defer ds.mu.Unlock()
+	device = ds.devices[id]
 
 	delete(ds.devices, id)
 	ds.rebuildIndexes()
+	ds.mu.Unlock()
+
+	if ds.persistence == nil {
+		return nil
+	}
+	if device == nil {
+		return nil
+	}
+	return ds.persistence.remove(id)
 }
 
 // UpdateDeviceIP updates a device's IP address (v4 or v6) and regenerates

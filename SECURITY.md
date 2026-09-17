@@ -61,7 +61,7 @@ For a binary installation, startup builds the data path as a `gatesentry` subdir
 The directory can contain:
 
 - `GSSettings`, including admin credentials, users, policy settings, external AI API keys and URLs, DNS configuration, and the CA certificate/private key;
-- `GSWebSettings` and the unencrypted `GSUpdateLog`;
+- `GSWebSettings`, the encrypted `GSDevices` durable device assignment store, and the unencrypted `GSUpdateLog`;
 - `log.db` by default, containing proxy and DNS activity;
 - `filterfiles/*.json`, containing filter configuration; and
 - supporting files such as `zoneinfo.zip` when created by the application.
@@ -72,13 +72,13 @@ Entries written to `log.db` expire after a hard-coded seven-day TTL. There is no
 
 Settings, filter files, and other configuration do not have automatic retention or expiration; they remain until the operator changes or removes them. Deleting them can make the installation unusable, so stop the service and take a protected backup before intentional removal.
 
-Settings stores are written atomically with mode `0600`, but current filter directory/file creation can use broader permissions. Verify ownership and permissions on the entire data directory after installation and restore. Encrypted settings use authenticated AES-256-GCM with an installation-specific key. Older fixed-key AES-CFB settings are upgraded automatically on a successful load. The key location, managed-key option, migration failure behavior, backup requirements, and offline rotation procedure are documented in [Settings encryption](docs/settings-encryption.md).
+Settings stores are written atomically with mode `0600`, but current filter directory/file creation can use broader permissions. Verify ownership and permissions on the entire data directory after installation and restore. Encrypted settings use authenticated AES-256-GCM with an installation-specific key. Older fixed-key AES-CFB settings are upgraded automatically on a successful load. The key location, managed-key option, migration failure behavior, backup requirements, and offline rotation procedure are documented in [Settings encryption](docs/settings-encryption.md). Versioned settings and device-assignment content migrations, rollback, and backup compatibility are documented in [Configuration migrations](docs/configuration-migrations.md).
 
 GateSentry does not currently send the browsing and device records described above through its dormant consumption/heartbeat path. This is not a promise about external services configured by an operator. Never include browsing records, stable device information, credentials, keys, or image contents in public reports or telemetry.
 
 ## Backup and recovery
 
-There is no validated backup/export/restore workflow or automated certificate rotation. For the best available filesystem backup, stop GateSentry and copy the complete data directory so the settings and database are consistent. Include `installation.key`, `GSSettings`, `GSWebSettings`, filter files, and any other configuration; include `log.db` only if its sensitive history is required. If a managed installation key is outside the data directory, include it in the same backup snapshot. Without the matching key, encrypted settings are unrecoverable. A Docker operator should back up the host's complete `docker_root` volume directory. See [Settings encryption](docs/settings-encryption.md) for key recovery and tested offline rotation sequencing.
+There is no validated backup/export/restore workflow or automated certificate rotation. For the best available filesystem backup, stop GateSentry and copy the complete data directory so the settings and database are consistent. Include `installation.key`, `GSSettings`, `GSWebSettings`, `GSDevices`, filter files, and any other configuration; include `log.db` only if its sensitive history is required. If a managed installation key is outside the data directory, include it in the same backup snapshot. Without the matching key, encrypted settings are unrecoverable. A Docker operator should back up the host's complete `docker_root` volume directory. See [Settings encryption](docs/settings-encryption.md) for key recovery and tested offline rotation sequencing.
 
 Store backups encrypted with operator-managed tooling, restrict them to the service owner, and preserve restrictive permissions. A copied `GSSettings` also copies credentials, provider keys, and the CA private key and therefore copies the authority to impersonate sites to trusting clients. Possession of the installation key and encrypted settings allows their decryption; application-level encryption does not make a complete copied backup safe. Test restoration offline with the exact release before depending on it; compatibility across versions and successful recovery are not guaranteed by the current code.
 
