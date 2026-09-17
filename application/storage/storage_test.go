@@ -125,7 +125,7 @@ func TestOpenMapStoreRejectsCorruptedNonFinalPaddingByte(t *testing.T) {
 	old := GSBASEDIR
 	SetBaseDir(dir + string(os.PathSeparator))
 	t.Cleanup(func() { SetBaseDir(old) })
-	ciphertext, err := Encrypt([]byte("{}"), []byte(ENCRYPTIONKEY))
+	ciphertext, err := Encrypt([]byte("{}"), []byte(legacyEncryptionKey))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,6 +145,13 @@ func TestOpenMapStoreRejectsCorruptedNonFinalPaddingByte(t *testing.T) {
 	}
 	if _, err := OpenMapStore("settings", true); err == nil || !strings.Contains(err.Error(), "invalid padding bytes") {
 		t.Fatalf("error = %v, want invalid padding bytes", err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(envelope) {
+		t.Fatal("corrupted legacy file was modified")
 	}
 }
 
@@ -360,7 +367,11 @@ func TestPlaintextAndEncryptedFilesRemainCompatible(t *testing.T) {
 
 func TestEncryptionFailureDoesNotCreateFile(t *testing.T) {
 	store, path := testMapStore(t, true)
-	store.baseStore.Encryptionkey = "short"
+	managedKey := filepath.Join(t.TempDir(), "invalid-managed.key")
+	if err := os.WriteFile(managedKey, []byte("short"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(managedKeyFileEnv, managedKey)
 	if err := store.Update("key", "value"); err == nil {
 		t.Fatal("expected encryption error")
 	}

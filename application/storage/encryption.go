@@ -14,6 +14,15 @@ import (
 	"strings"
 )
 
+const (
+	gcmEnvelopeVersion = "aes-256-gcm-v1"
+	gcmPayloadPrefix   = "gcm1:"
+)
+
+func gcmAdditionalData(storeName string) []byte {
+	return []byte("gatesentry-storage:" + gcmEnvelopeVersion + "\x00" + storeName)
+}
+
 func addBase64Padding(value string) string {
 	m := len(value) % 4
 	if m != 0 {
@@ -115,4 +124,51 @@ func Encrypt(plaintext []byte, key []byte) ([]byte, error) {
 
 func Decrypt(ciphertext []byte, key []byte) ([]byte, error) {
 	return decrypt(key, string(ciphertext))
+}
+
+func encryptGCM(plaintext, key []byte, storeName string) ([]byte, error) {
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, err
+	}
+	nonce := make([]byte, gcm.NonceSize())
+	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
+		return nil, fmt.Errorf("generate encryption nonce: %w", err)
+	}
+	sealed := gcm.Seal(nil, nonce, plaintext, gcmAdditionalData(storeName))
+	combined := append(nonce, sealed...)
+	return []byte(gcmPayloadPrefix + base64.RawURLEncoding.EncodeToString(combined)), nil
+}
+
+func decryptGCM(encoded string, key []byte, storeName string) ([]byte, error) {
+	if !strings.HasPrefix(encoded, gcmPayloadPrefix) {
+		return nil, errors.New("authenticated ciphertext is missing its format marker")
+	}
+	encoded = strings.TrimPrefix(encoded, gcmPayloadPrefix)
+	combined, err := base64.RawURLEncoding.DecodeString(encoded)
+	if err != nil {
+		return nil, fmt.Errorf("decode authenticated ciphertext: %w", err)
+	}
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, err
+	}
+	if len(combined) < gcm.NonceSize()+gcm.Overhead() {
+		return nil, errors.New("authenticated ciphertext is too short")
+	}
+	nonce := combined[:gcm.NonceSize()]
+	ciphertext := combined[gcm.NonceSize():]
+	plaintext, err := gcm.Open(nil, nonce, ciphertext, gcmAdditionalData(storeName))
+	if err != nil {
+		return nil, errors.New("authenticated ciphertext verification failed")
+	}
+	return plaintext, nil
 }

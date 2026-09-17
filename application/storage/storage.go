@@ -9,10 +9,13 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 )
 
-const ENCRYPTIONKEY = "AES256Key-A23AS98BVM94PO3XSD10AA"
+// legacyEncryptionKey is retained only to migrate settings written by older
+// releases. It must never be used for a new write.
+const legacyEncryptionKey = "AES256Key-A23AS98BVM94PO3XSD10AA"
 
 var GSBASEDIR = "./gatesentry"
 
@@ -21,13 +24,13 @@ var GSBASEDIR = "./gatesentry"
 type Store struct {
 	Id            string
 	Encrypted     bool
-	Encryptionkey string
 	mu            sync.RWMutex
 	data          []byte
 	path          string
 	loadErr       error
 	durabilityErr error
 	pathMu        *sync.RWMutex
+	validate      func([]byte) error
 }
 
 var pathLocks = struct {
@@ -55,13 +58,62 @@ func SetBaseDir(dir string) { GSBASEDIR = dir }
 // OpenStore loads a store and reports malformed, decryption, and filesystem
 // errors. A missing file is a valid empty store and is not created until Set.
 func OpenStore(name string, encrypt bool) (*Store, error) {
-	path := GSBASEDIR + name
-	s := &Store{Id: name, Encrypted: encrypt, Encryptionkey: ENCRYPTIONKEY, path: path, pathMu: lockForPath(path)}
+	return openStore(name, encrypt, nil)
+}
+
+func openStore(name string, encrypt bool, validate func([]byte) error) (*Store, error) {
+	path, err := storagePath(name)
+	if err != nil {
+		err = fmt.Errorf("open storage %q: %w", name, err)
+		s := &Store{Id: name, Encrypted: encrypt, pathMu: lockForPath(GSBASEDIR), validate: validate, loadErr: err}
+		return s, err
+	}
+	s := &Store{Id: name, Encrypted: encrypt, path: path, pathMu: lockForPath(path), validate: validate}
 	if err := s.Load(); err != nil {
 		s.loadErr = err
 		return s, err
 	}
 	return s, nil
+}
+
+// storagePath permits nested stores, but keeps them strictly beneath the data
+// directory. Atomic temporary names are reserved in every path component so
+// missing-key discovery can ignore them without hiding a real store.
+func storagePath(name string) (string, error) {
+	if name == "" || name == "." || filepath.IsAbs(name) || filepath.Clean(name) != name {
+		return "", fmt.Errorf("invalid storage name %q", name)
+	}
+	for _, component := range strings.Split(name, string(filepath.Separator)) {
+		if component == "" || component == ".." {
+			return "", fmt.Errorf("invalid storage name %q", name)
+		}
+		if isAtomicTemporaryName(component) {
+			return "", errors.New("name is reserved for atomic temporary files")
+		}
+	}
+	path := filepath.Join(GSBASEDIR, name)
+	relative, err := filepath.Rel(filepath.Clean(GSBASEDIR), path)
+	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("invalid storage name %q", name)
+	}
+	// Missing-key discovery deliberately does not follow symlinks. Apply the
+	// same boundary to OpenStore so a supported nested store cannot escape the
+	// scanned data tree or become invisible to key-loss protection.
+	componentPath := filepath.Clean(GSBASEDIR)
+	for _, component := range strings.Split(name, string(filepath.Separator)) {
+		componentPath = filepath.Join(componentPath, component)
+		info, lstatErr := os.Lstat(componentPath)
+		if errors.Is(lstatErr, os.ErrNotExist) {
+			break
+		}
+		if lstatErr != nil {
+			return "", fmt.Errorf("inspect storage path %q: %w", name, lstatErr)
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return "", fmt.Errorf("storage path %q contains a symbolic link", name)
+		}
+	}
+	return path, nil
 }
 
 // NewStore is retained for source compatibility. Err exposes a failed load.
@@ -76,35 +128,70 @@ func (s *Store) Err() error {
 	return s.loadErr
 }
 
-func decodeEnvelope(data []byte, encryptionKey string) ([]byte, error) {
+type envelope struct {
+	Data      string `json:"data"`
+	Encrypted string `json:"encrypted"`
+	Version   string `json:"version,omitempty"`
+}
+
+func parseEnvelope(data []byte) (envelope, error) {
 	if len(data) == 0 {
-		return nil, errors.New("storage file is empty")
+		return envelope{}, errors.New("storage file is empty")
 	}
-	var envelope map[string]string
-	if err := json.Unmarshal(data, &envelope); err != nil {
-		return nil, fmt.Errorf("parse storage envelope: %w", err)
+	var raw map[string]string
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return envelope{}, fmt.Errorf("parse storage envelope: %w", err)
 	}
-	payload, ok := envelope["data"]
+	payload, ok := raw["data"]
 	if !ok {
-		return nil, errors.New("parse storage envelope: missing data field")
+		return envelope{}, errors.New("parse storage envelope: missing data field")
 	}
-	encrypted, ok := envelope["encrypted"]
+	encrypted, ok := raw["encrypted"]
 	if !ok {
-		return nil, errors.New("parse storage envelope: missing encrypted field")
+		return envelope{}, errors.New("parse storage envelope: missing encrypted field")
 	}
 	switch encrypted {
 	case "false":
-		return []byte(payload), nil
 	case "true":
-		// Continue below and decrypt the payload.
 	default:
-		return nil, fmt.Errorf("parse storage envelope: invalid encrypted value %q", encrypted)
+		return envelope{}, fmt.Errorf("parse storage envelope: invalid encrypted value %q", encrypted)
 	}
-	plaintext, err := Decrypt([]byte(payload), []byte(encryptionKey))
-	if err != nil {
-		return nil, fmt.Errorf("decrypt storage payload: %w", err)
+	return envelope{Data: payload, Encrypted: encrypted, Version: raw["version"]}, nil
+}
+
+func decryptEnvelope(parsed envelope, keys installationKeys, storeName string) (plaintext []byte, legacy bool, err error) {
+	if parsed.Encrypted == "false" {
+		if strings.HasPrefix(parsed.Data, gcmPayloadPrefix) {
+			return nil, false, errors.New("authenticated ciphertext is marked as plaintext")
+		}
+		if parsed.Version != "" {
+			return nil, false, fmt.Errorf("plaintext storage envelope has unexpected version %q", parsed.Version)
+		}
+		return []byte(parsed.Data), false, nil
 	}
-	return plaintext, nil
+	if parsed.Version == "" {
+		if strings.HasPrefix(parsed.Data, gcmPayloadPrefix) {
+			return nil, false, errors.New("authenticated ciphertext is missing its envelope version")
+		}
+		plaintext, err := Decrypt([]byte(parsed.Data), []byte(legacyEncryptionKey))
+		if err != nil {
+			return nil, true, fmt.Errorf("decrypt legacy storage payload: %w", err)
+		}
+		return plaintext, true, nil
+	}
+	if parsed.Version != gcmEnvelopeVersion {
+		return nil, false, fmt.Errorf("unsupported encrypted storage version %q", parsed.Version)
+	}
+	if len(keys.current) == 0 {
+		return nil, false, errors.New("installation key is unavailable")
+	}
+	for _, key := range allKeys(keys) {
+		plaintext, err := decryptGCM(parsed.Data, key, storeName)
+		if err == nil {
+			return plaintext, false, nil
+		}
+	}
+	return nil, false, errors.New("decrypt authenticated storage payload: no installation key could verify the ciphertext")
 }
 
 func (s *Store) Load() error {
@@ -134,32 +221,91 @@ func (s *Store) loadLocked() error {
 		s.loadErr = fmt.Errorf("read storage %q: %w", s.Id, err)
 		return s.loadErr
 	}
-	payload, err := decodeEnvelope(data, s.Encryptionkey)
+	parsed, err := parseEnvelope(data)
 	if err != nil {
 		s.loadErr = fmt.Errorf("load storage %q: %w", s.Id, err)
 		return s.loadErr
+	}
+	if s.Encrypted && parsed.Encrypted != "true" {
+		s.loadErr = fmt.Errorf("load storage %q: encrypted store contains a plaintext envelope", s.Id)
+		return s.loadErr
+	}
+	var keys installationKeys
+	if parsed.Encrypted == "true" && parsed.Version == gcmEnvelopeVersion {
+		keys, err = loadInstallationKeys(false)
+		if err != nil {
+			s.loadErr = fmt.Errorf("load storage %q: %w", s.Id, err)
+			return s.loadErr
+		}
+	}
+	payload, legacy, err := decryptEnvelope(parsed, keys, s.Id)
+	if err != nil {
+		s.loadErr = fmt.Errorf("load storage %q: %w", s.Id, err)
+		return s.loadErr
+	}
+	// Legacy CFB provides no authentication, so successful decryption is not
+	// enough to prove that the plaintext is valid. Validate at the caller's
+	// semantic boundary before replacing the only legacy copy with GCM data.
+	if s.validate != nil {
+		if err := s.validate(payload); err != nil {
+			s.loadErr = fmt.Errorf("load storage %q: %w", s.Id, err)
+			return s.loadErr
+		}
+	}
+	if legacy {
+		keys, err = loadInstallationKeys(true)
+		if err != nil {
+			s.loadErr = fmt.Errorf("migrate storage %q: %w", s.Id, err)
+			return s.loadErr
+		}
+		upgraded, encodeErr := encodeEnvelopeWithKey(payload, true, keys.current, s.Id)
+		if encodeErr != nil {
+			s.loadErr = fmt.Errorf("migrate storage %q: %w", s.Id, encodeErr)
+			return s.loadErr
+		}
+		committed, writeErr := atomicWrite(s.path, upgraded)
+		if writeErr != nil {
+			if committed {
+				s.durabilityErr = fmt.Errorf("storage durability is uncertain until restart: %w", writeErr)
+			}
+			s.loadErr = fmt.Errorf("migrate storage %q: %w", s.Id, writeErr)
+			return s.loadErr
+		}
 	}
 	s.data = append([]byte(nil), payload...)
 	s.loadErr = nil
 	return nil
 }
 
-func encodeEnvelope(data []byte, encrypted bool, encryptionKey string) ([]byte, error) {
+func encodeEnvelopeWithKey(data []byte, encrypted bool, key []byte, storeName string) ([]byte, error) {
 	payload := data
 	encryptedValue := "false"
+	version := ""
 	if encrypted {
 		var err error
-		payload, err = Encrypt(data, []byte(encryptionKey))
+		payload, err = encryptGCM(data, key, storeName)
 		if err != nil {
 			return nil, fmt.Errorf("encrypt storage payload: %w", err)
 		}
 		encryptedValue = "true"
+		version = gcmEnvelopeVersion
 	}
-	b, err := json.Marshal(map[string]string{"data": string(payload), "encrypted": encryptedValue})
+	b, err := json.Marshal(envelope{Data: string(payload), Encrypted: encryptedValue, Version: version})
 	if err != nil {
 		return nil, fmt.Errorf("serialize storage envelope: %w", err)
 	}
 	return b, nil
+}
+
+func encodeEnvelope(data []byte, encrypted bool, storeName string) ([]byte, error) {
+	if !encrypted {
+		return encodeEnvelopeWithKey(data, false, nil, storeName)
+	}
+	keys, err := loadInstallationKeys(true)
+	if err != nil {
+		return nil, err
+	}
+	return encodeEnvelopeWithKey(data, true, keys.current, storeName)
 }
 
 var renameFile = os.Rename
@@ -234,7 +380,7 @@ func (s *Store) persistLocked(data []byte) (err error) {
 	if s.loadErr != nil {
 		return s.loadErr
 	}
-	envelope, err := encodeEnvelope(data, s.Encrypted, s.Encryptionkey)
+	envelope, err := encodeEnvelope(data, s.Encrypted, s.Id)
 	if err != nil {
 		return fmt.Errorf("persist storage %q: %w", s.Id, err)
 	}
@@ -316,16 +462,12 @@ func (m *MapStore) UpdateMap(update func(map[string]string) error) error {
 }
 
 func OpenMapStore(name string, encrypt bool) (*MapStore, error) {
-	s, err := OpenStore(name, encrypt)
+	s, err := openStore(name, encrypt, func(data []byte) error {
+		_, err := parseMap(data)
+		return err
+	})
 	m := &MapStore{baseStore: s}
 	if err != nil {
-		return m, err
-	}
-	if _, err := parseMap(s.Get()); err != nil {
-		err = fmt.Errorf("load map storage %q: %w", name, err)
-		s.mu.Lock()
-		s.loadErr = err
-		s.mu.Unlock()
 		return m, err
 	}
 	return m, nil

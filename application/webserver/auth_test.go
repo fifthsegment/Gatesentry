@@ -583,6 +583,9 @@ func TestBootstrapPersistenceFailureDoesNotGrantAccess(t *testing.T) {
 	if err := os.Remove(path); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.Remove(filepath.Join(dir, "installation.key")); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.Remove(filepath.Dir(path)); err != nil {
 		t.Fatal(err)
 	}

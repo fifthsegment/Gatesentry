@@ -5,6 +5,7 @@ docker_root
 test-binaries
 pr-binaries
 dns_test_server.log
+installation.key
 ui/.yarn/
 ui/dist/
 
