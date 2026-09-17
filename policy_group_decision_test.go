@@ -108,3 +108,30 @@ func TestPolicyGroupDecisionIPAddressUserFallbackUsesDeviceIdentity(t *testing.T
 		t.Fatalf("match = %+v, handled = %v, want device identity block", match, handled)
 	}
 }
+
+func TestPolicyGroupDecisionAllowIsAnExplicitException(t *testing.T) {
+	svc := newDecisionTestService(t)
+	original := gatesentryDnsServer.GetPolicyService()
+	gatesentryDnsServer.SetPolicyServiceForTests(svc)
+	t.Cleanup(func() { gatesentryDnsServer.SetPolicyServiceForTests(original) })
+
+	if err := svc.SaveGroups([]gatesentryPolicy.PolicyGroup{{
+		ID: "work", Action: gatesentryPolicy.ActionAllow, Domains: []string{"approved.example"},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.SaveAssignments([]gatesentryPolicy.DeviceAssignment{{DeviceID: "device-1", GroupID: "work"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Reload(); err != nil {
+		t.Fatal(err)
+	}
+
+	match, handled := policyGroupDecision("192.0.2.10", "", "approved.example")
+	if !handled {
+		t.Fatal("allow group did not claim the matching request")
+	}
+	if match.Matched || match.ShouldBlock {
+		t.Fatalf("allow exception match = %+v, want no block and no legacy fall-through", match)
+	}
+}

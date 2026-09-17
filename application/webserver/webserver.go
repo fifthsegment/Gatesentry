@@ -539,11 +539,26 @@ func RegisterEndpointsStartServer(
 
 	// Policy group endpoints
 	log.Println("Registering policy API endpoints...")
+	internalServer.Get("/api/policy/templates", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiPolicyTemplatesGet(w, r)
+	})
+	internalServer.Post("/api/policy/templates/{id}/apply", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiPolicyTemplateApply(w, r)
+	})
 	internalServer.Get("/api/policy/groups", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
 		gatesentryWebserverEndpoints.GSApiPolicyGroupsGet(w, r)
 	})
+	internalServer.Post("/api/policy/groups", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiPolicyGroupCreate(w, r)
+	})
 	internalServer.Put("/api/policy/groups", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
 		gatesentryWebserverEndpoints.GSApiPolicyGroupsReplace(w, r)
+	})
+	internalServer.Put("/api/policy/groups/{id}", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiPolicyGroupUpdate(w, r)
+	})
+	internalServer.Delete("/api/policy/groups/{id}", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiPolicyGroupDelete(w, r)
 	})
 	internalServer.Get("/api/policy/assignments", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
 		gatesentryWebserverEndpoints.GSApiPolicyAssignmentsGet(w, r)
