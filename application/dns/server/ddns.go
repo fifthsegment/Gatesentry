@@ -10,7 +10,7 @@ import (
 )
 
 var (
-	ddnsEnabled = true
+	ddnsEnabled      = true
 	ddnsTSIGRequired = false
 )
 
@@ -95,7 +95,7 @@ func handleDDNSUpdate(w dns.ResponseWriter, r *dns.Msg) {
 		updateZone, appliedAdds, appliedDeletes, w.RemoteAddr())
 
 	if logger != nil {
-		logger.LogDNS(updateZone, "ddns", "update")
+		logger.LogDNS(updateZone, discovery.ExtractClientIP(w.RemoteAddr()), "update")
 	}
 
 	sendDDNSResponse(w, r, dns.RcodeSuccess)

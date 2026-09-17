@@ -205,6 +205,14 @@ func SetPolicyServiceForTests(svc *gatesentryPolicy.Service) {
 	policyService = svc
 }
 
+// SetDeviceStoreForTests installs a device store for handler tests. It
+// exists only so the webserver can exercise device endpoints against a real
+// store without starting the DNS listener; production wiring uses
+// StartDNSServer.
+func SetDeviceStoreForTests(store *discovery.DeviceStore) {
+	deviceStore = store
+}
+
 // GetMDNSBrowser returns the global mDNS browser instance, or nil if not started.
 func GetMDNSBrowser() *discovery.MDNSBrowser {
 	return mdnsBrowser
@@ -455,11 +463,12 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 	m.SetReply(r)
 	m.Authoritative = true
 
+	clientIP := discovery.ExtractClientIP(w.RemoteAddr())
+
 	// Passive discovery: record that we saw a query from this client IP.
 	// Runs in a goroutine to avoid adding latency to DNS responses.
 	// The device store handles deduplication and MAC correlation internally.
 	if deviceStore != nil {
-		clientIP := discovery.ExtractClientIP(w.RemoteAddr())
 		if clientIP != "" {
 			go deviceStore.ObservePassiveQuery(clientIP)
 		}
@@ -494,7 +503,7 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 						response.Answer = append(response.Answer, rr)
 					}
 				}
-				logger.LogDNS(domain, "dns", "device")
+				logger.LogDNS(domain, clientIP, "device")
 				w.WriteMsg(response)
 				return
 			}
@@ -513,7 +522,7 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 
 		if isException {
 			log.Println("Domain is exception : ", domain)
-			logger.LogDNS(domain, "dns", "exception")
+			logger.LogDNS(domain, clientIP, "exception")
 		} else if isInternal {
 			log.Println("Domain is internal : ", domain, " - ", internalIP)
 			response := new(dns.Msg)
@@ -522,7 +531,7 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 				Hdr: dns.RR_Header{Name: q.Name, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 60},
 				A:   net.ParseIP(internalIP),
 			})
-			logger.LogDNS(domain, "dns", "internal")
+			logger.LogDNS(domain, clientIP, "internal")
 			w.WriteMsg(response)
 			return
 		}
@@ -535,13 +544,12 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 		// because DNS cannot evaluate them.
 		policyDecision := gatesentryPolicy.DNSDecision{}
 		if policyService != nil {
-			clientIP := discovery.ExtractClientIP(w.RemoteAddr())
 			identity := policyService.ResolveIdentityForDNS(clientIP, "")
 			policyDecision = policyService.EvaluateDNS(identity, domain)
 			if policyDecision.Action == gatesentryPolicy.ActionBlock {
 				log.Printf("[DNS] Domain blocked by policy group %s: %s (conditions not enforceable in DNS: %v)",
 					policyDecision.GroupID, domain, policyDecision.InapplicableConditions)
-				logger.LogDNS(domain, "dns", "blocked")
+				logger.LogDNS(domain, clientIP, "blocked")
 				response := new(dns.Msg)
 				response.SetRcode(r, dns.RcodeNameError)
 				response.Answer = append(response.Answer, &dns.CNAME{
@@ -553,7 +561,7 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 			}
 			if policyDecision.Action == gatesentryPolicy.ActionAllow && isBlocked {
 				log.Printf("[DNS] Domain allowed by policy group %s: %s", policyDecision.GroupID, domain)
-				logger.LogDNS(domain, "dns", "exception")
+				logger.LogDNS(domain, clientIP, "exception")
 			}
 		}
 		if policyDecision.Action != gatesentryPolicy.ActionAllow && isBlocked {
@@ -564,11 +572,11 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 				Hdr:    dns.RR_Header{Name: domain + ".", Rrtype: dns.TypeCNAME, Class: dns.ClassINET, Ttl: 3600},
 				Target: "blocked.local.",
 			})
-			logger.LogDNS(domain, "dns", "blocked")
+			logger.LogDNS(domain, clientIP, "blocked")
 			w.WriteMsg(response)
 			return
 		}
-		logger.LogDNS(domain, "dns", "forward")
+		logger.LogDNS(domain, clientIP, "forward")
 
 		// --- 3. Forward to external resolver ---
 		// Forward request WITHOUT holding the mutex - this is the key fix!

@@ -2,6 +2,7 @@ package policy
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -390,5 +391,138 @@ func TestDocumentRoundTripAndVersion(t *testing.T) {
 	}
 	if !strings.Contains(raw, "\"version\":1") {
 		t.Fatalf("document = %s", raw)
+	}
+}
+
+func TestSetDeviceAssignmentSetClearAndUnknownGroup(t *testing.T) {
+	svc := newTestService(t)
+	if err := svc.SaveGroups([]PolicyGroup{
+		{ID: "kids", Name: "Kids", Action: ActionBlock, Domains: []string{"*.games.example"}},
+		{ID: "adults", Name: "Adults", Action: ActionNone},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.SetDeviceAssignment("device-1", "kids"); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Reload(); err != nil {
+		t.Fatal(err)
+	}
+	if got := svc.Snapshot().Assignments["device-1"]; got != "kids" {
+		t.Fatalf("assignment = %q, want kids", got)
+	}
+
+	// Reassignment replaces the previous group instead of stacking entries.
+	if err := svc.SetDeviceAssignment("device-1", "adults"); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Reload(); err != nil {
+		t.Fatal(err)
+	}
+	if got := svc.Snapshot().Assignments["device-1"]; got != "adults" {
+		t.Fatalf("reassignment = %q, want adults", got)
+	}
+
+	// An empty group id clears the assignment.
+	if err := svc.SetDeviceAssignment("device-1", ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Reload(); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := svc.Snapshot().Assignments["device-1"]; exists {
+		t.Fatal("cleared assignment still present after reload")
+	}
+
+	// An unknown group is rejected and leaves nothing behind.
+	if err := svc.SetDeviceAssignment("device-1", "missing"); !errors.Is(err, ErrUnknownGroup) {
+		t.Fatalf("error = %v, want ErrUnknownGroup", err)
+	}
+	if err := svc.Reload(); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := svc.Snapshot().Assignments["device-1"]; exists {
+		t.Fatal("rejected assignment leaked into the snapshot")
+	}
+}
+
+func TestSetDeviceAssignmentPersistsAcrossRestart(t *testing.T) {
+	dir := t.TempDir()
+	old := gatesentry2storage.GSBASEDIR
+	gatesentry2storage.SetBaseDir(dir + string(os.PathSeparator))
+	t.Cleanup(func() { gatesentry2storage.SetBaseDir(old) })
+	store, err := gatesentry2storage.OpenMapStore("settings", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := NewService(store, &mapResolver{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := first.SaveGroups([]PolicyGroup{{ID: "kids", Action: ActionBlock, Domains: []string{"*.games.example"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := first.SetDeviceAssignment("device-1", "kids"); err != nil {
+		t.Fatal(err)
+	}
+
+	// A service instance created after restart must load the same assignment.
+	restarted, err := NewService(store, &mapResolver{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := restarted.Snapshot().Assignments["device-1"]; got != "kids" {
+		t.Fatalf("assignment after restart = %q, want kids", got)
+	}
+	identity := restarted.ResolveIdentityForDNS("192.0.2.10", "")
+	if identity.DeviceID != "" || identity.GroupID != "" {
+		t.Fatalf("restart leaked a resolver from the previous instance: %+v", identity)
+	}
+}
+
+func TestSetDeviceAssignmentConcurrentWritesPreserveOthers(t *testing.T) {
+	svc := newTestService(t)
+	if err := svc.SaveGroups([]PolicyGroup{{ID: "kids", Action: ActionBlock, Domains: []string{"games.example"}}}); err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			if err := svc.SetDeviceAssignment(fmt.Sprintf("device-%d", i), "kids"); err != nil {
+				t.Errorf("set assignment: %v", err)
+			}
+		}(i)
+	}
+	wg.Wait()
+	if err := svc.Reload(); err != nil {
+		t.Fatal(err)
+	}
+	snap := svc.Snapshot()
+	if len(snap.Assignments) != 20 {
+		t.Fatalf("assignments = %d, want 20: per-device writes must not replace the full set", len(snap.Assignments))
+	}
+}
+
+func TestUpdateTransformErrorAborts(t *testing.T) {
+	svc := newTestService(t)
+	if err := svc.SaveGroups([]PolicyGroup{{ID: "kids", Action: ActionBlock, Domains: []string{"games.example"}}}); err != nil {
+		t.Fatal(err)
+	}
+	before, err := svc.storage.GetE(StorageKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	boom := errors.New("boom")
+	if err := svc.update(func(snap *PolicySnapshot) error { return boom }); err == nil {
+		t.Fatal("expected transform error to propagate")
+	}
+	after, err := svc.storage.GetE(StorageKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before != after {
+		t.Fatal("aborted transform must leave the persisted document unchanged")
 	}
 }

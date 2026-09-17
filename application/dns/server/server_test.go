@@ -3,6 +3,7 @@ package gatesentryDnsServer
 import (
 	"net"
 	"testing"
+	"time"
 
 	"bitbucket.org/abdullah_irfan/gatesentryf/dns/discovery"
 	gatesentryLogger "bitbucket.org/abdullah_irfan/gatesentryf/logger"
@@ -136,6 +137,46 @@ func TestHandleDNS_DeviceStoreA(t *testing.T) {
 	}
 	if a.A.String() != "192.168.1.100" {
 		t.Errorf("Expected A record 192.168.1.100, got %s", a.A.String())
+	}
+}
+
+func TestHandleDNSLogsClientIP(t *testing.T) {
+	cleanup := setupTestServer(t)
+	defer cleanup()
+
+	deviceStore.UpsertDevice(&discovery.Device{
+		Hostnames: []string{"macmini"},
+		IPv4:      "192.168.1.100",
+		Source:    discovery.SourceManual,
+		Sources:   []discovery.DiscoverySource{discovery.SourceManual},
+	})
+
+	req := new(dns.Msg)
+	req.SetQuestion("macmini.local.", dns.TypeA)
+	w := newMockResponseWriter("192.168.1.50")
+	handleDNSRequest(w, req)
+	if w.msg == nil || len(w.msg.Answer) != 1 {
+		t.Fatalf("expected a device-store answer, got %+v", w.msg)
+	}
+
+	// LogDNS writes asynchronously; poll briefly for the decision record.
+	// The entry must be attributed to the querying client IP, not to the
+	// literal protocol name.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		entries, err := logger.GetDeviceActivity([]string{"192.168.1.50"}, 60, 10)
+		if err != nil {
+			t.Fatalf("read device activity: %v", err)
+		}
+		for _, entry := range entries {
+			if entry.URL == "macmini.local" {
+				return
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("DNS decision was not logged with the client IP")
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 

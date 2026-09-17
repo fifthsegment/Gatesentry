@@ -197,6 +197,48 @@ func (L *Log) GetLogSearch(search string) string {
 	return strings.Join(outputs, ",")
 }
 
+// GetDeviceActivity returns decision-history entries whose client address
+// matches one of matchIPs, newest first, inside sinceSeconds, capped at
+// limit. It is a read-only query over the same store the live log view uses;
+// it never introduces a second decision record.
+func (L *Log) GetDeviceActivity(matchIPs []string, sinceSeconds int64, limit int) ([]LogEntry, error) {
+	ips := make(map[string]bool, len(matchIPs))
+	for _, ip := range matchIPs {
+		if ip != "" {
+			ips[ip] = true
+		}
+	}
+	if len(ips) == 0 {
+		return []LogEntry{}, nil
+	}
+	if sinceSeconds <= 0 {
+		sinceSeconds = int64((24 * time.Hour).Seconds())
+	}
+	if limit <= 0 {
+		limit = 100
+	}
+	now := time.Now().Unix()
+	from := gatesentry2utils.Int64toString(now - sinceSeconds)
+	to := gatesentry2utils.Int64toString(now)
+	entries := []LogEntry{}
+	err := L.Database.View(func(tx *buntdb.Tx) error {
+		return tx.DescendRange("entries", `{"time":`+to+`}`, `{"time":`+from+`}`, func(key, value string) bool {
+			var entry LogEntry
+			if err := json.Unmarshal([]byte(value), &entry); err != nil {
+				return true
+			}
+			if ips[entry.IP] {
+				entries = append(entries, entry)
+			}
+			return len(entries) < limit
+		})
+	})
+	if err != nil {
+		return nil, err
+	}
+	return entries, nil
+}
+
 func (L *Log) GetLastXSecondsDNSLogs(fromSeconds int64, groupByDate bool) (interface{}, error) {
 	var logs interface{} // The return type can be either []LogEntry or map[string][]LogEntry
 
