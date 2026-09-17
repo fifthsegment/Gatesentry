@@ -1,7 +1,7 @@
 # Settings encryption
 
-GateSentry encrypts the `GSSettings` and `GSWebSettings` stores. Other stores
-remain plaintext unless their caller explicitly opts in to encryption.
+GateSentry encrypts the `GSSettings`, `GSWebSettings`, and `GSDevices`
+stores. Other stores remain plaintext unless their caller explicitly opts in to encryption.
 
 ## Formats and automatic migration
 
@@ -53,11 +53,12 @@ those settings, so startup fails with recovery guidance instead.
 ## Backup and recovery
 
 Stop GateSentry and back up the complete data directory as one unit. The backup
-must include `installation.key`, `GSSettings`, and `GSWebSettings`. Without the
+must include `installation.key`, `GSSettings`, `GSWebSettings`, and `GSDevices`. Without the
 matching current or retained previous key, authenticated settings are
 unrecoverable by design. Protect the key and backups as secrets: settings can
 contain administrator credentials, provider keys, and the HTTPS interception
-CA private key.
+CA private key, while `GSDevices` contains stable device identifiers
+including MAC addresses.
 
 When `GATESENTRY_INSTALLATION_KEY_FILE` points outside the data directory, back
 up that managed file separately with the same snapshot. Docker deployments must
@@ -72,18 +73,18 @@ on it.
 Rotation is an offline storage operation exposed by the storage package:
 
 ```go
-err := gatesentry2storage.RotateInstallationKey("GSSettings", "GSWebSettings")
+err := gatesentry2storage.RotateInstallationKey("GSSettings", "GSWebSettings", "GSDevices")
 ```
 
 Use this sequence in an operator tool or maintenance build:
 
 1. Stop every GateSentry process that uses the data directory.
-2. Take a protected backup of the key file and both encrypted stores.
+2. Take a protected backup of the key file and every encrypted store.
 3. Call `RotateInstallationKey` with every encrypted store name.
-4. Start GateSentry and verify both settings stores and normal operation.
+4. Start GateSentry and verify settings, device assignments, and normal operation.
 5. Take and test a new backup.
 6. In a later offline maintenance window, call
-   `PrunePreviousInstallationKeys("GSSettings", "GSWebSettings")`.
+   `PrunePreviousInstallationKeys("GSSettings", "GSWebSettings", "GSDevices")`.
 
 Rotation first atomically installs a keyring containing the new current key and
 all previous keys, then re-encrypts each store with the current key through the

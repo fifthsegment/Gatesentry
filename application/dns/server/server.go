@@ -148,7 +148,7 @@ func GetMDNSBrowser() *discovery.MDNSBrowser {
 
 const BLOCKLIST_HOURLY_UPDATE_INTERVAL = 10
 
-func StartDNSServer(basePath string, ilogger *gatesentryLogger.Log, blockedLists []string, settings *gatesentry2storage.MapStore, dnsinfo *gatesentryTypes.DnsServerInfo) {
+func StartDNSServer(basePath string, ilogger *gatesentryLogger.Log, blockedLists []string, settings *gatesentry2storage.MapStore, devices *gatesentry2storage.MapStore, dnsinfo *gatesentryTypes.DnsServerInfo) {
 
 	if server != nil || serverRunning.Load() {
 		fmt.Println("DNS server is already running")
@@ -194,6 +194,17 @@ func StartDNSServer(basePath string, ilogger *gatesentryLogger.Log, blockedLists
 	}
 	deviceStore = discovery.NewDeviceStoreMultiZone(zones...)
 	log.Printf("[DNS] Device store initialized with zones: %v (primary: %s)", zones, zones[0])
+	// Durable user-managed device assignments live in GSDevices (opened and
+	// fail-closed in runtime Init). Envelope corruption therefore already
+	// stops startup; this attach restores the content-level assignment
+	// subset. A load error here means the store is degraded between Init and
+	// DNS start, so persistence is disabled with the error logged rather than
+	// silently dropping assignments.
+	if devices != nil {
+		if err := deviceStore.AttachPersistence(devices); err != nil {
+			log.Printf("[DNS] Device persistence disabled after load error: %v", err)
+		}
+	}
 
 	// Start mDNS/Bonjour browser for automatic device discovery (Phase 3).
 	// Browses common service types (_airplay._tcp, _googlecast._tcp, _printer._tcp, etc.)
