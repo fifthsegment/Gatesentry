@@ -528,6 +528,25 @@ func RegisterEndpointsStartServer(
 	})
 	log.Println("Device API endpoints registered")
 
+	// Policy group endpoints
+	log.Println("Registering policy API endpoints...")
+	internalServer.Get("/api/policy/groups", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiPolicyGroupsGet(w, r)
+	})
+	internalServer.Put("/api/policy/groups", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiPolicyGroupsReplace(w, r)
+	})
+	internalServer.Get("/api/policy/assignments", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiPolicyAssignmentsGet(w, r)
+	})
+	internalServer.Put("/api/policy/assignments", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiPolicyAssignmentsReplace(w, r)
+	})
+	internalServer.Post("/api/policy/preview", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiPolicyPreview(w, r)
+	})
+	log.Println("Policy API endpoints registered")
+
 	// Register MIME types for static file serving
 	mime.AddExtensionType(".css", "text/css")
 	mime.AddExtensionType(".js", "application/javascript")

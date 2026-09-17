@@ -31,6 +31,27 @@ disabled optional features are preserved. `GSDevices` assignments are restored
 into the in-memory device store when the DNS server starts, and re-discovered
 traffic merges back into the same device by ID.
 
+### Policy groups
+
+Explicit policy groups live in an optional `policy_groups` key in
+`GSSettings`, written as `{"version":1,"groups":[...],"assignments":[...]}`.
+The key is optional: a missing or empty value means no groups exist and every
+adapter keeps its pre-policy behavior (global blocklist and user rules
+unchanged). The first start with legacy device owner/category metadata writes
+the key exactly once, converting each distinct category (owner as fallback)
+into a group with action `none` (informational only, no behavior change) and
+stable device assignments. If the key already exists, migration is skipped so
+API edits are never overwritten; a failed write leaves the key missing and the
+previous default behavior in place. Removing the key rolls back to the
+pre-policy behavior (existing user-based rules keep working in both cases).
+
+DNS enforcement applies group decisions by domain only. A group domain
+decision cannot evaluate URL-path, MIME-type, or HTTPS-inspection conditions;
+the DNS adapter logs and the preview endpoint reports these as
+inapplicable conditions rather than silently treating them as enforced. Those
+conditions remain enforceable on the explicit and transparent proxy paths
+where full requests are available.
+
 ## Failure and rollback
 
 A schema version newer than this release, an invalid version, malformed JSON,

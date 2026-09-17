@@ -35,9 +35,12 @@ type GSProxy struct {
 	IsExceptionUrl     func(url string) bool
 	IsAuthEnabled      func() bool
 	LogHandler         func(GSLogData)
-	RuleMatchHandler   func(domain string, user string) interface{} // Returns RuleMatch
-	Handlers           map[string][]*GSHandler
-	UsersCache         map[string]GSUserCached
+	// RuleMatchHandler returns the RuleMatch-compatible struct for a request.
+	// ClientIP is the observed source address, used only as a device lookup
+	// key; it is never itself treated as the authenticated identity.
+	RuleMatchHandler func(domain string, user string, clientIP string) interface{}
+	Handlers         map[string][]*GSHandler
+	UsersCache       map[string]GSUserCached
 }
 
 // For the refactored filter input

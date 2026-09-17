@@ -14,6 +14,7 @@ import (
 	gatesentryDnsScheduler "bitbucket.org/abdullah_irfan/gatesentryf/dns/scheduler"
 	gatesentryDnsUtils "bitbucket.org/abdullah_irfan/gatesentryf/dns/utils"
 	gatesentryLogger "bitbucket.org/abdullah_irfan/gatesentryf/logger"
+	gatesentryPolicy "bitbucket.org/abdullah_irfan/gatesentryf/policy"
 	gatesentry2storage "bitbucket.org/abdullah_irfan/gatesentryf/storage"
 	gatesentryTypes "bitbucket.org/abdullah_irfan/gatesentryf/types"
 	"github.com/miekg/dns"
@@ -136,6 +137,11 @@ var restartDnsSchedulerChan chan bool
 // Initialized in StartDNSServer().
 var deviceStore *discovery.DeviceStore
 
+// policyService is the dedicated policy engine used by DNS enforcement.
+// Discovery owns device observations; this service owns how a resolved
+// identity maps to an enforcement decision. Initialized in StartDNSServer().
+var policyService *gatesentryPolicy.Service
+
 // mdnsBrowser performs periodic mDNS/Bonjour scanning to discover devices.
 // Initialized in StartDNSServer() when mDNS browsing is enabled.
 var mdnsBrowser *discovery.MDNSBrowser
@@ -144,6 +150,59 @@ var mdnsBrowser *discovery.MDNSBrowser
 // the API layer, and other packages. Returns nil before StartDNSServer is called.
 func GetDeviceStore() *discovery.DeviceStore {
 	return deviceStore
+}
+
+// deviceResolver adapts the discovery-owned device store to the policy
+// service's read-only resolver interface. It never mutates device state.
+type deviceResolver struct{}
+
+// policyStaleDeviceThreshold bounds how old a device's LastSeen may be
+// before its IP association is treated as stale. Every DNS query refreshes
+// the observed device asynchronously (ObservePassiveQuery), so any device
+// that is still active keeps itself fresh; a threshold longer than the
+// discovery OnlineThreshold avoids flapping idle-but-present devices while
+// still releasing a group after enough time for DHCP reassignment.
+const policyStaleDeviceThreshold = 1 * time.Hour
+
+// ResolveDeviceByIP reports the device observed at an IP, whether the
+// address is ambiguous (more than one device currently indexed to it), and
+// whether the winning observation is stale.
+func (deviceResolver) ResolveDeviceByIP(ip string) (string, bool, bool) {
+	if deviceStore == nil {
+		return "", false, false
+	}
+	device := deviceStore.FindDeviceByIP(ip)
+	if device == nil {
+		return "", false, false
+	}
+	// The index maps IP to a single device, but overlapping entries can occur
+	// during IP churn when two devices have not yet been observed at their new
+	// addresses. Detect the ambiguity explicitly.
+	ambiguous := false
+	for _, other := range deviceStore.GetAllDevices() {
+		if other.ID == device.ID {
+			continue
+		}
+		if other.IPv4 == ip || other.IPv6 == ip {
+			ambiguous = true
+			break
+		}
+	}
+	stale := time.Since(device.LastSeen) > policyStaleDeviceThreshold
+	return device.ID, ambiguous, stale
+}
+
+// GetPolicyService returns the DNS policy service, or nil before startup.
+func GetPolicyService() *gatesentryPolicy.Service {
+	return policyService
+}
+
+// SetPolicyServiceForTests installs a policy service for handler tests. It
+// exists only so the webserver can exercise its endpoints against a real
+// service without starting the DNS listener; production wiring uses
+// StartDNSServer.
+func SetPolicyServiceForTests(svc *gatesentryPolicy.Service) {
+	policyService = svc
 }
 
 // GetMDNSBrowser returns the global mDNS browser instance, or nil if not started.
@@ -160,6 +219,7 @@ func StartDNSServer(basePath string, ilogger *gatesentryLogger.Log, blockedLists
 		restartDnsSchedulerChan <- true
 		return
 	}
+	policyService = nil
 
 	logger = ilogger
 	logsPath = basePath + logsPath
@@ -209,6 +269,18 @@ func StartDNSServer(basePath string, ilogger *gatesentryLogger.Log, blockedLists
 		if err := deviceStore.AttachPersistence(devices); err != nil {
 			log.Printf("[DNS] Device persistence disabled after load error: %v", err)
 		}
+	}
+	// Policy enforcement is a dedicated service; discovery remains the owner
+	// of observed identity. A policy load error is logged and enforcement
+	// keeps the default (no groups) behavior rather than guessing.
+	policySvc, policyErr := gatesentryPolicy.NewService(settings, deviceResolver{})
+	if policyErr != nil {
+		log.Printf("[DNS] Policy service unavailable, retaining default enforcement: %v", policyErr)
+	} else {
+		if err := migrateLegacyDevicePolicy(policySvc, settings); err != nil {
+			log.Printf("[DNS] Legacy policy migration unavailable, retaining default enforcement: %v", err)
+		}
+		policyService = policySvc
 	}
 
 	// Start mDNS/Bonjour browser for automatic device discovery (Phase 3).
@@ -439,11 +511,9 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 
 		log.Println("[DNS] Domain requested:", domain, " Length of internal records = ", internalRecordsLen)
 
-		// LogQuery(domain)
 		if isException {
 			log.Println("Domain is exception : ", domain)
 			logger.LogDNS(domain, "dns", "exception")
-
 		} else if isInternal {
 			log.Println("Domain is internal : ", domain, " - ", internalIP)
 			response := new(dns.Msg)
@@ -455,7 +525,38 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 			logger.LogDNS(domain, "dns", "internal")
 			w.WriteMsg(response)
 			return
-		} else if isBlocked {
+		}
+
+		// --- 2.5 Policy-group enforcement ---
+		// Precedence after internal/exception records: policy group → global
+		// blocklist. Group "allow" explicitly exempts a domain from the global
+		// blocklist; group "block" is a stronger decision and takes effect
+		// here. URL, MIME, and MITM conditions are reported as inapplicable
+		// because DNS cannot evaluate them.
+		policyDecision := gatesentryPolicy.DNSDecision{}
+		if policyService != nil {
+			clientIP := discovery.ExtractClientIP(w.RemoteAddr())
+			identity := policyService.ResolveIdentityForDNS(clientIP, "")
+			policyDecision = policyService.EvaluateDNS(identity, domain)
+			if policyDecision.Action == gatesentryPolicy.ActionBlock {
+				log.Printf("[DNS] Domain blocked by policy group %s: %s (conditions not enforceable in DNS: %v)",
+					policyDecision.GroupID, domain, policyDecision.InapplicableConditions)
+				logger.LogDNS(domain, "dns", "blocked")
+				response := new(dns.Msg)
+				response.SetRcode(r, dns.RcodeNameError)
+				response.Answer = append(response.Answer, &dns.CNAME{
+					Hdr:    dns.RR_Header{Name: domain + ".", Rrtype: dns.TypeCNAME, Class: dns.ClassINET, Ttl: 3600},
+					Target: "blocked.local.",
+				})
+				w.WriteMsg(response)
+				return
+			}
+			if policyDecision.Action == gatesentryPolicy.ActionAllow && isBlocked {
+				log.Printf("[DNS] Domain allowed by policy group %s: %s", policyDecision.GroupID, domain)
+				logger.LogDNS(domain, "dns", "exception")
+			}
+		}
+		if policyDecision.Action != gatesentryPolicy.ActionAllow && isBlocked {
 			log.Println("[DNS] Domain is blocked : ", domain)
 			response := new(dns.Msg)
 			response.SetRcode(r, dns.RcodeNameError)
@@ -466,9 +567,8 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 			logger.LogDNS(domain, "dns", "blocked")
 			w.WriteMsg(response)
 			return
-		} else {
-			logger.LogDNS(domain, "dns", "forward")
 		}
+		logger.LogDNS(domain, "dns", "forward")
 
 		// --- 3. Forward to external resolver ---
 		// Forward request WITHOUT holding the mutex - this is the key fix!

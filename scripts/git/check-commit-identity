@@ -1,0 +1,69 @@
+#!/bin/sh
+set -eu
+
+expected_name="fifthsegment"
+expected_email="5513549+fifthsegment@users.noreply.github.com"
+alternate_email="abdullah.irfan1@gmail.com"
+github_committer="GitHub <noreply@github.com>"
+
+usage() {
+  printf 'usage: %s [revision-range]\n' "$0" >&2
+  printf 'With no argument, validate the pending commit identity.\n' >&2
+  exit 2
+}
+
+fail() {
+  printf 'error: %s identity is not %s <%s>\n' "$1" "$expected_name" "$expected_email" >&2
+  printf 'Use the repository-configured identity and do not override user.name or user.email.\n' >&2
+  exit 1
+}
+
+validate_author() {
+  role=$1
+  name=$2
+  email=$3
+  if [ "$name" != "$expected_name" ] || { [ "$email" != "$expected_email" ] && [ "$email" != "$alternate_email" ]; }; then
+    fail "$role"
+  fi
+}
+
+validate_committer() {
+  name=$1
+  email=$2
+  if [ "$name" != "$expected_name" ] || [ "$email" != "$expected_email" ]; then
+    if [ "$name <$email>" != "$github_committer" ]; then
+      fail committer
+    fi
+  fi
+}
+
+if [ "$#" -eq 0 ]; then
+  author=$(git var GIT_AUTHOR_IDENT)
+  committer=$(git var GIT_COMMITTER_IDENT)
+  case "$author" in
+    "$expected_name <$expected_email> "*) ;;
+    "$expected_name <$alternate_email> "*) ;;
+    *) fail author ;;
+  esac
+  case "$committer" in
+    "$expected_name <$expected_email> "*) ;;
+    "$expected_name <$alternate_email> "*) ;;
+    *) fail committer ;;
+  esac
+  exit 0
+fi
+
+if [ "$#" -ne 1 ]; then
+  usage
+fi
+
+for commit in $(git rev-list --reverse "$1"); do
+  author_name=$(git show -s --format='%an' "$commit")
+  author_email=$(git show -s --format='%ae' "$commit")
+  committer_name=$(git show -s --format='%cn' "$commit")
+  committer_email=$(git show -s --format='%ce' "$commit")
+  validate_author author "$author_name" "$author_email"
+  validate_committer "$committer_name" "$committer_email"
+  printf 'validated %s author=%s <%s> committer=%s <%s>\n' \
+    "$commit" "$author_name" "$author_email" "$committer_name" "$committer_email"
+done

@@ -131,8 +131,12 @@ func (l *TransparentProxyListener) handleTransparentHTTP(conn net.Conn, original
 		host = originalDst
 	}
 	user := ""
+	clientIP := ""
+	if host, _, err := net.SplitHostPort(conn.RemoteAddr().String()); err == nil {
+		clientIP = host
+	}
 
-	shouldBlock, _, _ := CheckProxyRules(host, user)
+	shouldBlock, _, _ := CheckProxyRules(host, user, clientIP)
 	if shouldBlock {
 		if DebugLogging {
 			log.Printf("[Transparent] Blocking HTTP request to %s by rule", originalDst)
@@ -172,6 +176,10 @@ func (l *TransparentProxyListener) handleTransparentHTTPS(conn net.Conn, origina
 
 	serverAddr := net.JoinHostPort(host, port)
 	user := ""
+	clientIP := ""
+	if host, _, err := net.SplitHostPort(conn.RemoteAddr().String()); err == nil {
+		clientIP = host
+	}
 
 	passthru := NewGSProxyPassthru()
 
@@ -219,7 +227,7 @@ func (l *TransparentProxyListener) handleTransparentHTTPS(conn net.Conn, origina
 	}
 
 	// Check proxy rules using the domain name (SNI) instead of IP
-	shouldBlock, ruleMatch, ruleShouldMitm := CheckProxyRules(ruleMatchHost, user)
+	shouldBlock, ruleMatch, ruleShouldMitm := CheckProxyRules(ruleMatchHost, user, clientIP)
 
 	if shouldBlock {
 		logUrl := "https://" + serverAddr

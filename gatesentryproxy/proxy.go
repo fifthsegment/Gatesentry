@@ -326,7 +326,7 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		requestHost = r.URL.Host
 	}
 
-	shouldBlock, ruleMatch, ruleShouldMITM := CheckProxyRules(requestHost, user)
+	shouldBlock, ruleMatch, ruleShouldMITM := CheckProxyRules(requestHost, user, client)
 	if shouldBlock {
 		if DebugLogging {
 			log.Printf("[Proxy] Blocking request to %s by rule", r.URL.String())
@@ -630,12 +630,12 @@ func sendBlockMessageBytes(w http.ResponseWriter, r *http.Request, resp *http.Re
 
 // CheckProxyRules checks proxy rules for a given host and user.
 // Returns: shouldBlock (bool), ruleMatch (interface{}), shouldMITM (bool)
-func CheckProxyRules(host string, user string) (bool, interface{}, bool) {
+func CheckProxyRules(host string, user string, clientIP string) (bool, interface{}, bool) {
 	if IProxy == nil || IProxy.RuleMatchHandler == nil {
 		return false, nil, false
 	}
 
-	ruleMatch := IProxy.RuleMatchHandler(host, user)
+	ruleMatch := IProxy.RuleMatchHandler(host, user, clientIP)
 	if ruleMatch == nil {
 		return false, nil, false
 	}
