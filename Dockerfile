@@ -28,4 +28,8 @@ WORKDIR /usr/local/gatesentry
 COPY --from=go-builder /gatesentry-bin ./
 RUN mkdir -p /usr/local/gatesentry/gatesentry
 EXPOSE 53/udp 53/tcp 10413 10786
+# The unauthenticated readiness endpoint on the fixed web admin port; busybox
+# wget is present in the alpine base image.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD wget -q -O /dev/null http://127.0.0.1:10786/health || exit 1
 ENTRYPOINT ["./gatesentry-bin"]

@@ -37,7 +37,20 @@ Fresh installations require one-time administrator setup. See [Secure first-run 
 
 ### Method 1: Using Docker
 
-1. Use the [docker-compose.yml](docker-compose.yml) file from the root of this repo as a template, copy and paste it to any directory on your computer, then run the following command in a terminal `docker compose up`
+GateSentry runs on a Linux Docker host and publishes `linux/amd64` and `linux/arm64` images. The verified quickstart builds from a repository checkout so you run the exact source you pinned:
+
+```bash
+git clone https://github.com/fifthsegment/Gatesentry.git
+cd Gatesentry
+docker compose up -d --build
+docker compose ps   # wait for the gateway to report (healthy)
+```
+
+The dashboard is at `http://127.0.0.1:10786` on the Docker host. Fresh installations have no default credentials; create the administrator on the one-time setup screen.
+
+For a copyable quickstart without a checkout, [docker-compose.prebuilt.yml](docker-compose.prebuilt.yml) pulls the published `abdullahi1/gatesentry` image. The currently published image predates the secure first-run release: it still starts with legacy `admin/admin` credentials and lacks the `/health` endpoint, so change that password immediately or prefer the verified build above until the next release is published.
+
+GateSentry uses host networking to serve DNS on port 53 and see real client addresses. Read [Docker installation, upgrade, and rollback](docs/docker.md) before production use: it covers DNS port conflicts (for example `systemd-resolved`), firewall exposure, persistent state and backups, readiness checks and logs, pinned upgrades with rollback, and router DNS configuration.
 
 ### Method 2: Using the Gatesentry binary directly
 
@@ -114,14 +127,9 @@ service gatesentry stop
 | 10786 | Plain-HTTP web admin panel (all interfaces) |
 | 53    | DNS server (TCP and UDP; all interfaces by default) |
 
-### Default credentials
+### First-run setup
 
-```
-Username: admin
-Password: admin
-```
-
-Change the password after first login.
+Fresh installations have no default credentials. Open `http://127.0.0.1:10786` (or `http://[::1]:10786`) on the GateSentry host and create the administrator on the one-time setup screen. Setting up from another machine requires a one-time bootstrap file; see [Secure first-run administration](docs/secure-first-run.md). Docker deployments follow the same flow, including unattended startup with the bootstrap file described in [Docker installation, upgrade, and rollback](docs/docker.md).
 
 Restrict these listeners to trusted clients with the host firewall. Do not
 expose the admin UI directly to the Internet. The supplied Docker Compose file
