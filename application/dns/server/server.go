@@ -121,6 +121,11 @@ func SetExternalResolver(resolver string) {
 	}
 }
 
+// GetExternalResolver returns the resolver used for upstream DNS lookups.
+func GetExternalResolver() string {
+	return externalResolver
+}
+
 var server *dns.Server        // UDP server
 var tcpServer *dns.Server     // TCP server for large queries (>512 bytes)
 var serverRunning atomic.Bool // Thread-safe flag for server state
@@ -340,6 +345,22 @@ func StopDNSServer() {
 	}
 
 	serverRunning.Store(false)
+}
+
+// AddBlockedDomainForTest adds one domain to the in-memory blocked map.
+// The name is scoped to tests and diagnostics; the scheduler still owns
+// blocklist-initialized entries.
+func AddBlockedDomainForTest(domain string) {
+	mutex.Lock()
+	defer mutex.Unlock()
+	blockedDomains[strings.ToLower(domain)] = true
+}
+
+// RemoveBlockedDomainForTest removes one domain from the blocked map.
+func RemoveBlockedDomainForTest(domain string) {
+	mutex.Lock()
+	defer mutex.Unlock()
+	delete(blockedDomains, strings.ToLower(domain))
 }
 
 func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {

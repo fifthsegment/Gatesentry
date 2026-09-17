@@ -142,7 +142,10 @@ DNS-first onboarding is the simple default. The DNS server blocks domains from
 external blocklists. Use `dns_resolver` in settings to choose an upstream
 (defaults to `8.8.8.8:53`). DNS filtering acts on domains; it cannot inspect or
 explain URL, MIME, keyword, or image-content decisions. See the
-[filtering coverage limits](SECURITY.md#filtering-coverage-limits).
+[filtering coverage limits](SECURITY.md#filtering-coverage-limits). The
+dashboard home page provides guided DNS-first onboarding with an end-to-end
+protection check; see [onboarding and the ten-minute pilot
+protocol](docs/onboarding.md).
 
 ## Transparent Proxy Mode (Linux only)
 

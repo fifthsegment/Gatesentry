@@ -392,6 +392,20 @@ func RegisterEndpointsStartServer(
 		SendJSON(w, output)
 	})
 
+	internalServer.Get("/api/onboarding/status", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiOnboardingStatusGET(w, r, gatesentryWebserverEndpoints.OnboardingDeps{
+			Settings:      internalSettings,
+			DnsServerInfo: dnsServerInfo,
+		})
+	})
+
+	internalServer.Post("/api/onboarding/protection-check", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiOnboardingProtectionCheckPOST(w, r, gatesentryWebserverEndpoints.OnboardingDeps{
+			Settings:      internalSettings,
+			DnsServerInfo: dnsServerInfo,
+		})
+	})
+
 	internalServer.Get("/api/dns/custom_entries", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
 		data, err := internalSettings.GetE("DNS_custom_entries")
 		if err != nil {
