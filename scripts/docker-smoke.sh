@@ -4,9 +4,11 @@ set -euo pipefail
 IMAGE=${IMAGE:-gatesentry:local}
 CONTAINER=gatesentry-smoke-$$
 response=$(mktemp)
+health=$(mktemp)
 cleanup() {
   docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
   rm -f "$response"
+  rm -f "$health"
 }
 trap cleanup EXIT
 
@@ -27,5 +29,7 @@ for attempt in $(seq 1 30); do
 done
 
 grep -Eqi '<!doctype html|<html' "$response" || { echo "error: dashboard smoke response is not HTML" >&2; exit 1; }
+curl --fail --silent --show-error "http://127.0.0.1:$web_port/health" > "$health"
+grep -Eq '"status"[[:space:]]*:[[:space:]]*"ok"' "$health" || { echo "error: health endpoint did not report ok" >&2; exit 1; }
 curl --fail --silent --show-error --proxy "http://127.0.0.1:$proxy_port" http://example.com/ >/dev/null
-echo "Docker dashboard and explicit proxy smoke checks passed"
+echo "Docker dashboard, health endpoint, and explicit proxy smoke checks passed"

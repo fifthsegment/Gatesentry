@@ -8,6 +8,21 @@ permissions:
   contents: read
 
 jobs:
+  docker-quickstart:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Validate Compose installation files
+        run: |
+          docker compose -f docker-compose.yml config --quiet
+          docker compose -f docker-compose.prebuilt.yml config --quiet
+      - name: Build and smoke test the Docker installation path
+        run: make docker-smoke REVISION="$(git rev-parse --short HEAD)" IMAGE=gatesentry:pr-verify
+
   verify:
     runs-on: ubuntu-latest
     steps:

@@ -157,6 +157,14 @@ func registerDashboardAssetRoutes(router *mux.Router) {
 	router.Path("/vite.svg").Handler(assetHandler)
 }
 
+// healthHandler reports web-server readiness. It is intentionally
+// unauthenticated and returns no configuration, credential, or browsing
+// material so container health checks and load balancers can probe it safely.
+var healthHandler HttpHandlerFunc = func(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	SendJSON(w, map[string]string{"status": "ok"})
+}
+
 func RegisterEndpointsStartServer(
 	Filters *[]gatesentryFilters.GSFilter,
 	runtime *gatesentryWebserverTypes.TemporaryRuntime,
@@ -176,6 +184,7 @@ func RegisterEndpointsStartServer(
 	tokenCreationHandler := tokenCreationHandlerFor(auth)
 
 	internalServer := NewGsWeb(basePath)
+	internalServer.Get("/health", healthHandler)
 	internalServer.Get("/api/setup/status", setupStatusHandlerFor(auth))
 	internalServer.Post("/api/setup", setupHandlerFor(auth))
 
