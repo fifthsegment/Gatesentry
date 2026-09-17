@@ -17,14 +17,42 @@ import (
 	"fmt"
 
 	application "bitbucket.org/abdullah_irfan/gatesentryf"
+	gatesentryDnsServer "bitbucket.org/abdullah_irfan/gatesentryf/dns/server"
 	filters "bitbucket.org/abdullah_irfan/gatesentryf/filters"
+	gatesentryPolicy "bitbucket.org/abdullah_irfan/gatesentryf/policy"
 	gresponder "bitbucket.org/abdullah_irfan/gatesentryf/responder"
+	GatesentryTypes "bitbucket.org/abdullah_irfan/gatesentryf/types"
 	gatesentryWebserverEndpoints "bitbucket.org/abdullah_irfan/gatesentryf/webserver/endpoints"
 	"bitbucket.org/abdullah_irfan/gatesentryproxy"
 	"github.com/jpillora/overseer"
 	"github.com/kardianos/service"
 	"github.com/steakknife/devnull"
 )
+
+// policyGroupDecision returns the proxy enforcement decision from the policy
+// service for a request context. handled is false when no group policy
+// applies (no service, or no matching domain), which tells the caller to fall
+// through to the existing user-scoped rule engine.
+func policyGroupDecision(clientIP, user, domain string) (GatesentryTypes.RuleMatch, bool) {
+	policyService := gatesentryDnsServer.GetPolicyService()
+	if policyService == nil {
+		return GatesentryTypes.RuleMatch{}, false
+	}
+	identity := policyService.ResolveIdentity(clientIP, user)
+	action := policyService.EvaluateDomain(identity, domain)
+	switch action {
+	case gatesentryPolicy.ActionBlock:
+		return GatesentryTypes.RuleMatch{
+			Matched:     true,
+			ShouldBlock: true,
+			ShouldMITM:  false,
+		}, true
+	case gatesentryPolicy.ActionAllow:
+		return GatesentryTypes.RuleMatch{Matched: false}, true
+	default:
+		return GatesentryTypes.RuleMatch{}, false
+	}
+}
 
 var GSPROXYPORT = "10413"
 var GSWEBADMINPORT = "10786"
@@ -407,13 +435,19 @@ func runGateSentry(startup chan<- error) (returnErr error) {
 		R.Logger.LogProxy(url, user, actionTaken)
 	}
 
-	ngp.RuleMatchHandler = func(domain string, user string) interface{} {
+	ngp.RuleMatchHandler = func(domain string, user string, clientIP string) interface{} {
+		// Deterministic precedence: policy group (device or authenticated
+		// user) first, then the existing user-scoped rule engine. Group allow
+		// short-circuits a matching block rule; group block short-circuits
+		// here. clientIP is only a device lookup key, never an identity.
+		if match, handled := policyGroupDecision(clientIP, user, domain); handled {
+			return match
+		}
 		ruleManager := gatesentryWebserverEndpoints.GetRuleManager()
 		if ruleManager == nil {
 			return nil
 		}
-		match := ruleManager.MatchRule(domain, user)
-		return match
+		return ruleManager.MatchRule(domain, user)
 	}
 
 	ngp.ProxyErrorHandler = func(gafd *gatesentryproxy.GSProxyErrorData) {

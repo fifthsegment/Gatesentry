@@ -1,5 +1,5 @@
 .PHONY: test test-go test-python build run clean-test install-test-deps coverage coverage-int \
-	check-go check-toolchains ui-install ui-check frontend-assets validate-assets verify-go verify release-artifacts docker-build docker-smoke
+	check-go check-toolchains check-commit-identity ui-install ui-check frontend-assets validate-assets verify-go verify release-artifacts docker-build docker-smoke
 
 PYTHON ?= python3
 PIP ?= pip3
@@ -15,6 +15,9 @@ check-toolchains:
 
 check-go:
 	./scripts/check-toolchains.sh go
+
+check-commit-identity:
+	./scripts/git/check-commit-identity "HEAD^..HEAD"
 
 ui-install: check-toolchains
 	./scripts/frontend.sh install
@@ -35,7 +38,7 @@ verify-go: check-go validate-assets
 	go test -vet=off ./gatesentryproxy/...
 	go build -buildvcs=false ./...
 
-verify: check-toolchains
+verify: check-toolchains check-commit-identity
 	./scripts/frontend.sh install
 	cd ui && yarn check
 	cd ui && yarn test --run

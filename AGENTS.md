@@ -48,6 +48,7 @@ Do not make device metadata appear to enforce a policy unless it reaches the pol
 ## Implementation rules
 
 - Inspect the relevant Linear issue, branch/status, this file, and existing tests before editing.
+- Commit with the identity configured by this repository. Do not override `user.name`, `user.email`, `GIT_AUTHOR_*`, or `GIT_COMMITTER_*` with `git -c`, environment variables, or `--author`, and do not bypass the identity hook with `--no-verify`.
 - Reproduce current behavior for security, persistence, filtering, build, and timing changes.
 - Keep state ownership explicit and avoid a second source of truth.
 - Propagate storage and network errors; do not ignore write, close, response, or parsing failures on user-critical paths.
