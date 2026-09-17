@@ -119,7 +119,7 @@ func GSApiDeviceSetName(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("[Devices API] Device %s named: %q (owner=%q, category=%q)", id, req.Name, req.Owner, req.Category)
+	log.Printf("[Devices API] Device %s manual metadata updated (owner provided=%t, category provided=%t)", id, req.Owner != nil, req.Category != nil)
 
 	// Return updated device
 	updated := ds.GetDevice(id)
