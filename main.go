@@ -6,6 +6,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -28,6 +29,90 @@ import (
 	"github.com/kardianos/service"
 	"github.com/steakknife/devnull"
 )
+
+// proxyActionToDecisionAction maps a proxy ProxyAction to the shared
+// six-value DecisionAction vocabulary so the proxy speaks the same
+// language as DNS and content decisions.
+func proxyActionToDecisionAction(action gatesentryproxy.ProxyAction) gatesentryPolicy.DecisionAction {
+	switch action {
+	case gatesentryproxy.ProxyActionBlockedUrl,
+		gatesentryproxy.ProxyActionBlockedTime,
+		gatesentryproxy.ProxyActionBlockedFileType,
+		gatesentryproxy.ProxyActionBlockedMediaContent,
+		gatesentryproxy.ProxyActionBlockedTextContent,
+		gatesentryproxy.ProxyActionBlockedInternetForUser:
+		return gatesentryPolicy.ActionDecisionBlock
+	case gatesentryproxy.ProxyActionSSLBump:
+		return gatesentryPolicy.ActionDecisionInspect
+	case gatesentryproxy.ProxyActionSSLDirect:
+		return gatesentryPolicy.ActionDecisionBypass
+	case gatesentryproxy.ProxyActionFilterError,
+		gatesentryproxy.ProxyActionUserNotFound:
+		return gatesentryPolicy.ActionDecisionError
+	case gatesentryproxy.ProxyActionUserActive,
+		gatesentryproxy.ProxyActionFilterNone:
+		return gatesentryPolicy.ActionDecisionAllow
+	default:
+		return gatesentryPolicy.ActionDecisionUnknown
+	}
+}
+
+// proxyLayerToDecisionLayer maps the plain-string layer carried by
+// GSLogData to the canonical DecisionLayer.
+func proxyLayerToDecisionLayer(layer string) gatesentryPolicy.DecisionLayer {
+	switch layer {
+	case "transparent_proxy":
+		return gatesentryPolicy.LayerTransparentProxy
+	case "content":
+		return gatesentryPolicy.LayerContent
+	default:
+		return gatesentryPolicy.LayerExplicitProxy
+	}
+}
+
+// proxyActionProvenance returns the matched-rule label and reason for
+// a ProxyAction, so every proxy decision explains itself without a
+// second source of truth.
+func proxyActionProvenance(action gatesentryproxy.ProxyAction) (matchedRule, reason string) {
+	switch action {
+	case gatesentryproxy.ProxyActionBlockedUrl:
+		return "url filter", "blocked URL"
+	case gatesentryproxy.ProxyActionBlockedTime:
+		return "time filter", "blocked by schedule"
+	case gatesentryproxy.ProxyActionBlockedFileType:
+		return "file type filter", "blocked file type"
+	case gatesentryproxy.ProxyActionBlockedMediaContent:
+		return "media content filter", "blocked media content"
+	case gatesentryproxy.ProxyActionBlockedTextContent:
+		return "text content filter", "blocked text content"
+	case gatesentryproxy.ProxyActionBlockedInternetForUser:
+		return "user access", "internet blocked for user"
+	case gatesentryproxy.ProxyActionSSLBump:
+		return "ssl bump", "TLS inspection enabled"
+	case gatesentryproxy.ProxyActionSSLDirect:
+		return "ssl direct", "direct tunnel without inspection"
+	case gatesentryproxy.ProxyActionFilterError:
+		return "", "filter error"
+	case gatesentryproxy.ProxyActionUserNotFound:
+		return "auth", "user not found"
+	case gatesentryproxy.ProxyActionUserActive:
+		return "auth", "user active"
+	case gatesentryproxy.ProxyActionFilterNone:
+		return "", "no matching rule"
+	default:
+		return "", "unknown"
+	}
+}
+
+// domainFromURL extracts the hostname from a request URL for decision
+// provenance. It falls back to the raw string if parsing fails.
+func domainFromURL(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Host == "" {
+		return rawURL
+	}
+	return u.Hostname()
+}
 
 // policyGroupDecision returns the proxy enforcement decision from the policy
 // service for a request context. handled is false when no group policy
@@ -429,10 +514,21 @@ func runGateSentry(startup chan<- error) (returnErr error) {
 	}
 
 	ngp.LogHandler = func(gafd gatesentryproxy.GSLogData) {
-		url := gafd.Url
-		user := gafd.User
-		actionTaken := string(gafd.Action)
-		R.Logger.LogProxy(url, user, actionTaken)
+		action := proxyActionToDecisionAction(gafd.Action)
+		layer := proxyLayerToDecisionLayer(gafd.Layer)
+		decision := gatesentryPolicy.NewDecision(action, layer, domainFromURL(gafd.Url))
+		decision.URL = gafd.Url
+		decision.ClientIP = gafd.ClientIP
+		decision.ResponseType = string(gafd.Action)
+		decision.MatchedRule, decision.Reason = proxyActionProvenance(gafd.Action)
+		// Resolve identity for device/group provenance. ClientIP is a
+		// lookup key only; the authenticated user is kept distinct.
+		policySvc := gatesentryDnsServer.GetPolicyService()
+		if policySvc != nil {
+			identity := policySvc.ResolveIdentity(gafd.ClientIP, gafd.User)
+			decision = decision.WithIdentity(identity).WithPolicyRevision(policySvc.Snapshot().Version)
+		}
+		R.Logger.LogDecision(decision)
 	}
 
 	ngp.RuleMatchHandler = func(domain string, user string, clientIP string) interface{} {

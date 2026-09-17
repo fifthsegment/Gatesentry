@@ -141,7 +141,7 @@ func (l *TransparentProxyListener) handleTransparentHTTP(conn net.Conn, original
 		if DebugLogging {
 			log.Printf("[Transparent] Blocking HTTP request to %s by rule", originalDst)
 		}
-		LogProxyAction(req.URL.String(), user, ProxyActionBlockedUrl)
+		LogProxyAction(req.URL.String(), user, ProxyActionBlockedUrl, clientIP, "transparent_proxy")
 		conn.Close()
 		return
 	}
@@ -201,7 +201,7 @@ func (l *TransparentProxyListener) handleTransparentHTTPS(conn net.Conn, origina
 				buf:    clientHello,
 				offset: 0,
 			}
-			LogProxyAction("https://"+serverAddr, user, ProxyActionSSLDirect)
+			LogProxyAction("https://"+serverAddr, user, ProxyActionSSLDirect, clientIP, "transparent_proxy")
 			ConnectDirect(freshConn, serverAddr, nil, passthru)
 		} else {
 			conn.Close()
@@ -234,7 +234,7 @@ func (l *TransparentProxyListener) handleTransparentHTTPS(conn net.Conn, origina
 		if serverName != "" {
 			logUrl = "https://" + serverName
 		}
-		LogProxyAction(logUrl, user, ProxyActionBlockedUrl)
+		LogProxyAction(logUrl, user, ProxyActionBlockedUrl, clientIP, "transparent_proxy")
 		conn.Close()
 		return
 	}
@@ -271,7 +271,7 @@ func (l *TransparentProxyListener) handleTransparentHTTPS(conn net.Conn, origina
 		if DebugLogging {
 			log.Printf("[Transparent] Direct tunnel for %s (SNI: %s)", serverAddr, serverName)
 		}
-		LogProxyAction(logUrl, user, ProxyActionSSLDirect)
+		LogProxyAction(logUrl, user, ProxyActionSSLDirect, clientIP, "transparent_proxy")
 		freshConn := &prependConn{
 			Conn:   realConn,
 			buf:    clientHello,
