@@ -417,6 +417,53 @@ func (ds *DeviceStore) UpsertDeviceE(device *Device) (string, error) {
 	return device.ID, err
 }
 
+// ManualFieldsUpdate changes user-managed device fields. A true Set* field
+// writes the corresponding value, including an empty value, so the API can
+// clear a label without changing discovery's merge behavior; a false Set*
+// field leaves the current value untouched.
+type ManualFieldsUpdate struct {
+	ManualName    string
+	Owner         string
+	Category      string
+	SetManualName bool
+	SetOwner      bool
+	SetCategory   bool
+}
+
+// UpdateManualFieldsE applies user-managed fields to one device. Discovery
+// remains the owner of observed identity: this method never changes addresses,
+// sources, last-seen, or online state. It returns the updated copy and any
+// persistence error so user-facing callers can surface a failed durable write.
+func (ds *DeviceStore) UpdateManualFieldsE(id string, update ManualFieldsUpdate) (*Device, bool, error) {
+	ds.mu.Lock()
+	current := ds.devices[id]
+	if current == nil {
+		ds.mu.Unlock()
+		return nil, false, nil
+	}
+	device := *current
+	if update.SetManualName {
+		device.ManualName = update.ManualName
+	}
+	if update.SetOwner {
+		device.Owner = update.Owner
+	}
+	if update.SetCategory {
+		device.Category = update.Category
+	}
+	device.Persistent = true
+	device.DisplayName = device.GetDisplayName()
+	ds.devices[id] = &device
+	ds.rebuildIndexes()
+	updated := device
+	ds.mu.Unlock()
+
+	if ds.persistence == nil {
+		return &updated, true, nil
+	}
+	return &updated, true, ds.persistence.persistIfChanged(updated)
+}
+
 // RemoveDevice removes a device by ID and rebuilds indexes.
 func (ds *DeviceStore) RemoveDevice(id string) {
 	// Errors are logged by the error-returning variant; this compatibility

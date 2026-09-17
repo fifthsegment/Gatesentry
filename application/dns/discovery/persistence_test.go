@@ -195,3 +195,104 @@ func TestDeviceAssignmentCorruptedFileFailsClosed(t *testing.T) {
 		t.Fatal("corrupted device store must remain byte-identical after failed open")
 	}
 }
+
+func TestUpdateManualFieldsClearsOwnerCategory(t *testing.T) {
+	store, _ := assignmentsStore(t)
+	ds := NewDeviceStore("local")
+	if err := ds.AttachPersistence(store); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ds.UpsertDeviceE(&Device{
+		ID:         "dev-1",
+		ManualName: "laptop",
+		Owner:      "Dana",
+		Category:   "kids",
+		IPv4:       "192.0.2.10",
+		Source:     SourcePassive,
+		Sources:    []DiscoverySource{SourcePassive},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	updated, ok, err := ds.UpdateManualFieldsE("dev-1", ManualFieldsUpdate{
+		Owner:       "",
+		Category:    "",
+		SetOwner:    true,
+		SetCategory: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("expected device to be found")
+	}
+	if updated.Owner != "" || updated.Category != "" {
+		t.Fatalf("owner/category = %q/%q, want cleared", updated.Owner, updated.Category)
+	}
+	if updated.ManualName != "laptop" {
+		t.Fatalf("manual name = %q, want preserved", updated.ManualName)
+	}
+	if updated.IPv4 != "192.0.2.10" || len(updated.Sources) != 1 {
+		t.Fatalf("observed identity changed: %+v", updated)
+	}
+
+	// Cleared labels must survive a restart, not just the in-memory copy.
+	restored := NewDeviceStore("local")
+	if err := restored.AttachPersistence(store); err != nil {
+		t.Fatal(err)
+	}
+	device := restored.GetDevice("dev-1")
+	if device == nil {
+		t.Fatal("device missing after restart")
+	}
+	if device.Owner != "" || device.Category != "" {
+		t.Fatalf("cleared labels restored: owner=%q category=%q", device.Owner, device.Category)
+	}
+	if device.ManualName != "laptop" {
+		t.Fatalf("manual name lost after restart: %q", device.ManualName)
+	}
+}
+
+func TestUpdateManualFieldsOmittedPreservesValues(t *testing.T) {
+	ds := NewDeviceStore("local")
+	if _, err := ds.UpsertDeviceE(&Device{
+		ID:       "dev-1",
+		Owner:    "Dana",
+		Category: "kids",
+		IPv4:     "192.0.2.10",
+		Source:   SourcePassive,
+		Sources:  []DiscoverySource{SourcePassive},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	before := ds.GetDevice("dev-1")
+
+	updated, ok, err := ds.UpdateManualFieldsE("dev-1", ManualFieldsUpdate{
+		ManualName:    "tablet",
+		SetManualName: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("expected device to be found")
+	}
+	if updated.Owner != "Dana" || updated.Category != "kids" {
+		t.Fatalf("omitted fields changed: owner=%q category=%q", updated.Owner, updated.Category)
+	}
+	if updated.ManualName != "tablet" {
+		t.Fatalf("manual name = %q, want tablet", updated.ManualName)
+	}
+	if updated.IPv4 != "192.0.2.10" || len(updated.Sources) != 1 {
+		t.Fatalf("observed identity changed: %+v", updated)
+	}
+	if !updated.LastSeen.Equal(before.LastSeen) {
+		t.Fatal("manual field update must not refresh LastSeen")
+	}
+
+	// An unknown device reports not-found without an error.
+	_, ok, err = ds.UpdateManualFieldsE("missing", ManualFieldsUpdate{ManualName: "x", SetManualName: true})
+	if err != nil || ok {
+		t.Fatalf("unknown device: ok=%v err=%v, want false/nil", ok, err)
+	}
+}

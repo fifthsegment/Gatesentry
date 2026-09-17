@@ -69,9 +69,11 @@ func GSApiDeviceGet(w http.ResponseWriter, r *http.Request) {
 
 // nameRequest is the JSON body for naming/updating a device.
 type nameRequest struct {
-	Name     string `json:"name"`
-	Owner    string `json:"owner,omitempty"`
-	Category string `json:"category,omitempty"`
+	Name string `json:"name"`
+	// Owner and Category are pointers so an omitted field preserves the
+	// current value while an explicit empty string clears it.
+	Owner    *string `json:"owner,omitempty"`
+	Category *string `json:"category,omitempty"`
 }
 
 // GSApiDeviceSetName sets the manual name (and optionally owner/category) for a device.
@@ -97,17 +99,23 @@ func GSApiDeviceSetName(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	device.ManualName = req.Name
-	if req.Owner != "" {
-		device.Owner = req.Owner
+	update := discovery.ManualFieldsUpdate{
+		ManualName:    req.Name,
+		SetManualName: true,
 	}
-	if req.Category != "" {
-		device.Category = req.Category
+	if req.Owner != nil {
+		update.Owner = *req.Owner
+		update.SetOwner = true
 	}
-	device.Persistent = true // Named devices should survive restarts
-
-	if _, err := ds.UpsertDeviceE(device); err != nil {
-		http.Error(w, `{"error":"Unable to persist device assignment"}`, http.StatusInternalServerError)
+	if req.Category != nil {
+		update.Category = *req.Category
+		update.SetCategory = true
+	}
+	if _, ok, err := ds.UpdateManualFieldsE(id, update); err != nil {
+		http.Error(w, `{"error":"Unable to persist device labels"}`, http.StatusInternalServerError)
+		return
+	} else if !ok {
+		http.Error(w, `{"error":"Device not found"}`, http.StatusNotFound)
 		return
 	}
 

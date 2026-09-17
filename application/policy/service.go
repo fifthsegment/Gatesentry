@@ -63,6 +63,10 @@ func NewService(storage *gatesentry2storage.MapStore, devices DeviceResolver) (*
 // from a storage error: adapters treat it as "no groups configured".
 var ErrNoPolicy = errors.New("no policy document")
 
+// ErrUnknownGroup is returned when an assignment targets a group that is not
+// in the persisted policy document.
+var ErrUnknownGroup = errors.New("unknown policy group")
+
 func (s *Service) loadDocument() (PolicyDocument, error) {
 	var doc PolicyDocument
 	if s.storage == nil {
@@ -158,23 +162,46 @@ func (s *Service) Reload() error {
 
 // SaveGroups replaces the group set atomically.
 func (s *Service) SaveGroups(groups []PolicyGroup) error {
-	return s.update(func(snap *PolicySnapshot) {
+	return s.update(func(snap *PolicySnapshot) error {
 		next := make(map[string]PolicyGroup, len(groups))
 		for _, g := range groups {
 			next[g.ID] = g
 		}
 		snap.Groups = next
+		return nil
 	})
 }
 
 // SaveAssignments replaces device→group assignments atomically.
 func (s *Service) SaveAssignments(assignments []DeviceAssignment) error {
-	return s.update(func(snap *PolicySnapshot) {
+	return s.update(func(snap *PolicySnapshot) error {
 		next := make(map[string]string, len(assignments))
 		for _, a := range assignments {
 			next[a.DeviceID] = a.GroupID
 		}
 		snap.Assignments = next
+		return nil
+	})
+}
+
+// SetDeviceAssignment assigns one device to a group, or clears the assignment
+// when groupID is empty. The read, validation, and write happen inside a
+// single storage transaction, so concurrent edits to other device assignments
+// cannot be lost and an invalid group aborts without writing.
+func (s *Service) SetDeviceAssignment(deviceID, groupID string) error {
+	if deviceID == "" {
+		return errors.New("policy assignment needs a device id")
+	}
+	return s.update(func(snap *PolicySnapshot) error {
+		if groupID == "" {
+			delete(snap.Assignments, deviceID)
+			return nil
+		}
+		if _, exists := snap.Groups[groupID]; !exists {
+			return fmt.Errorf("%w: %s", ErrUnknownGroup, groupID)
+		}
+		snap.Assignments[deviceID] = groupID
+		return nil
 	})
 }
 
@@ -211,7 +238,10 @@ func (s *Service) SaveMigration(groups []PolicyGroup, assignments []DeviceAssign
 	})
 }
 
-func (s *Service) update(transform func(*PolicySnapshot)) error {
+// update runs transform inside one atomic storage transaction. A non-nil
+// transform error aborts the transaction and leaves the persisted document
+// untouched.
+func (s *Service) update(transform func(*PolicySnapshot) error) error {
 	if s.storage == nil {
 		return errors.New("policy service has no storage")
 	}
@@ -226,7 +256,9 @@ func (s *Service) update(transform func(*PolicySnapshot)) error {
 			}
 		}
 		snap := snapshotFromDocument(doc)
-		transform(&snap)
+		if err := transform(&snap); err != nil {
+			return "", err
+		}
 		nextDoc := documentFromSnapshot(snap, doc.MigratedFrom)
 		encoded, err := json.Marshal(nextDoc)
 		if err != nil {
@@ -367,6 +399,13 @@ func (s *Service) EvaluateDNS(identity Identity, domain string) DNSDecision {
 
 func dnsInapplicableConditions() []string {
 	return []string{"url_regex", "content_type", "mitm"}
+}
+
+// DNSInapplicableConditions exposes the conditions DNS enforcement cannot
+// evaluate. APIs and logs use it so the public limitation always matches the
+// policy engine rather than duplicating the list.
+func DNSInapplicableConditions() []string {
+	return dnsInapplicableConditions()
 }
 
 // EvaluateDomain reports the group action for a domain in any adapter.

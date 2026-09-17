@@ -86,13 +86,13 @@ const (
 // Identity is the resolved request context. IP is a lookup key only, never a
 // durable identity: it is not persisted and never treated as authenticated.
 type Identity struct {
-	DeviceID string
-	AuthUser string
-	GroupID  string
-	Source   SourceKind
+	DeviceID string     `json:"device_id,omitempty"`
+	AuthUser string     `json:"auth_user,omitempty"`
+	GroupID  string     `json:"group_id,omitempty"`
+	Source   SourceKind `json:"source"`
 	// Explanation describes why this identity was chosen. It never contains
 	// stable identifiers or credentials.
-	Explanation string
+	Explanation string `json:"explanation,omitempty"`
 }
 
 // DNSDecision is the DNS adapter outcome including the conditions that DNS

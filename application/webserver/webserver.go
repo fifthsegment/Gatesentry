@@ -520,6 +520,15 @@ func RegisterEndpointsStartServer(
 	internalServer.Get("/api/devices/{id}", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
 		gatesentryWebserverEndpoints.GSApiDeviceGet(w, r)
 	})
+	internalServer.Get("/api/devices/{id}/policy", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiDevicePolicyGet(w, r)
+	})
+	internalServer.Put("/api/devices/{id}/assignment", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiDeviceAssignmentSet(w, r)
+	})
+	internalServer.Get("/api/devices/{id}/activity", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiDeviceActivityGet(w, r, logger)
+	})
 	internalServer.Post("/api/devices/{id}/name", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
 		gatesentryWebserverEndpoints.GSApiDeviceSetName(w, r)
 	})
