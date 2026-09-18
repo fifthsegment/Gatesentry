@@ -35,7 +35,8 @@ group_json=$(mktemp); exc_json=$(mktemp)
 block_out=$(mktemp); bypass_out=$(mktemp); forward_out=$(mktemp)
 mitm_out=$(mktemp); noauth_out=$(mktemp)
 pause_json=$(mktemp); sched_json=$(mktemp)
-cleanup_files() { rm -f "$response" "$health" "$token_json" "$group_json" "$exc_json" "$pause_json" "$sched_json" "$block_out" "$bypass_out" "$forward_out" "$mitm_out" "$noauth_out"; }
+backup_json=$(mktemp); restore_out=$(mktemp); corrupt_out=$(mktemp); mutate_out=$(mktemp)
+cleanup_files() { rm -f "$response" "$health" "$token_json" "$group_json" "$exc_json" "$pause_json" "$sched_json" "$block_out" "$bypass_out" "$forward_out" "$mitm_out" "$noauth_out" "$backup_json" "$restore_out" "$corrupt_out" "$mutate_out"; }
 
 stop_binary() {
   if [[ -f "$PID_FILE" ]]; then
@@ -235,8 +236,59 @@ forward_size=$(wc -c < "$forward_out")
 [[ "$forward_size" -gt 100 ]] || fail "after disabling MITM, HTTPS tunnel returned only $forward_size bytes"
 echo "  HTTPS tunnels again after MITM disabled ($forward_size bytes)"
 
+# ---- 21. Backup: export current configuration -------------------------
+echo "== backup: export current configuration =="
+curl --fail --silent --show-error -o "$backup_json" "$base/backup" -H "$auth_header"
+python3 -c "import json,sys; a=json.load(open(sys.argv[1])); assert a['format_version']==1, 'bad format_version'; assert 'httpbin.org' in json.dumps(a), 'block rule missing from archive'" "$backup_json"
+backup_size=$(wc -c < "$backup_json")
+[[ "$backup_size" -gt 100 ]] || fail "backup archive too small ($backup_size bytes)"
+echo "  backup exported ($backup_size bytes, format_version=1, contains httpbin.org block)"
+
+# ---- 22. Backup: mutate live state (remove block group) --------------
+echo "== backup: remove block group to mutate state =="
+curl --fail --silent --show-error -X DELETE "$base/policy/groups/$group_id" -H "$auth_header" > /dev/null
+curl -s -o "$mutate_out" -w '%{http_code}' --proxy "$proxy_url" "http://$TEST_DOMAIN$TEST_PATH" || true
+mutate_size=$(wc -c < "$mutate_out")
+[[ "$mutate_size" -gt 10 ]] || fail "after deleting block group, $TEST_DOMAIN returned only $mutate_size bytes, expected forwarded content"
+echo "  block group removed, $TEST_DOMAIN forwards again ($mutate_size bytes)"
+
+# ---- 23. Restore: apply backup archive -------------------------------
+echo "== restore: apply backup archive =="
+restore_code=$(curl -s -o "$restore_out" -w '%{http_code}' -X POST "$base/restore" -H 'Content-Type: application/json' -H "$auth_header" --data-binary @"$backup_json" || true)
+[[ "$restore_code" == "200" ]] || { cat "$restore_out" >&2; fail "restore returned $restore_code, expected 200"; }
+recovery_point=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['recovery_point'])" "$restore_out")
+[[ -n "$recovery_point" ]] || fail "restore response missing recovery_point"
+echo "  restore ok (recovery point recorded)"
+
+# ---- 24. Restore: block re-enforced at runtime -----------------------
+echo "== restore: block re-enforced after restore =="
+curl -s -o "$block_out" -w '%{http_code}' --proxy "$proxy_url" "http://$TEST_DOMAIN$TEST_PATH" || true
+block_size=$(wc -c < "$block_out")
+[[ "$block_size" -eq 0 ]] || fail "after restore, $TEST_DOMAIN returned $block_size bytes, expected 0 (blocked)"
+echo "  $TEST_DOMAIN blocked again after restore (size=0)"
+
+# ---- 25. Restore: unrelated traffic still proxies --------------------
+echo "== restore: runtime still forwards unrelated traffic =="
+curl -s -o "$forward_out" -w '%{http_code}' --proxy "$proxy_url" "http://$FORWARD_DOMAIN/" || true
+forward_size=$(wc -c < "$forward_out")
+[[ "$forward_size" -gt 100 ]] || fail "after restore, HTTP forward returned only $forward_size bytes"
+echo "  HTTP $FORWARD_DOMAIN forwarded after restore ($forward_size bytes)"
+
+# ---- 26. Restore: corrupt archive rejected, live config intact ------
+echo "== restore: corrupt archive rejected, live config intact =="
+corrupt_code=$(curl -s -o "$corrupt_out" -w '%{http_code}' -X POST "$base/restore" -H 'Content-Type: application/json' -H "$auth_header" --data-binary 'this is not json' || true)
+[[ "$corrupt_code" == "400" ]] || fail "corrupt restore returned $corrupt_code, expected 400"
+curl -s -o "$block_out" -w '%{http_code}' --proxy "$proxy_url" "http://$TEST_DOMAIN$TEST_PATH" || true
+block_size=$(wc -c < "$block_out")
+[[ "$block_size" -eq 0 ]] || fail "after corrupt restore, $TEST_DOMAIN returned $block_size bytes, expected 0 (still blocked)"
+curl -s -o "$forward_out" -w '%{http_code}' --proxy "$proxy_url" "http://$FORWARD_DOMAIN/" || true
+forward_size=$(wc -c < "$forward_out")
+[[ "$forward_size" -gt 100 ]] || fail "after corrupt restore, HTTP forward returned only $forward_size bytes"
+echo "  corrupt archive -> 400, live block and forward intact"
+
 echo ""
 echo "All proxy smoke checks passed: HTTP forward, HTTPS tunnel, 407 auth,"
 echo "policy block, exception bypass, revoke, pause suppress, pause revoke,"
-echo "schedule inactive, schedule clear, policy preview, MITM intercept, MITM disable."
+echo "schedule inactive, schedule clear, policy preview, MITM intercept, MITM disable,"
+echo "backup export, restore re-enforces block, corrupt restore rejected."
 exit 0

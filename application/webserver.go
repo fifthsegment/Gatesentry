@@ -71,6 +71,8 @@ func GSwebserverStart(port int) {
 		R.GSSettings,
 		NewRuleManager(R.GSSettings),
 		basePath,
+		R.GSDevices,
+		GSBASEDIR,
 	); err != nil {
 		fmt.Printf("Webserver stopped: %v\n", err)
 	}

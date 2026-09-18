@@ -11,6 +11,7 @@ import (
 	"os"
 	"strings"
 
+	gatesentryDnsServer "bitbucket.org/abdullah_irfan/gatesentryf/dns/server"
 	gatesentryFilters "bitbucket.org/abdullah_irfan/gatesentryf/filters"
 	gatesentry2logger "bitbucket.org/abdullah_irfan/gatesentryf/logger"
 	gatesentry2storage "bitbucket.org/abdullah_irfan/gatesentryf/storage"
@@ -175,6 +176,8 @@ func RegisterEndpointsStartServer(
 	internalSettings *gatesentry2storage.MapStore,
 	ruleManager gatesentryWebserverEndpoints.RuleManagerInterface,
 	basePath string,
+	devices *gatesentry2storage.MapStore,
+	dataDir string,
 ) error {
 	auth, err := NewAuthManager(internalSettings, os.Getenv("GATESENTRY_BOOTSTRAP_FILE"))
 	if err != nil {
@@ -629,6 +632,37 @@ func RegisterEndpointsStartServer(
 	})
 	log.Println("Pause and schedule API endpoints registered")
 	log.Println("Policy API endpoints registered")
+
+	// Backup and restore endpoints (PER-41).
+	log.Println("Registering backup and restore API endpoints...")
+	// reloadAfterRestore refreshes runtime state and the DNS policy service so
+	// that groups restored directly to storage are reflected in live enforcement.
+	reloadAfterRestore := func() error {
+		runtime.Reload()
+		if svc := gatesentryDnsServer.GetPolicyService(); svc != nil {
+			return svc.Reload()
+		}
+		return nil
+	}
+	internalServer.Get("/api/backup", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiBackupGET(w, r, gatesentryWebserverEndpoints.BackupDeps{
+			Settings: internalSettings,
+			Devices:  devices,
+			BaseDir:  dataDir,
+			Reload:   reloadAfterRestore,
+			Version:  runtime.GetApplicationVersion,
+		})
+	})
+	internalServer.Post("/api/restore", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiRestorePOST(w, r, gatesentryWebserverEndpoints.BackupDeps{
+			Settings: internalSettings,
+			Devices:  devices,
+			BaseDir:  dataDir,
+			Reload:   reloadAfterRestore,
+			Version:  runtime.GetApplicationVersion,
+		})
+	})
+	log.Println("Backup and restore API endpoints registered")
 
 	// Register MIME types for static file serving
 	mime.AddExtensionType(".css", "text/css")
