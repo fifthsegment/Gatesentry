@@ -183,7 +183,34 @@ block_size=$(wc -c < "$block_out")
 [[ "$block_size" -eq 0 ]] || fail "after clearing schedule, blocked domain returned $block_size bytes, expected 0"
 echo "  block restored after schedule cleared (size=0)"
 
-# ---- 16. MITM: enable, download CA, verify HTTPS interception ---------
+# ---- 16. Policy preview: active decision ---------------------------
+echo "== policy preview: active decision =="
+curl --fail --silent --show-error -X POST "$base/policy/preview" -H 'Content-Type: application/json' -H "$auth_header" \
+  -d '{"user":"smokeproxy","domain":"httpbin.org"}' > "$sched_json"
+active_action=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['active']['action'])" "$sched_json")
+[[ "$active_action" == "block" ]] || fail "preview active action was $active_action, expected block"
+echo "  preview reports active=block for httpbin.org"
+
+# ---- 17. Policy preview: proposed change ---------------------------
+echo "== policy preview: proposed comparison =="
+group_id=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['group']['id'])" "$group_json")
+curl --fail --silent --show-error -X POST "$base/policy/preview" -H 'Content-Type: application/json' -H "$auth_header" \
+  -d "{\"user\":\"smokeproxy\",\"domain\":\"httpbin.org\",\"proposed\":{\"groups\":[{\"id\":\"preview-allow\",\"name\":\"preview-allow\",\"action\":\"allow\",\"domains\":[\"httpbin.org\"],\"users\":[\"smokeproxy\"]}],\"assignments\":[]}}" > "$sched_json"
+proposed_action=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['proposed']['action'])" "$sched_json")
+changed=$(python3 -c "import json,sys; print(str(json.load(open(sys.argv[1]))['changed']).lower())" "$sched_json")
+[[ "$proposed_action" == "allow" ]] || fail "preview proposed action was $proposed_action, expected allow"
+[[ "$changed" == "true" ]] || fail "preview changed was $changed, expected true"
+echo "  preview reports proposed=allow, changed=true"
+
+# ---- 18. Policy preview: live policy untouched ---------------------
+echo "== policy preview: live policy untouched =="
+curl -s -o "$block_out" -w '%{http_code}' --proxy "$proxy_url" "http://$TEST_DOMAIN$TEST_PATH" || true
+block_size=$(wc -c < "$block_out")
+[[ "$block_size" -eq 0 ]] || fail "after preview, live block returned $block_size bytes, expected 0"
+echo "  live block still enforced after preview (size=0)"
+
+
+# ---- 19. MITM: enable, download CA, verify HTTPS interception ---------
 echo "== MITM: HTTPS interception =="
 curl --fail --silent --show-error -X POST "$base/settings/enable_https_filtering" -H 'Content-Type: application/json' -H "$auth_header" -d '{"value":"true"}' > /dev/null
 curl --fail --silent --show-error -o "$CA_FILE" "$base/files/certificate" -H "$auth_header"
@@ -200,7 +227,7 @@ if [[ "$noauth_code" != "000" ]]; then
 fi
 echo "  HTTPS without trusted CA -> connection fails (interception confirmed)"
 
-# ---- 17. Disable MITM -> HTTPS tunnels again -------------------------
+# ---- 20. Disable MITM -> HTTPS tunnels again -------------------------
 echo "== disable MITM =="
 curl --fail --silent --show-error -X POST "$base/settings/enable_https_filtering" -H 'Content-Type: application/json' -H "$auth_header" -d '{"value":"false"}' > /dev/null
 curl -s -o "$forward_out" -w '%{http_code}' --proxy "$proxy_url" "https://$FORWARD_DOMAIN/" || true
@@ -211,5 +238,5 @@ echo "  HTTPS tunnels again after MITM disabled ($forward_size bytes)"
 echo ""
 echo "All proxy smoke checks passed: HTTP forward, HTTPS tunnel, 407 auth,"
 echo "policy block, exception bypass, revoke, pause suppress, pause revoke,"
-echo "schedule inactive, schedule clear, MITM intercept, MITM disable."
+echo "schedule inactive, schedule clear, policy preview, MITM intercept, MITM disable."
 exit 0
