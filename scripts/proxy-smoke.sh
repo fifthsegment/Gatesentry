@@ -36,7 +36,8 @@ block_out=$(mktemp); bypass_out=$(mktemp); forward_out=$(mktemp)
 mitm_out=$(mktemp); noauth_out=$(mktemp)
 pause_json=$(mktemp); sched_json=$(mktemp)
 backup_json=$(mktemp); restore_out=$(mktemp); corrupt_out=$(mktemp); mutate_out=$(mktemp)
-cleanup_files() { rm -f "$response" "$health" "$token_json" "$group_json" "$exc_json" "$pause_json" "$sched_json" "$block_out" "$bypass_out" "$forward_out" "$mitm_out" "$noauth_out" "$backup_json" "$restore_out" "$corrupt_out" "$mutate_out"; }
+diag_json=$(mktemp); bundle_json=$(mktemp)
+cleanup_files() { rm -f "$response" "$health" "$token_json" "$group_json" "$exc_json" "$pause_json" "$sched_json" "$block_out" "$bypass_out" "$forward_out" "$mitm_out" "$noauth_out" "$backup_json" "$restore_out" "$corrupt_out" "$mutate_out" "$diag_json" "$bundle_json"; }
 
 stop_binary() {
   if [[ -f "$PID_FILE" ]]; then
@@ -286,9 +287,50 @@ forward_size=$(wc -c < "$forward_out")
 [[ "$forward_size" -gt 100 ]] || fail "after corrupt restore, HTTP forward returned only $forward_size bytes"
 echo "  corrupt archive -> 400, live block and forward intact"
 
+# ---- 27. Diagnostics: health report structure -------------------------
+echo "== diagnostics: health report structure =="
+curl --fail --silent --show-error "$base/diagnostics" -H "$auth_header" -o "$diag_json"
+python3 -c "
+import json,sys
+r=json.load(open(sys.argv[1]))
+assert r['version']==1, 'bad report version'
+assert 'checked_at' in r and r['checked_at'], 'missing checked_at'
+assert r['overall'] in ('ok','failed','unknown'), 'bad overall: '+r['overall']
+names=[c['name'] for c in r['checks']]
+expected=['listeners','upstream','blocklist','certificate','storage','discovery','policy']
+missing=[n for n in expected if n not in names]
+assert not missing, 'missing checks: '+str(missing)
+for c in r['checks']:
+    assert c['status'] in ('ok','failed','unknown'), 'bad status for '+c['name']+': '+c['status']
+    assert c['message'], 'empty message for '+c['name']
+" "$diag_json"
+echo "  diagnostics report has all 7 checks with valid statuses"
+
+# ---- 28. Diagnostics: support bundle is redacted ----------------------
+echo "== diagnostics: support bundle redacted =="
+bundle_code=$(curl -s -o "$bundle_json" -w '%{http_code}' "$base/diagnostics/bundle" -H "$auth_header" || true)
+[[ "$bundle_code" == "200" ]] || fail "diagnostics bundle returned $bundle_code, expected 200"
+python3 -c "
+import json,sys
+b=json.load(open(sys.argv[1]))
+assert b['format_version']==1, 'bad bundle format_version'
+assert 'diagnostics' in b, 'bundle missing diagnostics report'
+# Only the explicitly allowlisted keys may appear in settings.
+allowed={'dns_resolver','enable_dns_server','enable_https_filtering','timezone','settings_schema_version'}
+extra=set(b['settings'].keys())-allowed
+assert not extra, 'bundle leaked non-allowlisted settings: '+str(extra)
+# Sensitive keys that must never appear.
+forbidden=['capem','keypem','authusers','ai_grok_api_key','ai_openai_api_key','ai_local_llm_url','installation']
+leaked=[k for k in forbidden if k in b['settings']]
+assert not leaked, 'bundle leaked sensitive keys: '+str(leaked)
+" "$bundle_json"
+bundle_size=$(wc -c < "$bundle_json")
+echo "  support bundle redacted ($bundle_size bytes, no credentials/keys/certs)"
+
 echo ""
 echo "All proxy smoke checks passed: HTTP forward, HTTPS tunnel, 407 auth,"
 echo "policy block, exception bypass, revoke, pause suppress, pause revoke,"
 echo "schedule inactive, schedule clear, policy preview, MITM intercept, MITM disable,"
-echo "backup export, restore re-enforces block, corrupt restore rejected."
+echo "backup export, restore re-enforces block, corrupt restore rejected,"
+echo "diagnostics report structure, redacted support bundle."
 exit 0
