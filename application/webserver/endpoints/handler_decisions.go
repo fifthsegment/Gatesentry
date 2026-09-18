@@ -12,10 +12,10 @@ import (
 
 // decisionItem is the redacted, user-facing representation of a stored
 // LogEntry. DeviceID is intentionally omitted: the /api/decisions response
-// must never expose another household user browsing history through a single
-// decision record, so the stable identifier is dropped at the API boundary.
-// Device-to-name enrichment happens only in the summary endpoint, which
-// aggregates counts rather than per-device rows.
+// must never expose another household user's browsing history through a
+// single decision record, so the stable identifier is dropped at the API
+// boundary. Device-to-name enrichment happens only in the summary endpoint,
+// which aggregates counts rather than per-device rows.
 type decisionItem struct {
 	Time              int64  `json:"time"`
 	IP                string `json:"ip"`
@@ -70,11 +70,31 @@ func hasDecisionFilter(r *http.Request) bool {
 // GET /api/decisions?from=&to=&ip=&group=&domain=&action=&layer=&reason=&limit=&offset=
 // All filter parameters are optional. DeviceID is never returned; the field
 // is dropped at this boundary so a single decision record cannot leak a
-// stable device identifier or another user browsing history. A bare request
+// stable device identifier or another user's browsing history. A bare request
 // (no filters) defaults to the last hour so the live view stays bounded.
 func GSApiDecisionsGET(w http.ResponseWriter, r *http.Request, logger *gatesentryLogger.Log) {
 	if logger == nil {
 		http.Error(w, "{\"error\":\"Decision logger not initialized\"}", http.StatusServiceUnavailable)
+		return
+	}
+	from, ok := parseUnixParam(r, "from")
+	if !ok {
+		http.Error(w, "{\"error\":\"from must be a non-negative unix timestamp\"}", http.StatusBadRequest)
+		return
+	}
+	to, ok := parseUnixParam(r, "to")
+	if !ok {
+		http.Error(w, "{\"error\":\"to must be a non-negative unix timestamp\"}", http.StatusBadRequest)
+		return
+	}
+	limit, ok := parseIntParam(r, "limit")
+	if !ok {
+		http.Error(w, "{\"error\":\"limit must be a non-negative integer\"}", http.StatusBadRequest)
+		return
+	}
+	offset, ok := parseIntParam(r, "offset")
+	if !ok {
+		http.Error(w, "{\"error\":\"offset must be a non-negative integer\"}", http.StatusBadRequest)
 		return
 	}
 	f := gatesentryLogger.DecisionFilter{
@@ -84,10 +104,10 @@ func GSApiDecisionsGET(w http.ResponseWriter, r *http.Request, logger *gatesentr
 		Action:  r.URL.Query().Get("action"),
 		Layer:   r.URL.Query().Get("layer"),
 		Reason:  r.URL.Query().Get("reason"),
-		From:    parseUnixParam(w, r, "from"),
-		To:      parseUnixParam(w, r, "to"),
-		Limit:   parseIntParam(w, r, "limit"),
-		Offset:  parseIntParam(w, r, "offset"),
+		From:    from,
+		To:      to,
+		Limit:   limit,
+		Offset:  offset,
 	}
 	if !hasDecisionFilter(r) {
 		f.From = time.Now().Unix() - 3600
@@ -133,6 +153,16 @@ func GSApiDecisionSummaryGET(w http.ResponseWriter, r *http.Request, logger *gat
 		http.Error(w, "{\"error\":\"Decision logger not initialized\"}", http.StatusServiceUnavailable)
 		return
 	}
+	from, ok := parseUnixParam(r, "from")
+	if !ok {
+		http.Error(w, "{\"error\":\"from must be a non-negative unix timestamp\"}", http.StatusBadRequest)
+		return
+	}
+	to, ok := parseUnixParam(r, "to")
+	if !ok {
+		http.Error(w, "{\"error\":\"to must be a non-negative unix timestamp\"}", http.StatusBadRequest)
+		return
+	}
 	f := gatesentryLogger.DecisionFilter{
 		IP:      r.URL.Query().Get("ip"),
 		GroupID: r.URL.Query().Get("group"),
@@ -140,8 +170,8 @@ func GSApiDecisionSummaryGET(w http.ResponseWriter, r *http.Request, logger *gat
 		Action:  r.URL.Query().Get("action"),
 		Layer:   r.URL.Query().Get("layer"),
 		Reason:  r.URL.Query().Get("reason"),
-		From:    parseUnixParam(w, r, "from"),
-		To:      parseUnixParam(w, r, "to"),
+		From:    from,
+		To:      to,
 	}
 	if !hasDecisionFilter(r) {
 		f.From = time.Now().Unix() - 7*24*3600
@@ -200,32 +230,33 @@ func deviceNameForIPFromStore(ip string) string {
 	return ""
 }
 
-// parseUnixParam parses an optional unix-seconds query parameter. It writes a
-// 400 error on a malformed non-empty value and returns 0 for an absent one.
-func parseUnixParam(w http.ResponseWriter, r *http.Request, name string) int64 {
+// parseUnixParam parses an optional unix-seconds query parameter. It returns
+// (0, true) for an absent value and (0, false) for a malformed one; the
+// caller writes the 400 response so the handler stops instead of continuing
+// with a half-written response.
+func parseUnixParam(r *http.Request, name string) (int64, bool) {
 	raw := r.URL.Query().Get(name)
 	if raw == "" {
-		return 0
+		return 0, true
 	}
 	v, err := strconv.ParseInt(raw, 10, 64)
 	if err != nil || v < 0 {
-		http.Error(w, "{\"error\":\"from/to must be a non-negative unix timestamp\"}", http.StatusBadRequest)
-		return 0
+		return 0, false
 	}
-	return v
+	return v, true
 }
 
-// parseIntParam parses an optional integer query parameter, writing a 400
-// error on a malformed non-empty value and returning 0 for an absent one.
-func parseIntParam(w http.ResponseWriter, r *http.Request, name string) int {
+// parseIntParam parses an optional integer query parameter, returning
+// (0, true) for an absent value and (0, false) for a malformed one; the
+// caller writes the 400 response.
+func parseIntParam(r *http.Request, name string) (int, bool) {
 	raw := r.URL.Query().Get(name)
 	if raw == "" {
-		return 0
+		return 0, true
 	}
 	v, err := strconv.Atoi(raw)
 	if err != nil || v < 0 {
-		http.Error(w, "{\"error\":\"limit/offset must be a non-negative integer\"}", http.StatusBadRequest)
-		return 0
+		return 0, false
 	}
-	return v
+	return v, true
 }
