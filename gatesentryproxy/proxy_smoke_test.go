@@ -45,3 +45,124 @@ func TestProxyProviderRequestRunsThroughURLFilter(t *testing.T) {
 		t.Fatalf("status = %d", w.Code)
 	}
 }
+
+// smokeRuleMatch mirrors application/types.RuleMatch but lives in the proxy
+// package so the smoke test does not import the application module.
+// CheckProxyRules reads Matched, ShouldBlock, and BlockURLRegexes via
+// reflection, so any struct with those fields works.
+type smokeRuleMatch struct {
+	Matched         bool
+	ShouldBlock     bool
+	BlockURLRegexes []string
+	ShouldMITM      bool
+}
+
+// newSmokeProxy returns a GSProxy wired with no-op handlers and the given
+// RuleMatchHandler, so tests can exercise the block/allow decision path
+// without a real server or policy service.
+func newSmokeProxy(ruleHandler func(domain, user, clientIP string) interface{}) *GSProxy {
+	p := NewGSProxy()
+	p.IsAuthEnabled = func() bool { return false }
+	p.TimeAccessHandler = func(*GSTimeAccessFilterData) {}
+	p.ContentTypeHandler = func(*GSContentTypeFilterData) {}
+	p.ContentSizeHandler = func(GSContentSizeFilterData) {}
+	p.ContentHandler = func(*GSContentFilterData) {}
+	p.ProxyErrorHandler = func(*GSProxyErrorData) {}
+	p.UserAccessHandler = func(*GSUserAccessFilterData) {}
+	p.DoMitm = func(string) bool { return false }
+	p.IsExceptionUrl = func(string) bool { return false }
+	p.LogHandler = func(GSLogData) {}
+	p.UrlAccessHandler = func(*GSUrlFilterData) {}
+	p.RuleMatchHandler = ruleHandler
+	return p
+}
+
+// TestProxyBlocksByRuleMatchHandler verifies that when the RuleMatchHandler
+// returns a block decision for a domain, the proxy never contacts upstream
+// and logs a blocked_url action. This is the core path that policy group
+// blocks flow through.
+func TestProxyBlocksByRuleMatchHandler(t *testing.T) {
+	var loggedAction ProxyAction
+	var handlerCalled bool
+	p := newSmokeProxy(func(domain, user, clientIP string) interface{} {
+		if domain == "blocked.example" {
+			handlerCalled = true
+			return smokeRuleMatch{Matched: true, ShouldBlock: true}
+		}
+		return nil
+	})
+	p.LogHandler = func(d GSLogData) { loggedAction = d.Action }
+	rt := &smokeRoundTripper{}
+	h := ProxyHandler{rt: rt, Iproxy: p}
+	r := httptest.NewRequest(http.MethodGet, "http://blocked.example/page", nil)
+	r.RemoteAddr = "192.0.2.20:1234"
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if !handlerCalled {
+		t.Fatal("RuleMatchHandler was not called for the blocked domain")
+	}
+	if atomic.LoadInt32(&rt.hits) != 0 {
+		t.Fatalf("upstream should not be contacted on block, got hits = %d", rt.hits)
+	}
+	if loggedAction != ProxyActionBlockedUrl {
+		t.Fatalf("logged action = %q, want %q", loggedAction, ProxyActionBlockedUrl)
+	}
+}
+
+// TestProxyAllowsWhenRuleMatchHandlerReturnsNil verifies the fall-through
+// path: when no rule matches (nil return), the proxy forwards to upstream.
+func TestProxyAllowsWhenRuleMatchHandlerReturnsNil(t *testing.T) {
+	p := newSmokeProxy(func(domain, user, clientIP string) interface{} { return nil })
+	rt := &smokeRoundTripper{}
+	h := ProxyHandler{rt: rt, Iproxy: p}
+	r := httptest.NewRequest(http.MethodGet, "http://allowed.example/page", nil)
+	r.RemoteAddr = "192.0.2.20:1234"
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if atomic.LoadInt32(&rt.hits) != 1 {
+		t.Fatalf("upstream hits = %d, want 1 on allow", rt.hits)
+	}
+}
+
+// TestProxyExceptionBypassesBlock simulates the PER-38 exception flow: the
+// RuleMatchHandler first returns a block (group policy), then returns nil
+// (exception bypasses the block). The proxy must contact upstream on the
+// second request. This test exists because PR #170 shipped without any test
+// exercising the block-then-bypass path through the proxy, and the feature
+// was only caught by manual validation.
+func TestProxyExceptionBypassesBlock(t *testing.T) {
+	exceptionActive := false
+	p := newSmokeProxy(func(domain, user, clientIP string) interface{} {
+		if domain == "blocked.example" && !exceptionActive {
+			return smokeRuleMatch{Matched: true, ShouldBlock: true}
+		}
+		// When the exception is active, the handler returns nil (no match),
+		// simulating EvaluateDomain returning ActionAllow which makes
+		// policyGroupDecision return (RuleMatch{Matched: false}, true) --
+		// the proxy treats handled=false and falls through to upstream.
+		return nil
+	})
+	rt := &smokeRoundTripper{}
+	h := ProxyHandler{rt: rt, Iproxy: p}
+
+	// First request: blocked.
+	r := httptest.NewRequest(http.MethodGet, "http://blocked.example/page", nil)
+	r.RemoteAddr = "192.0.2.20:1234"
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if atomic.LoadInt32(&rt.hits) != 0 {
+		t.Fatalf("before exception: upstream hits = %d, want 0", rt.hits)
+	}
+
+	// Activate the exception (simulate admin creating a scoped exception).
+	exceptionActive = true
+
+	// Second request: bypassed.
+	r2 := httptest.NewRequest(http.MethodGet, "http://blocked.example/page", nil)
+	r2.RemoteAddr = "192.0.2.20:1234"
+	w2 := httptest.NewRecorder()
+	h.ServeHTTP(w2, r2)
+	if atomic.LoadInt32(&rt.hits) != 1 {
+		t.Fatalf("after exception: upstream hits = %d, want 1", rt.hits)
+	}
+}

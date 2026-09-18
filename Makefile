@@ -1,5 +1,5 @@
 .PHONY: test test-go test-python build run clean-test install-test-deps coverage coverage-int \
-	check-go check-toolchains check-commit-identity ui-install ui-check frontend-assets validate-assets verify-go verify release-artifacts docker-build docker-smoke
+	check-go check-toolchains check-commit-identity ui-install ui-check frontend-assets validate-assets verify-go verify release-artifacts docker-build docker-smoke proxy-smoke
 
 PYTHON ?= python3
 PIP ?= pip3
@@ -53,6 +53,9 @@ docker-build:
 
 docker-smoke: docker-build
 	IMAGE=$(IMAGE) ./scripts/docker-smoke.sh
+
+proxy-smoke: check-go
+	./scripts/proxy-smoke.sh
 
 clean-test:
 	@echo "Cleaning up test artifacts..."
