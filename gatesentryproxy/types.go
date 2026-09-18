@@ -85,6 +85,15 @@ type GSLogData struct {
 	ContentType string
 	User        string
 	Action      ProxyAction
+	// ClientIP is the observed source address, used as a device lookup
+	// key by the LogHandler closure that translates GSLogData into a
+	// policy.Decision. It is never itself treated as the authenticated
+	// identity.
+	ClientIP string
+	// Layer identifies which proxy path produced this log entry
+	// ("explicit_proxy", "transparent_proxy", or "content"). The closure
+	// maps it to a policy.DecisionLayer.
+	Layer string
 }
 
 type GSUrlFilterData struct {

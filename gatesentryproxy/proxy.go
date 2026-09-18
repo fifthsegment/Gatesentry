@@ -263,7 +263,7 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	IProxy.TimeAccessHandler(&timefilterData)
 	if timefilterData.FilterResponseAction == string(ProxyActionBlockedTime) {
 		passthru.ProxyActionToLog = ProxyActionBlockedTime
-		IProxy.LogHandler(GSLogData{Url: r.URL.String(), User: user, Action: ProxyActionBlockedTime})
+		IProxy.LogHandler(GSLogData{Url: r.URL.String(), User: user, Action: ProxyActionBlockedTime, ClientIP: client, Layer: "explicit_proxy"})
 		sendBlockMessageBytes(w, r, nil, timefilterData.FilterResponse, nil)
 		return
 	}
@@ -287,7 +287,7 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if urlFilterData.FilterResponseAction == ProxyActionBlockedUrl {
 		passthru.ProxyActionToLog = ProxyActionBlockedUrl
-		IProxy.LogHandler(GSLogData{Url: r.URL.String(), User: user, Action: ProxyActionBlockedUrl})
+		IProxy.LogHandler(GSLogData{Url: r.URL.String(), User: user, Action: ProxyActionBlockedUrl, ClientIP: client, Layer: "explicit_proxy"})
 		sendBlockMessageBytes(w, r, nil, urlFilterData.FilterResponse, nil)
 		return
 	}
@@ -303,7 +303,7 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if contentTypeScan.FilterResponseAction == ProxyActionBlockedFileType {
 		passthru.ProxyActionToLog = ProxyActionBlockedUrl
-		IProxy.LogHandler(GSLogData{Url: r.URL.String(), User: user, Action: ProxyActionBlockedUrl})
+		IProxy.LogHandler(GSLogData{Url: r.URL.String(), User: user, Action: ProxyActionBlockedUrl, ClientIP: client, Layer: "explicit_proxy"})
 		// sendBlockMessageBytes(w, r, nil, urlFilterData.FilterResponse, nil)
 		r.URL.Host = "blocked.gatesentryguard.com"
 		r.URL.Scheme = "https"
@@ -331,7 +331,7 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if DebugLogging {
 			log.Printf("[Proxy] Blocking request to %s by rule", r.URL.String())
 		}
-		LogProxyAction(r.URL.String(), user, ProxyActionBlockedUrl)
+		LogProxyAction(r.URL.String(), user, ProxyActionBlockedUrl, client, "explicit_proxy")
 		return
 	}
 
@@ -375,7 +375,7 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// requestUrlBytes_log := []byte(r.URL.String())
 		passthru.ProxyActionToLog = ProxyActionSSLDirect
 		// IProxy.RunHandler("log", "", &requestUrlBytes_log, passthru)
-		IProxy.LogHandler(GSLogData{Url: r.URL.String(), User: user, Action: ProxyActionSSLDirect})
+		IProxy.LogHandler(GSLogData{Url: r.URL.String(), User: user, Action: ProxyActionSSLDirect, ClientIP: client, Layer: "explicit_proxy"})
 		HandleSSLConnectDirect(r, w, user, passthru)
 		return
 	}
@@ -446,7 +446,7 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 				if shouldBlock {
 					passthru.ProxyActionToLog = ProxyActionBlockedUrl
-					IProxy.LogHandler(GSLogData{Url: requestURL, User: user, Action: ProxyActionBlockedUrl})
+					IProxy.LogHandler(GSLogData{Url: requestURL, User: user, Action: ProxyActionBlockedUrl, ClientIP: client, Layer: "explicit_proxy"})
 					sendBlockMessageBytes(w, r, nil, []byte("URL blocked by rule"), nil)
 					return
 				}
@@ -474,7 +474,7 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// requestUrlBytes_log := []byte(r.URL.String())
 		passthru.ProxyActionToLog = ProxyActionBlockedFileType
 		// IProxy.RunHandler("log", "", &requestUrlBytes_log, passthru)
-		IProxy.LogHandler(GSLogData{Url: r.URL.String(), User: user, Action: ProxyActionBlockedFileType})
+		IProxy.LogHandler(GSLogData{Url: r.URL.String(), User: user, Action: ProxyActionBlockedFileType, ClientIP: client, Layer: "explicit_proxy"})
 		sendBlockMessageBytes(w, r, nil, BLOCKED_CONTENT_TYPE, &contentType)
 		return
 	}
@@ -530,7 +530,7 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if responseSentMedia == true {
 		passthru.ProxyActionToLog = proxyActionTaken
 		// IProxy.RunHandler("log", "", &requestUrlBytes, passthru)
-		IProxy.LogHandler(GSLogData{Url: r.URL.String(), User: user, Action: proxyActionTaken})
+		IProxy.LogHandler(GSLogData{Url: r.URL.String(), User: user, Action: proxyActionTaken, ClientIP: client, Layer: "content"})
 		return
 	}
 
@@ -538,7 +538,7 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if responseSentText == true {
 		passthru.ProxyActionToLog = proxyActionTaken
 		// IProxy.RunHandler("log", "", &requestUrlBytes, passthru)
-		IProxy.LogHandler(GSLogData{Url: r.URL.String(), User: user, Action: proxyActionTaken})
+		IProxy.LogHandler(GSLogData{Url: r.URL.String(), User: user, Action: proxyActionTaken, ClientIP: client, Layer: "content"})
 		return
 	}
 
@@ -672,9 +672,9 @@ func CheckProxyRules(host string, user string, clientIP string) (bool, interface
 }
 
 // LogProxyAction logs a proxy action with the given URL, user, and action
-func LogProxyAction(url string, user string, action ProxyAction) {
+func LogProxyAction(url string, user string, action ProxyAction, clientIP string, layer string) {
 	if IProxy != nil && IProxy.LogHandler != nil {
-		IProxy.LogHandler(GSLogData{Url: url, User: user, Action: action})
+		IProxy.LogHandler(GSLogData{Url: url, User: user, Action: action, ClientIP: clientIP, Layer: layer})
 	}
 }
 

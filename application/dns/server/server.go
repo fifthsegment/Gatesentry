@@ -443,6 +443,19 @@ func RemoveBlockedDomainForTest(domain string) {
 	delete(blockedDomains, strings.ToLower(domain))
 }
 
+// dnsDecision builds a structured DNS filtering decision for logging.
+// It stamps the time, attaches identity and policy revision, and fills the
+// adapter-native ResponseType so legacy log/stat viewers keep working.
+func dnsDecision(action gatesentryPolicy.DecisionAction, domain, clientIP, responseLabel, matchedRule, reason string, identity gatesentryPolicy.Identity, revision int) gatesentryPolicy.Decision {
+	d := gatesentryPolicy.NewDecision(action, gatesentryPolicy.LayerDNS, domain).
+		WithIdentity(identity).WithPolicyRevision(revision)
+	d.ClientIP = clientIP
+	d.ResponseType = responseLabel
+	d.MatchedRule = matchedRule
+	d.Reason = reason
+	return d
+}
+
 func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 	// Check if server is running (atomic read - no lock needed)
 	if !serverRunning.Load() {
@@ -478,6 +491,16 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 		domain := strings.ToLower(q.Name)
 		domain = domain[:len(domain)-1] // Strip trailing dot
 
+		// Resolve identity once for decision provenance across all
+		// enforcement paths below. ResolveIdentityForDNS treats a live
+		// query as evidence that the address is active.
+		var dnsIdentity gatesentryPolicy.Identity
+		var policyRevision int
+		if policyService != nil {
+			dnsIdentity = policyService.ResolveIdentityForDNS(clientIP, "")
+			policyRevision = policyService.Snapshot().Version
+		}
+
 		// --- 1. Device store lookup (supports A, AAAA, PTR) ---
 		// The device store has its own RWMutex — no need to hold the shared mutex.
 		if deviceStore != nil {
@@ -503,7 +526,8 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 						response.Answer = append(response.Answer, rr)
 					}
 				}
-				logger.LogDNS(domain, clientIP, "device")
+				logger.LogDecision(dnsDecision(gatesentryPolicy.ActionDecisionAllow,
+					domain, clientIP, "device", "device store", "local device record", dnsIdentity, policyRevision))
 				w.WriteMsg(response)
 				return
 			}
@@ -522,7 +546,8 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 
 		if isException {
 			log.Println("Domain is exception : ", domain)
-			logger.LogDNS(domain, clientIP, "exception")
+			logger.LogDecision(dnsDecision(gatesentryPolicy.ActionDecisionBypass,
+				domain, clientIP, "exception", "exception", "exception domain", dnsIdentity, policyRevision))
 		} else if isInternal {
 			log.Println("Domain is internal : ", domain, " - ", internalIP)
 			response := new(dns.Msg)
@@ -531,7 +556,8 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 				Hdr: dns.RR_Header{Name: q.Name, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 60},
 				A:   net.ParseIP(internalIP),
 			})
-			logger.LogDNS(domain, clientIP, "internal")
+			logger.LogDecision(dnsDecision(gatesentryPolicy.ActionDecisionAllow,
+				domain, clientIP, "internal", "internal record", "internal record", dnsIdentity, policyRevision))
 			w.WriteMsg(response)
 			return
 		}
@@ -544,12 +570,14 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 		// because DNS cannot evaluate them.
 		policyDecision := gatesentryPolicy.DNSDecision{}
 		if policyService != nil {
-			identity := policyService.ResolveIdentityForDNS(clientIP, "")
-			policyDecision = policyService.EvaluateDNS(identity, domain)
+			policyDecision = policyService.EvaluateDNS(dnsIdentity, domain)
 			if policyDecision.Action == gatesentryPolicy.ActionBlock {
 				log.Printf("[DNS] Domain blocked by policy group %s: %s (conditions not enforceable in DNS: %v)",
 					policyDecision.GroupID, domain, policyDecision.InapplicableConditions)
-				logger.LogDNS(domain, clientIP, "blocked")
+				logger.LogDecision(dnsDecision(gatesentryPolicy.ActionDecisionBlock,
+					domain, clientIP, "blocked",
+					"policy group "+policyDecision.GroupID+": "+policyDecision.MatchedDomain,
+					"group policy block", dnsIdentity, policyRevision))
 				response := new(dns.Msg)
 				response.SetRcode(r, dns.RcodeNameError)
 				response.Answer = append(response.Answer, &dns.CNAME{
@@ -561,7 +589,10 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 			}
 			if policyDecision.Action == gatesentryPolicy.ActionAllow && isBlocked {
 				log.Printf("[DNS] Domain allowed by policy group %s: %s", policyDecision.GroupID, domain)
-				logger.LogDNS(domain, clientIP, "exception")
+				logger.LogDecision(dnsDecision(gatesentryPolicy.ActionDecisionBypass,
+					domain, clientIP, "exception",
+					"policy group "+policyDecision.GroupID+": "+policyDecision.MatchedDomain,
+					"group policy allow exempts blocklist", dnsIdentity, policyRevision))
 			}
 		}
 		if policyDecision.Action != gatesentryPolicy.ActionAllow && isBlocked {
@@ -572,11 +603,13 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 				Hdr:    dns.RR_Header{Name: domain + ".", Rrtype: dns.TypeCNAME, Class: dns.ClassINET, Ttl: 3600},
 				Target: "blocked.local.",
 			})
-			logger.LogDNS(domain, clientIP, "blocked")
+			logger.LogDecision(dnsDecision(gatesentryPolicy.ActionDecisionBlock,
+				domain, clientIP, "blocked", "blocklist", "global blocklist", dnsIdentity, policyRevision))
 			w.WriteMsg(response)
 			return
 		}
-		logger.LogDNS(domain, clientIP, "forward")
+		logger.LogDecision(dnsDecision(gatesentryPolicy.ActionDecisionAllow,
+			domain, clientIP, "forward", "", "no matching rule", dnsIdentity, policyRevision))
 
 		// --- 3. Forward to external resolver ---
 		// Forward request WITHOUT holding the mutex - this is the key fix!

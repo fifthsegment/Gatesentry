@@ -1,5 +1,26 @@
 # CHANGELOG
 
+## v1.25.0 (18 September 2026)
+
+- Structured filtering decisions: one canonical Decision type emitted at every enforcement point (DNS, explicit proxy, transparent proxy, content inspection)
+- Decision carries action (allow/block/inspect/bypass/error/unknown), matched rule, reason, layer, domain, URL, client IP, device/group context, source, policy revision, and timestamp
+- Backward-compatible logging: legacy LogDNS/LogProxy still work; LogDecision writes adapter-native response types into legacy fields so stats and device-activity views are unchanged
+- Editable policy starter templates: child, teen, adult/default, guest, work, IoT, and unrestricted profiles with honest protections and limitations preview
+- Atomic per-group create, update, and delete operations; safe template reapplication returns conflict instead of overwriting edits
+- Assignment cleanup when policy groups are deleted
+- Rules page template cards and editable group management UI
+
+## v1.24.0 (17 September 2026)
+
+- Explicit policy groups with consistent DNS and proxy evaluation
+- Per-device policy assignment, effective rules view, and activity history endpoints
+- Device detail UI with effective rules, coverage confidence, caveats, identity, shared/stale address flags, and decision history
+- Device-scoped activity history with client IPs recorded in DNS logs
+- Commit identity protection: AGENTS.md rules, pre-commit hook, CI workflow, and make verify integration
+- Reproducible release builds with multi-platform cross-compilation
+- Docker quickstart smoke test as gated PR check
+
+
 ## v1.23.0 (17 May 2026)
 
 - WebSocket proxy support: ws:// connections now properly proxied via TCP tunnel

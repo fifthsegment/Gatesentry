@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	gatesentryPolicy "bitbucket.org/abdullah_irfan/gatesentryf/policy"
 	gatesentry2utils "bitbucket.org/abdullah_irfan/gatesentryf/utils"
 	"github.com/tidwall/buntdb"
 )
@@ -27,7 +28,16 @@ type LogEntry struct {
 	Type              string `json:"type"`
 	DNSResponseType   string `json:"dnsResponseType"`
 	ProxyResponseType string `json:"proxyResponseType"`
-	// Add more fields if needed
+	// Structured decision provenance (PER-36). Optional; legacy entries
+	// logged via LogDNS/LogProxy unmarshal with zero values.
+	Layer          string `json:"layer,omitempty"`
+	Action         string `json:"action,omitempty"`
+	MatchedRule    string `json:"matched_rule,omitempty"`
+	Reason         string `json:"reason,omitempty"`
+	GroupID        string `json:"group_id,omitempty"`
+	DeviceID       string `json:"device_id,omitempty"`
+	Source         string `json:"source,omitempty"`
+	PolicyRevision int    `json:"policy_revision,omitempty"`
 }
 
 func (L *Log) Commit(tx *buntdb.Tx) {
@@ -123,6 +133,63 @@ func (L *Log) LogProxy(url string, user string, actionType string) {
 		_ = err
 	}()
 
+}
+
+// LogDecision records a structured filtering decision. It is the canonical
+// PER-36 path: every DNS, proxy, and content enforcement point builds a
+// policy.Decision and hands it here. The decision is flattened into a
+// LogEntry so the existing log, stats, and device-activity queries keep
+// reading it, and stored asynchronously like LogDNS/LogProxy.
+//
+// Legacy compatibility: ResponseType is written to DNSResponseType (DNS) or
+// ProxyResponseType (proxy/content) so viewers that filter on the native
+// outcome label are unaffected. New viewers read Action/Layer/MatchedRule.
+func (L *Log) LogDecision(d gatesentryPolicy.Decision) {
+	if L == nil || L.Database == nil {
+		return
+	}
+	url := d.URL
+	if url == "" {
+		url = d.Domain
+	}
+	entry := LogEntry{
+		Time:           d.Timestamp.Unix(),
+		IP:             d.ClientIP,
+		URL:            url,
+		Layer:          string(d.Layer),
+		Action:         string(d.Action),
+		MatchedRule:    d.MatchedRule,
+		Reason:         d.Reason,
+		GroupID:        d.GroupID,
+		DeviceID:       d.DeviceID,
+		Source:         string(d.Source),
+		PolicyRevision: d.PolicyRevision,
+	}
+	switch d.Layer {
+	case gatesentryPolicy.LayerDNS:
+		entry.Type = "dns"
+		entry.DNSResponseType = d.ResponseType
+	case gatesentryPolicy.LayerExplicitProxy, gatesentryPolicy.LayerTransparentProxy, gatesentryPolicy.LayerContent:
+		entry.Type = "proxy"
+		entry.ProxyResponseType = d.ResponseType
+	default:
+		entry.Type = "proxy"
+		entry.ProxyResponseType = d.ResponseType
+	}
+	go func() {
+		logJson, err := json.Marshal(entry)
+		if err != nil {
+			log.Println("Gatesentry logger LogDecision marshal error: " + err.Error())
+			return
+		}
+		key := gatesentry2utils.RandomString(25) + gatesentry2utils.Int64toString(entry.Time)
+		err = L.Database.Update(func(tx *buntdb.Tx) error {
+			_, _, err := tx.Set(key, string(logJson), &buntdb.SetOptions{Expires: true, TTL: Log_Entry_Expires})
+			L.Commit(tx)
+			return err
+		})
+		_ = err
+	}()
 }
 
 func (L *Log) GetLog() string {
