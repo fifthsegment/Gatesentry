@@ -175,6 +175,8 @@ func RegisterEndpointsStartServer(
 	internalSettings *gatesentry2storage.MapStore,
 	ruleManager gatesentryWebserverEndpoints.RuleManagerInterface,
 	basePath string,
+	devices *gatesentry2storage.MapStore,
+	dataDir string,
 ) error {
 	auth, err := NewAuthManager(internalSettings, os.Getenv("GATESENTRY_BOOTSTRAP_FILE"))
 	if err != nil {
@@ -629,6 +631,34 @@ func RegisterEndpointsStartServer(
 	})
 	log.Println("Pause and schedule API endpoints registered")
 	log.Println("Policy API endpoints registered")
+
+	// Backup and restore endpoints (PER-41).
+	log.Println("Registering backup and restore API endpoints...")
+	internalServer.Get("/api/backup", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiBackupGET(w, r, gatesentryWebserverEndpoints.BackupDeps{
+			Settings: internalSettings,
+			Devices:  devices,
+			BaseDir:  dataDir,
+			Reload: func() error {
+				runtime.Reload()
+				return nil
+			},
+			Version: runtime.GetApplicationVersion,
+		})
+	})
+	internalServer.Post("/api/restore", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiRestorePOST(w, r, gatesentryWebserverEndpoints.BackupDeps{
+			Settings: internalSettings,
+			Devices:  devices,
+			BaseDir:  dataDir,
+			Reload: func() error {
+				runtime.Reload()
+				return nil
+			},
+			Version: runtime.GetApplicationVersion,
+		})
+	})
+	log.Println("Backup and restore API endpoints registered")
 
 	// Register MIME types for static file serving
 	mime.AddExtensionType(".css", "text/css")
