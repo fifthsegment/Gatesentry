@@ -7,14 +7,6 @@ HTTP/HTTPS proxy with SSL interception (MITM), content filtering, and a built-in
 
 [Security policy and vulnerability reporting](SECURITY.md) · [Privacy, AI data handling, backups, and filtering limits](SECURITY.md#local-data-and-privacy)
 
-## Reproducible build
-
-GateSentry builds with Go 1.24.10, Node.js 24.x, and Yarn 4.10.3. Enable the exact Yarn version declared in `ui/package.json` with `corepack enable && corepack prepare yarn@4.10.3 --activate`, then run `make verify`. This fast path performs an immutable dependency install, UI checks and tests, a fresh dashboard build and embedded-asset sync, embedded dashboard and block-page tests, application and proxy tests, and a Go build. Any failed stage stops the build.
-
-Use `make verify-go` when the frontend assets have already been freshly synced and only Go checks are needed. `make docker-smoke` separately builds the checked-out revision into an image and exercises the dashboard and explicit proxy; it requires Docker and network access. The slower privileged integration suite remains available through `make test`.
-
-`make release-artifacts` writes cross-platform binaries, checksums, and the exact source commit to `dist/`. Ordinary branch builds only produce reviewable artifacts. Release publication requires an existing tag that resolves to the checked-out commit, and Docker publication uses the same tagged source rather than downloading another release.
-
 ## What it does
 
 Runs as a local proxy on your machine or network. Clients route traffic through it and Gatesentry can:
@@ -202,3 +194,12 @@ ip route add local 0.0.0.0/0 dev lo table 100
 To run it:
 
 `./run.sh`
+
+## Reproducible build
+
+GateSentry builds with Go 1.24.10, Node.js 24.x, and Yarn 4.10.3. Enable the exact Yarn version declared in `ui/package.json` with `corepack enable && corepack prepare yarn@4.10.3 --activate`, then run `make verify`. This fast path performs an immutable dependency install, UI checks and tests, a fresh dashboard build and embedded-asset sync, embedded dashboard and block-page tests, application and proxy tests, and a Go build. Any failed stage stops the build.
+
+Use `make verify-go` when the frontend assets have already been freshly synced and only Go checks are needed. `make docker-smoke` separately builds the checked-out revision into an image and exercises the dashboard and explicit proxy; it requires Docker and network access. The slower privileged integration suite remains available through `make test`.
+
+`make release-artifacts` writes cross-platform binaries, checksums, and the exact source commit to `dist/`. Ordinary branch builds only produce reviewable artifacts. Release publication requires an existing tag that resolves to the checked-out commit, and Docker publication uses the same tagged source rather than downloading another release.
+
