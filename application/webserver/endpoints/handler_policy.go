@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 
 	gatesentryDnsServer "bitbucket.org/abdullah_irfan/gatesentryf/dns/server"
 	gatesentryPolicy "bitbucket.org/abdullah_irfan/gatesentryf/policy"
@@ -279,32 +280,28 @@ func GSApiPolicyAssignmentsReplace(w http.ResponseWriter, r *http.Request) {
 }
 
 // GSApiPolicyPreview reports the decision a specific request context would
-// receive, including the DNS-inapplicable conditions so callers cannot
-// mistake DNS enforcement for URL/MIME/inspection enforcement.
+// receive against the active policy and, when a proposed revision is supplied,
+// against that revision, without persisting anything or making external
+// classification requests. The response carries the matched-rules precedence
+// trail, the conditions the selected layer cannot enforce (so DNS enforcement
+// is not mistaken for URL/MIME/inspection enforcement), and whether the
+// proposed revision would change the decision for this request.
 // POST /api/policy/preview
 func GSApiPolicyPreview(w http.ResponseWriter, r *http.Request) {
 	svc := policyServiceOrError(w)
 	if svc == nil {
 		return
 	}
-	var body struct {
-		Domain   string `json:"domain"`
-		ClientIP string `json:"client_ip"`
-		User     string `json:"user"`
-	}
+	var body gatesentryPolicy.PreviewRequest
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, `{"error":"Invalid JSON body"}`, http.StatusBadRequest)
 		return
 	}
-	identity := svc.ResolveIdentity(body.ClientIP, body.User)
-	decision := svc.EvaluateDNS(identity, body.Domain)
+	if strings.TrimSpace(body.Domain) == "" {
+		http.Error(w, `{"error":"domain is required"}`, http.StatusBadRequest)
+		return
+	}
+	result := svc.Preview(body)
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"identity":                identity,
-		"action":                  decision.Action,
-		"group_id":                decision.GroupID,
-		"matched_domain":          decision.MatchedDomain,
-		"inapplicable_conditions": decision.InapplicableConditions,
-		"reason":                  decision.Reason,
-	})
+	json.NewEncoder(w).Encode(result)
 }

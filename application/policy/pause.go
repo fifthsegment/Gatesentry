@@ -324,8 +324,10 @@ func (s *Service) PruneExpiredPauses() (int, error) {
 // the given identity. Precedence is device > group > installation (most
 // specific first), mirroring exceptions. A pause suppresses the block action
 // only; it does not override allow actions.
-func (s *Service) EvaluatePause(identity Identity) (Pause, bool) {
-	snap := s.PauseSnapshot()
+// evaluatePauseIn is the pure, snapshot-parametrized core of EvaluatePause.
+// The live path and preview both call it so pause precedence cannot diverge
+// between enforcement and preview.
+func evaluatePauseIn(identity Identity, snap PauseSnapshot) (Pause, bool) {
 	// First pass: device-scoped (most specific)
 	for _, p := range snap.Pauses {
 		if p.Scope == PauseScopeDevice && p.DeviceID == identity.DeviceID {
@@ -345,6 +347,10 @@ func (s *Service) EvaluatePause(identity Identity) (Pause, bool) {
 		}
 	}
 	return Pause{}, false
+}
+
+func (s *Service) EvaluatePause(identity Identity) (Pause, bool) {
+	return evaluatePauseIn(identity, s.PauseSnapshot())
 }
 
 // updatePauses runs the transform inside one atomic storage transaction on

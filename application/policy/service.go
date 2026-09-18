@@ -106,11 +106,18 @@ func (s *Service) SetClockFunc(f func() time.Time) {
 // scheduleActive reports whether a group's schedule is active at the
 // service's current time. A group with no schedule (nil) is always active,
 // preserving pre-PER-39 behavior.
-func (s *Service) scheduleActive(group PolicyGroup) bool {
+// scheduleActiveAt reports whether a group's schedule is active at an
+// arbitrary instant. It is the pure core the live path and preview share, so
+// schedule decisions cannot drift between enforcement and preview.
+func scheduleActiveAt(group PolicyGroup, now time.Time) bool {
 	if group.Schedule == nil {
 		return true
 	}
-	return group.Schedule.IsActive(s.now())
+	return group.Schedule.IsActive(now)
+}
+
+func (s *Service) scheduleActive(group PolicyGroup) bool {
+	return scheduleActiveAt(group, s.now())
 }
 
 // ErrNoPolicy is returned when no policy document exists. It is distinct
@@ -422,8 +429,12 @@ func (s *Service) ResolveIdentityForDNS(clientIP, authUser string) Identity {
 	return s.resolveIdentity(clientIP, authUser, true)
 }
 
-func (s *Service) resolveIdentity(clientIP, authUser string, requestConfirmsAddress bool) Identity {
-	snap := s.Snapshot()
+// resolveBaseIdentity resolves device/user/source from the live device store
+// without binding a policy group, so the group can be derived per snapshot
+// (proposed vs active) by preview. requestConfirmsAddress selects the DNS
+// path, where a live query is evidence the address is active and a stale
+// observation is still attributed rather than downgraded.
+func (s *Service) resolveBaseIdentity(clientIP, authUser string, requestConfirmsAddress bool) Identity {
 	// The unauthenticated explicit proxy passes the client address as the
 	// user fallback. An address is a lookup key, never an authenticated
 	// identity, so it must not take the authenticated-user path.
@@ -434,7 +445,6 @@ func (s *Service) resolveIdentity(clientIP, authUser string, requestConfirmsAddr
 	switch {
 	case authUser != "":
 		identity.Source = SourceAuthUser
-		identity.GroupID = s.groupForUser(snap, authUser)
 		identity.Explanation = "authenticated proxy user"
 	case clientIP == "" || s.devices == nil:
 		identity.Source = SourceUnknown
@@ -444,31 +454,32 @@ func (s *Service) resolveIdentity(clientIP, authUser string, requestConfirmsAddr
 		switch {
 		case ambiguous:
 			identity.Source = SourceUnknownNAT
-			identity.GroupID = ""
 			identity.Explanation = "multiple devices share this address; treating as unknown"
 		case stale:
 			if requestConfirmsAddress {
 				identity.DeviceID = deviceID
 				identity.Source = SourceDevice
-				identity.GroupID = snap.Assignments[deviceID]
 				identity.Explanation = "device attributed from observed address; live query confirms the address is active"
 			} else {
 				identity.DeviceID = deviceID
 				identity.Source = SourceStaleDevice
-				identity.GroupID = ""
 				identity.Explanation = "device observation is stale; using default policy"
 			}
 		case deviceID == "":
 			identity.Source = SourceUnknown
-			identity.GroupID = ""
 			identity.Explanation = "no device observed for this address"
 		default:
 			identity.DeviceID = deviceID
 			identity.Source = SourceDevice
-			identity.GroupID = snap.Assignments[deviceID]
 			identity.Explanation = "device resolved from observed address"
 		}
 	}
+	return identity
+}
+
+func (s *Service) resolveIdentity(clientIP, authUser string, requestConfirmsAddress bool) Identity {
+	identity := s.resolveBaseIdentity(clientIP, authUser, requestConfirmsAddress)
+	identity.GroupID = groupIDForSnapshot(identity, s.Snapshot())
 	return identity
 }
 
@@ -488,7 +499,10 @@ func isAddressLike(user string) bool {
 	return false
 }
 
-func (s *Service) groupForUser(snap PolicySnapshot, user string) string {
+// groupForUserIn resolves the winning group for an authenticated user from a
+// snapshot, choosing the lowest priority (then lowest ID for determinism). It
+// is the pure core shared by live identity resolution and preview.
+func groupForUserIn(snap PolicySnapshot, user string) string {
 	var best string
 	bestPriority := int(^uint(0) >> 1)
 	for _, group := range snap.Groups {
@@ -505,6 +519,26 @@ func (s *Service) groupForUser(snap PolicySnapshot, user string) string {
 	return best
 }
 
+func (s *Service) groupForUser(snap PolicySnapshot, user string) string {
+	return groupForUserIn(snap, user)
+}
+
+// groupIDForSnapshot derives the policy group for a base identity (DeviceID,
+// AuthUser, Source already resolved) from a given snapshot. Only authenticated
+// users and confirmed devices resolve to a group; unknown, NAT-ambiguous, and
+// stale-proxy observations resolve to none. Used per-snapshot so a proposed
+// assignment is honored without re-resolving device identity.
+func groupIDForSnapshot(identity Identity, snap PolicySnapshot) string {
+	switch identity.Source {
+	case SourceAuthUser:
+		return groupForUserIn(snap, identity.AuthUser)
+	case SourceDevice:
+		return snap.Assignments[identity.DeviceID]
+	default:
+		return ""
+	}
+}
+
 // EvaluateDNS applies group policy and exceptions to a DNS query. It only
 // reports DNS-applicable outcomes; URL, MIME, and TLS-inspection conditions
 // are surfaced as explicitly inapplicable rather than being silently treated
@@ -514,21 +548,23 @@ func (s *Service) groupForUser(snap PolicySnapshot, user string) string {
 // that matches the domain exempts it from the group block. This lets an
 // administrator recover a false positive for one device without creating a
 // global bypass.
-func (s *Service) EvaluateDNS(identity Identity, domain string) DNSDecision {
+// evaluateDNSAt is the pure, snapshot-parametrized core of EvaluateDNS. The
+// live path and preview both call it so DNS enforcement and preview cannot
+// diverge: there is one evaluator, not a parallel one.
+func (s *Service) evaluateDNSAt(identity Identity, domain string, snap PolicySnapshot, exc ExceptionSnapshot, pa PauseSnapshot, now time.Time) DNSDecision {
 	decision := DNSDecision{Action: ActionNone}
 
 	// Check scoped exceptions first. An active exception that matches the
 	// domain reports an allow so the caller can bypass the global blocklist,
 	// regardless of group policy.
-	if exc, ok := s.EvaluateException(identity, domain); ok {
+	if e, ok := evaluateExceptionIn(identity, domain, exc); ok {
 		decision.Action = ActionAllow
-		decision.Reason = "scoped exception: " + string(exc.Scope)
+		decision.Reason = "scoped exception: " + string(e.Scope)
 		// GroupID left empty for exception bypasses; Reason carries the scope
 		decision.InapplicableConditions = dnsInapplicableConditions()
 		return decision
 	}
 
-	snap := s.Snapshot()
 	group, ok := snap.Groups[identity.GroupID]
 	if !ok {
 		decision.InapplicableConditions = dnsInapplicableConditions()
@@ -539,7 +575,7 @@ func (s *Service) EvaluateDNS(identity Identity, domain string) DNSDecision {
 	// expresses no opinion: the block action does not apply and enforcement
 	// falls through to the global blocklist. DNS cache and established
 	// connections may retain prior decisions; see schedule documentation.
-	if !s.scheduleActive(group) {
+	if !scheduleActiveAt(group, now) {
 		decision.Reason = "group schedule inactive"
 		decision.InapplicableConditions = dnsInapplicableConditions()
 		return decision
@@ -548,9 +584,9 @@ func (s *Service) EvaluateDNS(identity Identity, domain string) DNSDecision {
 	// (device > group > installation). Pauses do not override allow actions:
 	// an allow group stays allow. DNS caches and established connections
 	// may retain prior decisions until they expire.
-	if pause, ok := s.EvaluatePause(identity); ok && group.Action == ActionBlock {
+	if p, ok := evaluatePauseIn(identity, pa); ok && group.Action == ActionBlock {
 		decision.Action = ActionNone
-		decision.Reason = "paused: " + string(pause.Scope)
+		decision.Reason = "paused: " + string(p.Scope)
 		decision.InapplicableConditions = dnsInapplicableConditions()
 		return decision
 	}
@@ -564,6 +600,10 @@ func (s *Service) EvaluateDNS(identity Identity, domain string) DNSDecision {
 	}
 	decision.InapplicableConditions = dnsInapplicableConditions()
 	return decision
+}
+
+func (s *Service) EvaluateDNS(identity Identity, domain string) DNSDecision {
+	return s.evaluateDNSAt(identity, domain, s.Snapshot(), s.ExceptionSnapshot(), s.PauseSnapshot(), s.now())
 }
 
 func dnsInapplicableConditions() []string {
@@ -581,23 +621,24 @@ func DNSInapplicableConditions() []string {
 // A scoped exception (device > group > installation) overrides a group
 // block with an allow, so a false positive can be recovered for one entity
 // without a global bypass.
-func (s *Service) EvaluateDomain(identity Identity, domain string) PolicyAction {
-	if _, ok := s.EvaluateException(identity, domain); ok {
+// evaluateDomainAt is the pure, snapshot-parametrized core of EvaluateDomain,
+// sharing the evaluator with preview so the two cannot diverge.
+func (s *Service) evaluateDomainAt(identity Identity, domain string, snap PolicySnapshot, exc ExceptionSnapshot, pa PauseSnapshot, now time.Time) PolicyAction {
+	if _, ok := evaluateExceptionIn(identity, domain, exc); ok {
 		return ActionAllow
 	}
-	snap := s.Snapshot()
 	group, ok := snap.Groups[identity.GroupID]
 	if !ok {
 		return ActionNone
 	}
 	// A schedule that is not currently active means the group expresses no
 	// opinion about this domain right now. Enforcement falls through.
-	if !s.scheduleActive(group) {
+	if !scheduleActiveAt(group, now) {
 		return ActionNone
 	}
 	// An active pause suppresses the group block action for the paused scope.
 	// Allow actions are not affected.
-	if _, ok := s.EvaluatePause(identity); ok && group.Action == ActionBlock {
+	if _, ok := evaluatePauseIn(identity, pa); ok && group.Action == ActionBlock {
 		return ActionNone
 	}
 	for _, pattern := range group.Domains {
@@ -606,6 +647,10 @@ func (s *Service) EvaluateDomain(identity Identity, domain string) PolicyAction 
 		}
 	}
 	return ActionNone
+}
+
+func (s *Service) EvaluateDomain(identity Identity, domain string) PolicyAction {
+	return s.evaluateDomainAt(identity, domain, s.Snapshot(), s.ExceptionSnapshot(), s.PauseSnapshot(), s.now())
 }
 
 // matchDomain mirrors the rules engine wildcard semantics: exact match or
