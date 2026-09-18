@@ -7,6 +7,7 @@
     Grid,
     Loading,
     Row,
+    Tag,
   } from "carbon-components-svelte";
   import "@carbon/charts/styles.css";
   import { AreaChart } from "@carbon/charts";
@@ -27,7 +28,17 @@
       };
     };
   };
-  let interval = null;
+  type DecisionSummary = {
+    window: string;
+    total: number;
+    by_action: Record<string, number>;
+    by_layer: Record<string, number>;
+    top_blocked_domains: { key: string; count: number }[];
+    top_reasons: { key: string; count: number }[];
+    affected_devices: { ip: string; device: string; count: number }[];
+    inspection_failures: number;
+  };
+  let interval: ReturnType<typeof setInterval> | null = null;
   const options = {
     title: "Requests served",
     axes: {
@@ -47,10 +58,11 @@
     },
   };
 
-  let chart;
-  let chartHolder;
-  let data = [];
+  let chart: any;
+  let chartHolder: HTMLElement;
+  let data: any[] = [];
   let responseData: ResponseData = null;
+  let summary: DecisionSummary | null = null;
 
   const updateChartData = async () => {
     try {
@@ -63,25 +75,19 @@
               ...Object.entries(json["blocked"]).map(([key, item]) => {
                 return {
                   group: "Blocked Requests",
-                  date: new Date(key).toISOString(), // You can adjust this as needed
+                  date: new Date(key).toISOString(),
                   value: item.total,
                 };
               }),
               ...Object.entries(json["all"]).map(([key, item]) => {
                 return {
                   group: "All Requests",
-                  date: new Date(key).toISOString(), // You can adjust this as needed
+                  date: new Date(key).toISOString(),
                   value: item.total,
                 };
               }),
             ]
           : [];
-      // Process the JSON data and update the chart
-      // const data = json.items.map((key, value) => ({
-      //     group: "URL Counts",
-      //     date: new Date(key).toISOString(), // You can adjust this as needed
-      //     value: value.count,
-      // }));
       if (!chart) {
         // @ts-ignore
         chart = new AreaChart(chartHolder, {
@@ -99,22 +105,29 @@
     }
   };
 
+  const loadSummary = async () => {
+    try {
+      summary = await $store.api.doCall("/decisions/summary");
+    } catch (error) {
+      console.error("Error fetching decision summary:", error);
+    }
+  };
+
   onMount(() => {
     chartHolder = document.getElementById("statschart");
     if (!chartHolder) throw new Error("Could not find chart holder element");
     // @ts-ignore
-
-    // Call updateChartData every 30 seconds
-    interval = setInterval(updateChartData, 5000);
-
-    // Initial data fetch
+    interval = setInterval(() => {
+      updateChartData();
+      loadSummary();
+    }, 5000);
     updateChartData();
+    loadSummary();
   });
 
-  // on unmount, destroy the chart
   onDestroy(() => {
     if (interval) clearInterval(interval);
-    chart.destroy();
+    if (chart) chart.destroy();
   });
 </script>
 
@@ -203,6 +216,66 @@
   <Row>
     <Column>
       <Loading />
+    </Column>
+  </Row>
+{/if}
+
+{#if summary}
+  <Row style="margin-top: 30px;">
+    <Column>
+      <h3>Decision summary — last {summary.window}</h3>
+      <div style="margin: 15px 0;">
+        <Tag>Decisions: {summary.total}</Tag>
+        {#if summary.inspection_failures > 0}
+          <Tag type="red">Inspection failures: {summary.inspection_failures}</Tag>
+        {/if}
+      </div>
+      <div style="margin-bottom: 10px;">
+        <Tag type="high-contrast">
+          DNS blocks return NXDOMAIN (no intercepted block page is shown to
+          the user). HTTPS block pages require MITM inspection to be enabled.
+        </Tag>
+      </div>
+    </Column>
+  </Row>
+  <Row>
+    <Column>
+      <h4>Frequently blocked domains</h4>
+      {#if summary.top_blocked_domains && summary.top_blocked_domains.length > 0}
+        <DataTable
+          headers={[
+            { key: "key", value: "Domain" },
+            { key: "count", value: "Blocks" },
+          ]}
+          rows={summary.top_blocked_domains.map((d, i) => ({
+            id: d.key + i,
+            key: d.key,
+            count: d.count,
+          }))}
+        />
+      {:else}
+        <p><i>No blocked domains in this window.</i></p>
+      {/if}
+    </Column>
+    <Column>
+      <h4>Most affected devices</h4>
+      {#if summary.affected_devices && summary.affected_devices.length > 0}
+        <DataTable
+          headers={[
+            { key: "ip", value: "IP address" },
+            { key: "device", value: "Device" },
+            { key: "count", value: "Decisions" },
+          ]}
+          rows={summary.affected_devices.map((d, i) => ({
+            id: d.ip + i,
+            ip: d.ip,
+            device: d.device || "—",
+            count: d.count,
+          }))}
+        />
+      {:else}
+        <p><i>No device activity in this window.</i></p>
+      {/if}
     </Column>
   </Row>
 {/if}
