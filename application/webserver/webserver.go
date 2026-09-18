@@ -449,6 +449,14 @@ func RegisterEndpointsStartServer(
 		SendJSON(w, output)
 	})
 
+	internalServer.Get("/api/decisions", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiDecisionsGET(w, r, logger)
+	})
+
+	internalServer.Get("/api/decisions/summary", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiDecisionSummaryGET(w, r, logger)
+	})
+
 	internalServer.Get("/api/toggleServer/{id}", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
 		params := mux.Vars(r)
 		id := params["id"]
