@@ -217,7 +217,7 @@ func (s *Service) loadExceptions() error {
 func (s *Service) ExceptionSnapshot() ExceptionSnapshot {
 	s.exc.mu.RLock()
 	defer s.exc.mu.RUnlock()
-	now := time.Now().UTC()
+	now := s.now()
 	active := make([]Exception, 0, len(s.exc.snapshot.Exceptions))
 	for _, e := range s.exc.snapshot.Exceptions {
 		if e.Active && now.Before(e.ExpiresAt) {
@@ -336,8 +336,10 @@ func (s *Service) PruneExpiredExceptions() (int, error) {
 // identity and domain. It returns the matching exception (if any) and true
 // when the exception allows (bypasses) the domain. Precedence is device >
 // group > installation (most specific first).
-func (s *Service) EvaluateException(identity Identity, domain string) (Exception, bool) {
-	snap := s.ExceptionSnapshot()
+// evaluateExceptionIn is the pure, snapshot-parametrized core of
+// EvaluateException. The live path and preview both call it so exception
+// precedence cannot diverge between enforcement and preview.
+func evaluateExceptionIn(identity Identity, domain string, snap ExceptionSnapshot) (Exception, bool) {
 	// First pass: device-scoped (most specific)
 	for _, e := range snap.Exceptions {
 		if e.Scope == ScopeDevice && e.DeviceID == identity.DeviceID && matchDomain(e.Domain, domain) {
@@ -357,6 +359,10 @@ func (s *Service) EvaluateException(identity Identity, domain string) (Exception
 		}
 	}
 	return Exception{}, false
+}
+
+func (s *Service) EvaluateException(identity Identity, domain string) (Exception, bool) {
+	return evaluateExceptionIn(identity, domain, s.ExceptionSnapshot())
 }
 
 // updateExceptions runs the transform inside one atomic storage transaction

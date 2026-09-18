@@ -122,18 +122,130 @@ func TestPolicyPreviewReportsInapplicableConditions(t *testing.T) {
 		t.Fatalf("preview status = %d, body = %s", previewRecorder.Code, previewRecorder.Body.String())
 	}
 	var previewBody struct {
-		Identity               gatesentryPolicy.Identity
-		Action                 gatesentryPolicy.PolicyAction
-		InapplicableConditions []string `json:"inapplicable_conditions"`
+		Identity gatesentryPolicy.Identity
+		Active   struct {
+			Action                 gatesentryPolicy.PolicyAction
+			GroupID                string   `json:"group_id"`
+			MatchedDomain          string   `json:"matched_domain"`
+			InapplicableConditions []string `json:"inapplicable_conditions"`
+			Reason                 string
+			Stages                 []struct {
+				Name    string
+				Applied bool
+				Action  gatesentryPolicy.PolicyAction
+				Detail  string
+			}
+		}
+		Proposed struct {
+			Action                 gatesentryPolicy.PolicyAction
+			InapplicableConditions []string `json:"inapplicable_conditions"`
+		}
+		Changed bool
 	}
 	if err := json.Unmarshal(previewRecorder.Body.Bytes(), &previewBody); err != nil {
 		t.Fatal(err)
 	}
-	if previewBody.Action != gatesentryPolicy.ActionBlock {
-		t.Fatalf("preview action = %s, want block", previewBody.Action)
+	if previewBody.Active.Action != gatesentryPolicy.ActionBlock {
+		t.Fatalf("preview active action = %s, want block", previewBody.Active.Action)
 	}
-	if len(previewBody.InapplicableConditions) != 3 {
-		t.Fatalf("inapplicable conditions = %v, want url_regex/content_type/mitm", previewBody.InapplicableConditions)
+	if previewBody.Active.GroupID != "kids" {
+		t.Fatalf("preview group = %s, want kids", previewBody.Active.GroupID)
+	}
+	if previewBody.Active.MatchedDomain != "*.games.example" {
+		t.Fatalf("preview matched domain = %s, want *.games.example", previewBody.Active.MatchedDomain)
+	}
+	if len(previewBody.Active.InapplicableConditions) != 3 {
+		t.Fatalf("inapplicable conditions = %v, want url_regex/content_type/mitm", previewBody.Active.InapplicableConditions)
+	}
+	// No proposed policy => proposed equals active and nothing changed.
+	if previewBody.Proposed.Action != gatesentryPolicy.ActionBlock {
+		t.Fatalf("preview proposed action = %s, want block", previewBody.Proposed.Action)
+	}
+	if previewBody.Changed {
+		t.Fatalf("preview changed = true, want false when no proposed policy is supplied")
+	}
+	if len(previewBody.Active.Stages) == 0 {
+		t.Fatalf("preview stages empty; expected a precedence trail")
+	}
+}
+
+// TestPolicyPreviewProposedComparison verifies the handler compares a proposed
+// policy revision against the active one and reports the change without
+// persisting anything.
+func TestPolicyPreviewProposedComparison(t *testing.T) {
+	_, cleanup := policyTestService(t)
+	defer cleanup()
+
+	groups := httptest.NewRequest(http.MethodPut, "/api/policy/groups", bytes.NewBufferString(
+		`{"groups":[{"id":"kids","action":"block","domains":["*.games.example"]}]}`))
+	groupsRecorder := httptest.NewRecorder()
+	GSApiPolicyGroupsReplace(groupsRecorder, groups)
+	if groupsRecorder.Code != http.StatusOK {
+		t.Fatalf("groups status = %d", groupsRecorder.Code)
+	}
+	assignments := httptest.NewRequest(http.MethodPut, "/api/policy/assignments", bytes.NewBufferString(
+		`{"assignments":[{"device_id":"device-1","group_id":"kids"}]}`))
+	assignmentsRecorder := httptest.NewRecorder()
+	GSApiPolicyAssignmentsReplace(assignmentsRecorder, assignments)
+	if assignmentsRecorder.Code != http.StatusOK {
+		t.Fatalf("assignments status = %d", assignmentsRecorder.Code)
+	}
+
+	body := `{"client_ip":"192.0.2.10","domain":"chess.games.example","proposed":{"groups":[{"id":"unrestricted","action":"allow","domains":["*.games.example"]}],"assignments":[{"device_id":"device-1","group_id":"unrestricted"}]}}`
+	preview := httptest.NewRequest(http.MethodPost, "/api/policy/preview", bytes.NewBufferString(body))
+	previewRecorder := httptest.NewRecorder()
+	GSApiPolicyPreview(previewRecorder, preview)
+	if previewRecorder.Code != http.StatusOK {
+		t.Fatalf("preview status = %d, body = %s", previewRecorder.Code, previewRecorder.Body.String())
+	}
+	var previewBody struct {
+		Active struct {
+			Action  gatesentryPolicy.PolicyAction
+			GroupID string `json:"group_id"`
+		}
+		Proposed struct {
+			Action  gatesentryPolicy.PolicyAction
+			GroupID string `json:"group_id"`
+		}
+		Changed bool
+	}
+	if err := json.Unmarshal(previewRecorder.Body.Bytes(), &previewBody); err != nil {
+		t.Fatal(err)
+	}
+	if previewBody.Active.Action != gatesentryPolicy.ActionBlock {
+		t.Fatalf("active action = %s, want block", previewBody.Active.Action)
+	}
+	if previewBody.Proposed.Action != gatesentryPolicy.ActionAllow {
+		t.Fatalf("proposed action = %s, want allow", previewBody.Proposed.Action)
+	}
+	if previewBody.Proposed.GroupID != "unrestricted" {
+		t.Fatalf("proposed group = %s, want unrestricted", previewBody.Proposed.GroupID)
+	}
+	if !previewBody.Changed {
+		t.Fatalf("changed = false, want true when proposed alters the decision")
+	}
+
+	// Active policy must be untouched by the preview.
+	get := httptest.NewRequest(http.MethodGet, "/api/policy/groups", nil)
+	getRecorder := httptest.NewRecorder()
+	GSApiPolicyGroupsGet(getRecorder, get)
+	if !strings.Contains(getRecorder.Body.String(), "kids") {
+		t.Fatalf("active groups lost kids after preview: %s", getRecorder.Body.String())
+	}
+	if strings.Contains(getRecorder.Body.String(), "unrestricted") {
+		t.Fatalf("proposed group persisted; preview must not write: %s", getRecorder.Body.String())
+	}
+}
+
+func TestPolicyPreviewRejectsMissingDomain(t *testing.T) {
+	_, cleanup := policyTestService(t)
+	defer cleanup()
+
+	preview := httptest.NewRequest(http.MethodPost, "/api/policy/preview", bytes.NewBufferString(`{"client_ip":"192.0.2.10"}`))
+	previewRecorder := httptest.NewRecorder()
+	GSApiPolicyPreview(previewRecorder, preview)
+	if previewRecorder.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 for missing domain", previewRecorder.Code)
 	}
 }
 
