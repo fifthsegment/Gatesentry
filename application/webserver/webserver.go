@@ -609,6 +609,25 @@ func RegisterEndpointsStartServer(
 		gatesentryWebserverEndpoints.GSApiAccessRequestReject(w, r)
 	})
 	log.Println("Exception and access-request API endpoints registered")
+
+	// Pause and schedule endpoints (PER-39).
+	log.Println("Registering pause and schedule API endpoints...")
+	internalServer.Get("/api/pauses", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiPausesGET(w, r)
+	})
+	internalServer.Post("/api/pauses", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiPauseCreate(w, r)
+	})
+	internalServer.Delete("/api/pauses/{id}", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiPauseRevoke(w, r)
+	})
+	internalServer.Get("/api/policy/schedule-presets", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiSchedulePresetsGET(w, r)
+	})
+	internalServer.Post("/api/policy/schedule-presets/apply", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiSchedulePresetApply(w, r)
+	})
+	log.Println("Pause and schedule API endpoints registered")
 	log.Println("Policy API endpoints registered")
 
 	// Register MIME types for static file serving

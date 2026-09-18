@@ -34,7 +34,8 @@ response=$(mktemp); health=$(mktemp); token_json=$(mktemp)
 group_json=$(mktemp); exc_json=$(mktemp)
 block_out=$(mktemp); bypass_out=$(mktemp); forward_out=$(mktemp)
 mitm_out=$(mktemp); noauth_out=$(mktemp)
-cleanup_files() { rm -f "$response" "$health" "$token_json" "$group_json" "$exc_json" "$block_out" "$bypass_out" "$forward_out" "$mitm_out" "$noauth_out"; }
+pause_json=$(mktemp); sched_json=$(mktemp)
+cleanup_files() { rm -f "$response" "$health" "$token_json" "$group_json" "$exc_json" "$pause_json" "$sched_json" "$block_out" "$bypass_out" "$forward_out" "$mitm_out" "$noauth_out"; }
 
 stop_binary() {
   if [[ -f "$PID_FILE" ]]; then
@@ -140,7 +141,49 @@ block_size=$(wc -c < "$block_out")
 [[ "$block_size" -eq 0 ]] || fail "after revoke, blocked domain returned $block_size bytes, expected 0"
 echo "  block restored after revoke (size=0)"
 
-# ---- 12. MITM: enable, download CA, verify HTTPS interception ---------
+# ---- 12. Pause suppresses block --------------------------------------
+echo "== pause: temporary suppression =="
+curl --fail --silent --show-error -X POST "$base/pauses" -H 'Content-Type: application/json' -H "$auth_header" -d '{"scope":"installation","duration":"5m","reason":"smoke test"}' > "$pause_json"
+pause_id=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['id'])" "$pause_json")
+curl -s -o "$bypass_out" -w '%{http_code}' --proxy "$proxy_url" "http://$TEST_DOMAIN$TEST_PATH" || true
+bypass_size=$(wc -c < "$bypass_out")
+[[ "$bypass_size" -gt 10 ]] || fail "pause did not suppress block: $bypass_size bytes, expected forwarded content"
+echo "  $TEST_DOMAIN forwarded during pause ($bypass_size bytes)"
+
+# ---- 13. Revoke pause restores block ---------------------------------
+echo "== pause: revoke restores block =="
+curl --fail --silent --show-error -X DELETE "$base/pauses/$pause_id" -H "$auth_header" > /dev/null
+curl -s -o "$block_out" -w '%{http_code}' --proxy "$proxy_url" "http://$TEST_DOMAIN$TEST_PATH" || true
+block_size=$(wc -c < "$block_out")
+[[ "$block_size" -eq 0 ]] || fail "after pause revoke, blocked domain returned $block_size bytes, expected 0"
+echo "  block restored after pause revoke (size=0)"
+
+# ---- 14. Inactive schedule suppresses block --------------------------
+echo "== schedule: inactive window suppresses block =="
+group_id=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['group']['id'])" "$group_json")
+# Build a 30-minute time window 12 hours from now so it is guaranteed
+# inactive at the current wall-clock time.
+cur_hh=$(date +%H)
+sched_hh=$(printf "%02d" $(( (10#$cur_hh + 12) % 24 )))
+sched_from="${sched_hh}:00"
+sched_to="${sched_hh}:30"
+curl --fail --silent --show-error -X PUT "$base/policy/groups/$group_id" -H 'Content-Type: application/json' -H "$auth_header" \
+  -d "{\"name\":\"smoke-block\",\"domains\":[\"httpbin.org\"],\"action\":\"block\",\"users\":[\"smokeproxy\"],\"priority\":0,\"schedule\":{\"timezone\":\"UTC\",\"windows\":[{\"from\":\"$sched_from\",\"to\":\"$sched_to\"}]}}" > /dev/null
+curl -s -o "$bypass_out" -w '%{http_code}' --proxy "$proxy_url" "http://$TEST_DOMAIN$TEST_PATH" || true
+bypass_size=$(wc -c < "$bypass_out")
+[[ "$bypass_size" -gt 10 ]] || fail "inactive schedule did not suppress block: $bypass_size bytes, expected forwarded content"
+echo "  $TEST_DOMAIN forwarded outside schedule window ($bypass_size bytes)"
+
+# ---- 15. Clear schedule restores block -------------------------------
+echo "== schedule: clear schedule restores block =="
+curl --fail --silent --show-error -X PUT "$base/policy/groups/$group_id" -H 'Content-Type: application/json' -H "$auth_header" \
+  -d '{"name":"smoke-block","domains":["httpbin.org"],"action":"block","users":["smokeproxy"],"priority":0}' > /dev/null
+curl -s -o "$block_out" -w '%{http_code}' --proxy "$proxy_url" "http://$TEST_DOMAIN$TEST_PATH" || true
+block_size=$(wc -c < "$block_out")
+[[ "$block_size" -eq 0 ]] || fail "after clearing schedule, blocked domain returned $block_size bytes, expected 0"
+echo "  block restored after schedule cleared (size=0)"
+
+# ---- 16. MITM: enable, download CA, verify HTTPS interception ---------
 echo "== MITM: HTTPS interception =="
 curl --fail --silent --show-error -X POST "$base/settings/enable_https_filtering" -H 'Content-Type: application/json' -H "$auth_header" -d '{"value":"true"}' > /dev/null
 curl --fail --silent --show-error -o "$CA_FILE" "$base/files/certificate" -H "$auth_header"
@@ -157,7 +200,7 @@ if [[ "$noauth_code" != "000" ]]; then
 fi
 echo "  HTTPS without trusted CA -> connection fails (interception confirmed)"
 
-# ---- 13. Disable MITM -> HTTPS tunnels again -------------------------
+# ---- 17. Disable MITM -> HTTPS tunnels again -------------------------
 echo "== disable MITM =="
 curl --fail --silent --show-error -X POST "$base/settings/enable_https_filtering" -H 'Content-Type: application/json' -H "$auth_header" -d '{"value":"false"}' > /dev/null
 curl -s -o "$forward_out" -w '%{http_code}' --proxy "$proxy_url" "https://$FORWARD_DOMAIN/" || true
@@ -167,5 +210,6 @@ echo "  HTTPS tunnels again after MITM disabled ($forward_size bytes)"
 
 echo ""
 echo "All proxy smoke checks passed: HTTP forward, HTTPS tunnel, 407 auth,"
-echo "policy block, exception bypass, revoke, MITM intercept, MITM disable."
+echo "policy block, exception bypass, revoke, pause suppress, pause revoke,"
+echo "schedule inactive, schedule clear, MITM intercept, MITM disable."
 exit 0
