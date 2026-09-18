@@ -107,7 +107,7 @@
 
   const loadSummary = async () => {
     try {
-      summary = await $store.api.doCall("/api/decisions/summary");
+      summary = await $store.api.doCall("/decisions/summary");
     } catch (error) {
       console.error("Error fetching decision summary:", error);
     }

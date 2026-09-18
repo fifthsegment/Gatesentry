@@ -31,7 +31,7 @@
   };
 
   const loadDecisions = () => {
-    $store.api.doCall("/api/decisions" + buildQuery()).then((json: any) => {
+    $store.api.doCall("/decisions" + buildQuery()).then((json: any) => {
       const items = (json && json.items) || [];
       logsToRender = items.map((item: any, index: number) => ({
         id: item.ip + item.time + index + item.url,
