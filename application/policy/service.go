@@ -45,6 +45,13 @@ type Service struct {
 
 	mu       sync.RWMutex
 	snapshot PolicySnapshot
+	// exc holds the in-memory exception snapshot, loaded from the same
+	// MapStore as policy groups. Separate from the group snapshot so
+	// exception writes do not require re-encoding the group document.
+	exc exceptionStorage
+	// accessRL rate-limits public access requests per client IP. It is
+	// in-memory only so a restart resets the counter.
+	accessRL *rateLimiter
 }
 
 // NewService creates a policy service. A nil storage is supported for tests
@@ -56,6 +63,10 @@ func NewService(storage *gatesentry2storage.MapStore, devices DeviceResolver) (*
 		return nil, err
 	}
 	s.snapshot = snapshotFromDocument(doc)
+	if err := s.loadExceptions(); err != nil {
+		return nil, err
+	}
+	s.accessRL = newAccessRequestRateLimiter()
 	return s, nil
 }
 
@@ -159,6 +170,9 @@ func (s *Service) Snapshot() PolicySnapshot {
 func (s *Service) Reload() error {
 	doc, err := s.loadDocument()
 	if err != nil {
+		return err
+	}
+	if err := s.loadExceptions(); err != nil {
 		return err
 	}
 	s.mu.Lock()
@@ -445,15 +459,33 @@ func (s *Service) groupForUser(snap PolicySnapshot, user string) string {
 	return best
 }
 
-// EvaluateDNS applies group policy to a DNS query. It only reports
-// DNS-applicable outcomes; URL, MIME, and TLS-inspection conditions are
-// surfaced as explicitly inapplicable rather than being silently treated as
-// enforced.
+// EvaluateDNS applies group policy and exceptions to a DNS query. It only
+// reports DNS-applicable outcomes; URL, MIME, and TLS-inspection conditions
+// are surfaced as explicitly inapplicable rather than being silently treated
+// as enforced.
+//
+// Exception precedence: a scoped exception (device > group > installation)
+// that matches the domain exempts it from the group block. This lets an
+// administrator recover a false positive for one device without creating a
+// global bypass.
 func (s *Service) EvaluateDNS(identity Identity, domain string) DNSDecision {
-	snap := s.Snapshot()
 	decision := DNSDecision{Action: ActionNone}
+
+	// Check scoped exceptions first. An active exception that matches the
+	// domain reports an allow so the caller can bypass the global blocklist,
+	// regardless of group policy.
+	if exc, ok := s.EvaluateException(identity, domain); ok {
+		decision.Action = ActionAllow
+		decision.Reason = "scoped exception: " + string(exc.Scope)
+		// GroupID left empty for exception bypasses; Reason carries the scope
+		decision.InapplicableConditions = dnsInapplicableConditions()
+		return decision
+	}
+
+	snap := s.Snapshot()
 	group, ok := snap.Groups[identity.GroupID]
 	if !ok {
+		decision.InapplicableConditions = dnsInapplicableConditions()
 		return decision
 	}
 	decision.GroupID = group.ID
@@ -481,7 +513,13 @@ func DNSInapplicableConditions() []string {
 }
 
 // EvaluateDomain reports the group action for a domain in any adapter.
+// A scoped exception (device > group > installation) overrides a group
+// block with an allow, so a false positive can be recovered for one entity
+// without a global bypass.
 func (s *Service) EvaluateDomain(identity Identity, domain string) PolicyAction {
+	if _, ok := s.EvaluateException(identity, domain); ok {
+		return ActionAllow
+	}
 	snap := s.Snapshot()
 	group, ok := snap.Groups[identity.GroupID]
 	if !ok {

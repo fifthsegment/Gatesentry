@@ -37,6 +37,8 @@ jobs:
             ${{ runner.os }}-yarn-
       - name: Verify reproducible build path
         run: make verify
+      - name: Proxy smoke (binary + curl)
+        run: make proxy-smoke
       - name: Collect coverage
         run: make coverage
       - uses: codecov/codecov-action@v5

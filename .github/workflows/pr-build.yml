@@ -54,6 +54,8 @@ jobs:
             ${{ runner.os }}-yarn-
       - name: Verify source and build
         run: make verify
+      - name: Proxy smoke (binary + curl)
+        run: make proxy-smoke
       - name: Build revision artifacts
         run: make release-artifacts
       - uses: actions/upload-artifact@v4
