@@ -49,9 +49,11 @@ type Service struct {
 	// MapStore as policy groups. Separate from the group snapshot so
 	// exception writes do not require re-encoding the group document.
 	exc exceptionStorage
+	pa  pauseStorage
 	// accessRL rate-limits public access requests per client IP. It is
 	// in-memory only so a restart resets the counter.
 	accessRL *rateLimiter
+	nowFunc  func() time.Time
 }
 
 // NewService creates a policy service. A nil storage is supported for tests
@@ -66,8 +68,49 @@ func NewService(storage *gatesentry2storage.MapStore, devices DeviceResolver) (*
 	if err := s.loadExceptions(); err != nil {
 		return nil, err
 	}
+	if err := s.loadPauses(); err != nil {
+		return nil, err
+	}
 	s.accessRL = newAccessRequestRateLimiter()
+	s.nowFunc = func() time.Time { return time.Now() }
 	return s, nil
+}
+
+// now returns the current time via the service's clock. Tests override
+// nowFunc via SetClock so they can control DST, midnight, and overlap
+// scenarios deterministically.
+func (s *Service) now() time.Time {
+	if s.nowFunc != nil {
+		return s.nowFunc()
+	}
+	return time.Now()
+}
+
+// SetClock replaces the service's time source. It is intended for tests that
+// need to verify DST transitions, midnight boundaries, and overlap behavior
+// without waiting on real wall-clock time. Production code must not call it.
+func (s *Service) SetClock(t time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.nowFunc = func() time.Time { return t }
+}
+
+// SetClockFunc installs a custom time function, for tests that need a
+// moving clock (e.g. to simulate a pause expiring between requests).
+func (s *Service) SetClockFunc(f func() time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.nowFunc = f
+}
+
+// scheduleActive reports whether a group's schedule is active at the
+// service's current time. A group with no schedule (nil) is always active,
+// preserving pre-PER-39 behavior.
+func (s *Service) scheduleActive(group PolicyGroup) bool {
+	if group.Schedule == nil {
+		return true
+	}
+	return group.Schedule.IsActive(s.now())
 }
 
 // ErrNoPolicy is returned when no policy document exists. It is distinct
@@ -173,6 +216,9 @@ func (s *Service) Reload() error {
 		return err
 	}
 	if err := s.loadExceptions(); err != nil {
+		return err
+	}
+	if err := s.loadPauses(); err != nil {
 		return err
 	}
 	s.mu.Lock()
@@ -489,6 +535,25 @@ func (s *Service) EvaluateDNS(identity Identity, domain string) DNSDecision {
 		return decision
 	}
 	decision.GroupID = group.ID
+	// If the group has a schedule and it is not currently active, the group
+	// expresses no opinion: the block action does not apply and enforcement
+	// falls through to the global blocklist. DNS cache and established
+	// connections may retain prior decisions; see schedule documentation.
+	if !s.scheduleActive(group) {
+		decision.Reason = "group schedule inactive"
+		decision.InapplicableConditions = dnsInapplicableConditions()
+		return decision
+	}
+	// An active pause suppresses the group block action for the paused scope
+	// (device > group > installation). Pauses do not override allow actions:
+	// an allow group stays allow. DNS caches and established connections
+	// may retain prior decisions until they expire.
+	if pause, ok := s.EvaluatePause(identity); ok && group.Action == ActionBlock {
+		decision.Action = ActionNone
+		decision.Reason = "paused: " + string(pause.Scope)
+		decision.InapplicableConditions = dnsInapplicableConditions()
+		return decision
+	}
 	for _, pattern := range group.Domains {
 		if matchDomain(pattern, domain) {
 			decision.MatchedDomain = pattern
@@ -523,6 +588,16 @@ func (s *Service) EvaluateDomain(identity Identity, domain string) PolicyAction 
 	snap := s.Snapshot()
 	group, ok := snap.Groups[identity.GroupID]
 	if !ok {
+		return ActionNone
+	}
+	// A schedule that is not currently active means the group expresses no
+	// opinion about this domain right now. Enforcement falls through.
+	if !s.scheduleActive(group) {
+		return ActionNone
+	}
+	// An active pause suppresses the group block action for the paused scope.
+	// Allow actions are not affected.
+	if _, ok := s.EvaluatePause(identity); ok && group.Action == ActionBlock {
 		return ActionNone
 	}
 	for _, pattern := range group.Domains {

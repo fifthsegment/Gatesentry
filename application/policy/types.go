@@ -40,6 +40,7 @@ type PolicyGroup struct {
 	// multiple groups; lower numbers win. Within one group, domain
 	// evaluation is first-match over the persisted list order.
 	Priority  int       `json:"priority"`
+	Schedule  *Schedule `json:"schedule,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
