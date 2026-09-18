@@ -11,6 +11,7 @@ import (
 	"os"
 	"strings"
 
+	gatesentryDiagnostics "bitbucket.org/abdullah_irfan/gatesentryf/diagnostics"
 	gatesentryDnsServer "bitbucket.org/abdullah_irfan/gatesentryf/dns/server"
 	gatesentryFilters "bitbucket.org/abdullah_irfan/gatesentryf/filters"
 	gatesentry2logger "bitbucket.org/abdullah_irfan/gatesentryf/logger"
@@ -663,6 +664,24 @@ func RegisterEndpointsStartServer(
 		})
 	})
 	log.Println("Backup and restore API endpoints registered")
+
+	// Gateway diagnostics and the redacted, previewable support bundle.
+	diagnosticsDeps := gatesentryWebserverEndpoints.DiagnosticsDeps{
+		Diagnostics: gatesentryDiagnostics.Deps{
+			Settings:   internalSettings,
+			DnsInfo:    dnsServerInfo,
+			Filters:    Filters,
+			GetDevices: gatesentryDnsServer.GetDeviceStore,
+			GetPolicy:  gatesentryDnsServer.GetPolicyService,
+		},
+		ApplicationVersion: runtime.GetApplicationVersion,
+	}
+	internalServer.Get("/api/diagnostics", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiDiagnosticsGET(w, r, diagnosticsDeps)
+	})
+	internalServer.Get("/api/diagnostics/bundle", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiDiagnosticsBundleGET(w, r, diagnosticsDeps)
+	})
 
 	// Register MIME types for static file serving
 	mime.AddExtensionType(".css", "text/css")
