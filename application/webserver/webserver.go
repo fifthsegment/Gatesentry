@@ -577,6 +577,38 @@ func RegisterEndpointsStartServer(
 	internalServer.Post("/api/policy/preview", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
 		gatesentryWebserverEndpoints.GSApiPolicyPreview(w, r)
 	})
+
+	// Exception and access-request endpoints (PER-38).
+	log.Println("Registering exception and access-request API endpoints...")
+	internalServer.Get("/api/exceptions", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiExceptionsGET(w, r)
+	})
+	internalServer.Post("/api/exceptions", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiExceptionCreate(w, r)
+	})
+	internalServer.Delete("/api/exceptions/{id}", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiExceptionRevoke(w, r)
+	})
+	internalServer.Post("/api/exceptions/preview", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiExceptionPreview(w, r)
+	})
+	internalServer.Get("/api/access-requests", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiAccessRequestsGET(w, r)
+	})
+	// Public, rate-limited access-request submission. Deliberately NOT behind
+	// authenticationMiddleware so a blocked user can request review without
+	// admin credentials. The handler rate-limits per client IP and never grants
+	// access; only an admin approval creates an exception.
+	internalServer.Post("/api/access-requests", HttpHandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiAccessRequestSubmit(w, r)
+	}))
+	internalServer.Post("/api/access-requests/{id}/approve", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiAccessRequestApprove(w, r)
+	})
+	internalServer.Post("/api/access-requests/{id}/reject", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiAccessRequestReject(w, r)
+	})
+	log.Println("Exception and access-request API endpoints registered")
 	log.Println("Policy API endpoints registered")
 
 	// Register MIME types for static file serving
