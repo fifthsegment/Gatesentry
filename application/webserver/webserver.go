@@ -81,18 +81,14 @@ func tokenCreationHandlerFor(auth *AuthManager) HttpHandlerFunc {
 func setupStatusHandlerFor(auth *AuthManager) HttpHandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
-		complete, requiresAuthorization, err := auth.Status()
+		complete, err := auth.Status()
 		if err != nil {
 			SendError(w, errors.New("unable to read setup status"), http.StatusInternalServerError)
 			return
 		}
-		if !complete {
-			requiresAuthorization = requiresAuthorization || !requestIsLoopback(r)
-		}
 		SendJSON(w, struct {
-			Complete              bool `json:"complete"`
-			RequiresAuthorization bool `json:"requires_authorization"`
-		}{complete, requiresAuthorization})
+			Complete bool `json:"complete"`
+		}{complete})
 	}
 }
 
@@ -100,20 +96,17 @@ func setupHandlerFor(auth *AuthManager) HttpHandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		var data struct {
-			Username      string `json:"username"`
-			Password      string `json:"password"`
-			Authorization string `json:"authorization"`
+			Username string `json:"username"`
+			Password string `json:"password"`
 		}
 		if err := ParseJSONRequest(r, &data); err != nil {
 			SendError(w, errors.New("invalid setup request"), http.StatusBadRequest)
 			return
 		}
-		if err := auth.Bootstrap(data.Username, data.Password, data.Authorization, requestIsLoopback(r)); err != nil {
-			status := http.StatusForbidden
+		if err := auth.Bootstrap(data.Username, data.Password); err != nil {
+			status := http.StatusBadRequest
 			if errors.Is(err, errSetupComplete) {
 				status = http.StatusConflict
-			} else if !errors.Is(err, errSetupAuth) {
-				status = http.StatusBadRequest
 			}
 			SendError(w, errors.New("setup could not be completed"), status)
 			return
@@ -183,6 +176,14 @@ func RegisterEndpointsStartServer(
 	auth, err := NewAuthManager(internalSettings, os.Getenv("GATESENTRY_BOOTSTRAP_FILE"))
 	if err != nil {
 		return fmt.Errorf("initialize administrator authentication: %w", err)
+	}
+	// First-run setup accepts the first client that reaches the dashboard. Keep
+	// that window visible in the startup log so operators finish setup promptly
+	// or restrict access to the admin port.
+	if complete, statusErr := auth.Status(); statusErr != nil {
+		log.Printf("WARNING: unable to read first-run setup status: %v", statusErr)
+	} else if !complete {
+		log.Printf("WARNING: first-run setup is not complete. Anyone who can reach the dashboard on port %s can create the administrator account. Complete setup now, or restrict access to this port.", port)
 	}
 	authenticationMiddleware := authenticationMiddlewareFor(auth)
 	tokenCreationHandler := tokenCreationHandlerFor(auth)

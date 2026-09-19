@@ -26,7 +26,7 @@ services:
 
     volumes:
       - ./gatesentry-data:/usr/local/gatesentry/gatesentry
-      # Optional first run only: chmod 600 gatesentry-bootstrap.json
+      # Optional first run only: a chmod 600 JSON file with {"username","password"}
       # - ./gatesentry-bootstrap.json:/run/secrets/gatesentry-bootstrap.json:ro
 
     environment:

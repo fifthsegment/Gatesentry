@@ -11,7 +11,9 @@ test("setup page contains one-time credential form", () => {
   const { js } = compile(setupSource, { generate: "dom" });
   expect(js.code).toContain("/api/setup");
   expect(setupSource).toContain("Confirm password");
-  expect(setupSource).toContain("Bootstrap authorization");
+  // Setup asks for credentials only; there is no authorization step to satisfy.
+  expect(setupSource).not.toContain("Bootstrap authorization");
+  expect(setupSource).not.toContain("requires_authorization");
   expect(setupSource).toContain("!statusLoaded");
   expect(setupSource).toContain("passwordHasValidByteLength");
   expect(setupSource).toContain("UTF-8 bytes");

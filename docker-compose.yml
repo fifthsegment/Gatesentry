@@ -17,7 +17,7 @@ services:
 
     volumes:
       - ./docker_root:/usr/local/gatesentry/gatesentry
-      # Optional first run only: chmod 600 ./secrets/gatesentry-bootstrap.json
+      # Optional first run only: a chmod 600 JSON file with {"username","password"}
       # - ./secrets/gatesentry-bootstrap.json:/run/secrets/gatesentry-bootstrap.json:ro
 
     environment:

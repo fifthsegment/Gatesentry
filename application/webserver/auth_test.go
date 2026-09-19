@@ -3,7 +3,6 @@ package gatesentryWebserver
 import (
 	gatesentry2storage "bitbucket.org/abdullah_irfan/gatesentryf/storage"
 	gatesentryWebserverTypes "bitbucket.org/abdullah_irfan/gatesentryf/webserver/types"
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -20,8 +19,10 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
+// testBootstrapAuthorization is a value in the removed authorization format.
+// It remains here so the bootstrap file tests can prove that the legacy shape
+// is rejected instead of silently accepted.
 const testBootstrapAuthorization = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
-const weakBootstrapAuthorization = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 
 func authStore(t *testing.T) *gatesentry2storage.MapStore {
 	t.Helper()
@@ -48,10 +49,10 @@ func TestFreshSetupIsOneTimeAndPersistent(t *testing.T) {
 	if ok, err := auth.Verify("admin", "admin"); err != nil || ok {
 		t.Fatalf("default login = %v, %v", ok, err)
 	}
-	if err := auth.Bootstrap("owner", "long-secure-password", "", true); err != nil {
+	if err := auth.Bootstrap("owner", "long-secure-password"); err != nil {
 		t.Fatal(err)
 	}
-	if err := auth.Bootstrap("other", "another-long-password", "", true); !errors.Is(err, errSetupComplete) {
+	if err := auth.Bootstrap("other", "another-long-password"); !errors.Is(err, errSetupComplete) {
 		t.Fatalf("reuse = %v", err)
 	}
 	if ok, err := auth.Verify("owner", "long-secure-password"); err != nil || !ok {
@@ -81,7 +82,7 @@ func TestExactlyOneConcurrentBootstrapWins(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if auth.Bootstrap("owner", "long-secure-password", "", true) == nil {
+			if auth.Bootstrap("owner", "long-secure-password") == nil {
 				wins.Add(1)
 			}
 		}()
@@ -192,38 +193,13 @@ func TestLegacyMigrationPreservesUnrelatedGeneralSettings(t *testing.T) {
 	}
 }
 
-func TestLegacyMigrationConsumesPersistedAuthorization(t *testing.T) {
-	store := authStore(t)
-	path := filepath.Join(t.TempDir(), "bootstrap.json")
-	if err := os.WriteFile(path, []byte(`{"authorization":"`+testBootstrapAuthorization+`"}`), 0600); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := NewAuthManager(store, path); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.Update("general_settings", `{"log_location":"./log.db","admin_username":"admin","admin_password":"admin"}`); err != nil {
-		t.Fatal(err)
-	}
-	auth, err := NewAuthManager(store, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	complete, requiresAuthorization, err := auth.Status()
-	if err != nil || !complete || requiresAuthorization {
-		t.Fatalf("migrated status: complete=%v authorization=%v err=%v", complete, requiresAuthorization, err)
-	}
-	if ok, err := auth.Verify("admin", "admin"); err != nil || !ok {
-		t.Fatalf("migrated login = %v, %v", ok, err)
-	}
-}
-
 func TestCompletedStateRemovesStaleLegacyCredentialsWithoutReadingBootstrap(t *testing.T) {
 	store := authStore(t)
 	auth, err := NewAuthManager(store, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := auth.Bootstrap("owner", "long-secure-password", "", true); err != nil {
+	if err := auth.Bootstrap("owner", "long-secure-password"); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.Update("general_settings", `{"log_location":"./log.db","admin_username":"stale","admin_password":"stale-secret","future_setting":true}`); err != nil {
@@ -241,42 +217,52 @@ func TestCompletedStateRemovesStaleLegacyCredentialsWithoutReadingBootstrap(t *t
 	}
 }
 
-func TestBootstrapAuthorizationAndSecretFile(t *testing.T) {
+func TestInteractiveSetupNeedsNoAuthorizationAndCompletesOnce(t *testing.T) {
 	store := authStore(t)
-	path := filepath.Join(t.TempDir(), "bootstrap.json")
-	if err := os.WriteFile(path, []byte(`{"authorization":"`+testBootstrapAuthorization+`"}`), 0600); err != nil {
-		t.Fatal(err)
-	}
-	auth, err := NewAuthManager(store, path)
+	auth, err := NewAuthManager(store, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := auth.Bootstrap("owner", "long-secure-password", "wrong", false); !errors.Is(err, errSetupAuth) {
-		t.Fatalf("wrong auth = %v", err)
-	}
-	if err := auth.Bootstrap("owner", "long-secure-password", "", false); !errors.Is(err, errSetupAuth) {
-		t.Fatalf("missing auth = %v", err)
-	}
-	if err := auth.Bootstrap("owner", "long-secure-password", testBootstrapAuthorization, false); err != nil {
+	// Setup is reachable from any client, so no address or shared secret is required.
+	if err := auth.Bootstrap("owner", "long-secure-password"); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(store.GetOrDefault(authStateKey, ""), testBootstrapAuthorization) {
-		t.Fatal("bootstrap secret persisted")
+	raw := store.GetOrDefault(authStateKey, "")
+	if strings.Contains(raw, "long-secure-password") || !strings.Contains(raw, "\"password_hash\":\"$2") {
+		t.Fatalf("unsafe auth state: %s", raw)
 	}
-	if err := auth.Bootstrap("owner", "long-secure-password", testBootstrapAuthorization, false); !errors.Is(err, errSetupComplete) {
-		t.Fatalf("reused auth = %v", err)
+	if err := auth.Bootstrap("owner", "long-secure-password"); !errors.Is(err, errSetupComplete) {
+		t.Fatalf("reused setup = %v", err)
+	}
+	complete, err := auth.Status()
+	if err != nil || !complete {
+		t.Fatalf("complete=%v err=%v", complete, err)
 	}
 }
 
-func TestUnattendedBootstrapAndTrustBoundary(t *testing.T) {
-	remoteAuth, err := NewAuthManager(authStore(t), "")
+func TestSetupRejectsInvalidCredentialsWithoutCompleting(t *testing.T) {
+	auth, err := NewAuthManager(authStore(t), "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := remoteAuth.Bootstrap("owner", "long-secure-password", "", false); !errors.Is(err, errSetupAuth) {
-		t.Fatalf("remote setup without authorization = %v", err)
+	for _, tc := range []struct{ name, username, password string }{
+		{"short password", "owner", "short"},
+		{"oversized password", "owner", strings.Repeat("p", 73)},
+		{"empty username", "", "long-secure-password"},
+		{"padded username", " owner", "long-secure-password"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := auth.Bootstrap(tc.username, tc.password); err == nil || errors.Is(err, errSetupComplete) {
+				t.Fatalf("invalid credentials accepted: %v", err)
+			}
+			if complete, err := auth.Status(); err != nil || complete {
+				t.Fatalf("failed setup changed status: complete=%v err=%v", complete, err)
+			}
+		})
 	}
+}
 
+func TestUnattendedBootstrapFromSecretFile(t *testing.T) {
 	store := authStore(t)
 	path := filepath.Join(t.TempDir(), "bootstrap.json")
 	if err := os.WriteFile(path, []byte("{\"username\":\"owner\",\"password\":\"long-secure-password\"}"), 0600); err != nil {
@@ -289,26 +275,8 @@ func TestUnattendedBootstrapAndTrustBoundary(t *testing.T) {
 	if ok, _ := auth.Verify("owner", "long-secure-password"); !ok {
 		t.Fatal("unattended setup failed")
 	}
-	for _, addr := range []string{"127.0.0.1:1234", "[::1]:1234"} {
-		r := httptest.NewRequest("POST", "/api/setup", nil)
-		r.RemoteAddr = addr
-		if !requestIsLoopback(r) {
-			t.Fatalf("loopback rejected: %s", addr)
-		}
-	}
-	for _, header := range []string{"Forwarded", "X-Forwarded-For", "X-Real-IP"} {
-		r := httptest.NewRequest("POST", "/api/setup", nil)
-		r.RemoteAddr = "127.0.0.1:1234"
-		r.Header.Set(header, "203.0.113.2")
-		if requestIsLoopback(r) {
-			t.Fatalf("forwarded loopback request trusted: %s", header)
-		}
-	}
-	r := httptest.NewRequest("POST", "/api/setup", nil)
-	r.RemoteAddr = "192.0.2.5:1234"
-	r.Header.Set("X-Forwarded-For", "127.0.0.1")
-	if requestIsLoopback(r) {
-		t.Fatal("proxy header trusted")
+	if complete, err := auth.Status(); err != nil || !complete {
+		t.Fatalf("unattended setup status: complete=%v err=%v", complete, err)
 	}
 }
 
@@ -330,43 +298,15 @@ func TestUnattendedBootstrapResumesIncompleteStateAtomically(t *testing.T) {
 	}
 }
 
-func TestUnattendedBootstrapRejectsMissingAndConflictingInput(t *testing.T) {
-	t.Run("missing file", func(t *testing.T) {
-		if _, err := NewAuthManager(authStore(t), filepath.Join(t.TempDir(), "missing.json")); err == nil {
-			t.Fatal("expected missing bootstrap file error")
-		}
-	})
-	t.Run("persisted authorization conflicts with credentials", func(t *testing.T) {
-		store := authStore(t)
-		tokenPath := filepath.Join(t.TempDir(), "token.json")
-		if err := os.WriteFile(tokenPath, []byte(`{"authorization":"`+testBootstrapAuthorization+`"}`), 0600); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := NewAuthManager(store, tokenPath); err != nil {
-			t.Fatal(err)
-		}
-		credentialsPath := filepath.Join(t.TempDir(), "credentials.json")
-		if err := os.WriteFile(credentialsPath, []byte(`{"username":"owner","password":"long-secure-password"}`), 0600); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := NewAuthManager(store, credentialsPath); err == nil {
-			t.Fatal("expected conflicting bootstrap mode error")
-		}
-		complete, requiresAuthorization, err := (&AuthManager{store: store}).Status()
-		if err != nil || complete || !requiresAuthorization {
-			t.Fatalf("state changed after conflict: complete=%v auth=%v err=%v", complete, requiresAuthorization, err)
-		}
-	})
+func TestUnattendedBootstrapRejectsMissingFile(t *testing.T) {
+	if _, err := NewAuthManager(authStore(t), filepath.Join(t.TempDir(), "missing.json")); err == nil {
+		t.Fatal("expected missing bootstrap file error")
+	}
 }
 
-func TestSetupHTTPTrustAuthorizationAndSecretRedaction(t *testing.T) {
+func TestSetupHTTPStatusAndSecretRedaction(t *testing.T) {
 	store := authStore(t)
-	path := filepath.Join(t.TempDir(), "bootstrap.json")
-	const secret = testBootstrapAuthorization
-	if err := os.WriteFile(path, []byte(`{"authorization":"`+secret+`"}`), 0600); err != nil {
-		t.Fatal(err)
-	}
-	auth, err := NewAuthManager(store, path)
+	auth, err := NewAuthManager(store, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -375,35 +315,45 @@ func TestSetupHTTPTrustAuthorizationAndSecretRedaction(t *testing.T) {
 	statusRequest.RemoteAddr = "192.0.2.8:1234"
 	statusResponse := httptest.NewRecorder()
 	setupStatusHandlerFor(auth)(statusResponse, statusRequest)
-	if statusResponse.Code != http.StatusOK || strings.Contains(statusResponse.Body.String(), secret) {
-		t.Fatalf("unsafe status response: %d %s", statusResponse.Code, statusResponse.Body.String())
+	if statusResponse.Code != http.StatusOK {
+		t.Fatalf("status code = %d", statusResponse.Code)
 	}
 	var status struct {
-		Complete              bool `json:"complete"`
-		RequiresAuthorization bool `json:"requires_authorization"`
+		Complete bool `json:"complete"`
 	}
-	if err := json.Unmarshal(statusResponse.Body.Bytes(), &status); err != nil || status.Complete || !status.RequiresAuthorization {
+	if err := json.Unmarshal(statusResponse.Body.Bytes(), &status); err != nil || status.Complete {
 		t.Fatalf("unexpected setup status: %+v, %v", status, err)
 	}
-
-	requestBody := func(authz string) *bytes.Reader {
-		body, _ := json.Marshal(map[string]string{"username": "owner", "password": "long-secure-password", "authorization": authz})
-		return bytes.NewReader(body)
-	}
-	wrongRequest := httptest.NewRequest(http.MethodPost, "/api/setup", requestBody("wrong-bootstrap-value"))
-	wrongRequest.RemoteAddr = "192.0.2.8:1234"
-	wrongResponse := httptest.NewRecorder()
-	setupHandlerFor(auth)(wrongResponse, wrongRequest)
-	if wrongResponse.Code != http.StatusForbidden || strings.Contains(wrongResponse.Body.String(), "wrong-bootstrap-value") {
-		t.Fatalf("unsafe rejection: %d %s", wrongResponse.Code, wrongResponse.Body.String())
+	if strings.Contains(statusResponse.Body.String(), "requires_authorization") {
+		t.Fatalf("status still asks for authorization: %s", statusResponse.Body.String())
 	}
 
-	goodRequest := httptest.NewRequest(http.MethodPost, "/api/setup", requestBody(secret))
-	goodRequest.RemoteAddr = "192.0.2.8:1234"
-	goodResponse := httptest.NewRecorder()
-	setupHandlerFor(auth)(goodResponse, goodRequest)
-	if goodResponse.Code != http.StatusOK || strings.Contains(goodResponse.Body.String(), secret) || strings.Contains(goodRequest.URL.String(), secret) {
-		t.Fatalf("unsafe setup result: %d %s", goodResponse.Code, goodResponse.Body.String())
+	// A client on another host completes setup with credentials alone.
+	const body = `{"username":"owner","password":"long-secure-password"}`
+	setupRequest := httptest.NewRequest(http.MethodPost, "/api/setup", strings.NewReader(body))
+	setupRequest.RemoteAddr = "192.0.2.8:1234"
+	setupResponse := httptest.NewRecorder()
+	setupHandlerFor(auth)(setupResponse, setupRequest)
+	if setupResponse.Code != http.StatusOK {
+		t.Fatalf("remote setup status = %d", setupResponse.Code)
+	}
+	if strings.Contains(setupResponse.Body.String(), "long-secure-password") {
+		t.Fatalf("setup response leaked the password: %s", setupResponse.Body.String())
+	}
+
+	// Setup stays one-time for every address, including a different one.
+	replayRequest := httptest.NewRequest(http.MethodPost, "/api/setup", strings.NewReader(body))
+	replayRequest.RemoteAddr = "198.51.100.7:1234"
+	replayResponse := httptest.NewRecorder()
+	setupHandlerFor(auth)(replayResponse, replayRequest)
+	if replayResponse.Code != http.StatusConflict {
+		t.Fatalf("replayed setup status = %d", replayResponse.Code)
+	}
+	if ok, err := auth.Verify("owner", "long-secure-password"); err != nil || !ok {
+		t.Fatalf("setup did not persist the administrator account: %v, %v", ok, err)
+	}
+	if strings.Contains(store.GetOrDefault(authStateKey, ""), "long-secure-password") {
+		t.Fatal("plaintext password persisted")
 	}
 }
 
@@ -419,7 +369,7 @@ func TestAuthenticationMiddlewareRejectsPreSetupAndInvalidatedSessions(t *testin
 	if response.Code != http.StatusUnauthorized {
 		t.Fatalf("pre-setup status = %d", response.Code)
 	}
-	if err := auth.Bootstrap("owner", "long-secure-password", "", true); err != nil {
+	if err := auth.Bootstrap("owner", "long-secure-password"); err != nil {
 		t.Fatal(err)
 	}
 	token, err := auth.CreateToken("owner")
@@ -466,7 +416,7 @@ func TestAuthenticationResponsesIncludeVerifiedUsername(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := auth.Bootstrap("owner", "long-secure-password", "", true); err != nil {
+	if err := auth.Bootstrap("owner", "long-secure-password"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -514,7 +464,7 @@ func TestSessionRequiresBoundedRegisteredClaims(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := auth.Bootstrap("owner", "long-secure-password", "", true); err != nil {
+	if err := auth.Bootstrap("owner", "long-secure-password"); err != nil {
 		t.Fatal(err)
 	}
 	state, err := auth.read()
@@ -552,10 +502,10 @@ func TestHashFailureDoesNotCompleteSetup(t *testing.T) {
 	original := passwordHash
 	passwordHash = func([]byte) ([]byte, error) { return nil, errors.New("injected") }
 	t.Cleanup(func() { passwordHash = original })
-	if err := auth.Bootstrap("owner", "long-secure-password", "", true); err == nil {
+	if err := auth.Bootstrap("owner", "long-secure-password"); err == nil {
 		t.Fatal("expected hash error")
 	}
-	complete, _, err := auth.Status()
+	complete, err := auth.Status()
 	if err != nil || complete {
 		t.Fatalf("complete=%v err=%v", complete, err)
 	}
@@ -592,7 +542,7 @@ func TestBootstrapPersistenceFailureDoesNotGrantAccess(t *testing.T) {
 	if err := os.WriteFile(filepath.Dir(path), []byte("unwritable"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := auth.Bootstrap("owner", "long-secure-password", "", true); err == nil {
+	if err := auth.Bootstrap("owner", "long-secure-password"); err == nil {
 		t.Fatal("expected bootstrap persistence error")
 	}
 	if ok, err := auth.Verify("owner", "long-secure-password"); err == nil || ok {
@@ -632,7 +582,7 @@ func TestBootstrapPostRenameDurabilityFailureDoesNotGrantAccess(t *testing.T) {
 		t.Fatal(err)
 	}
 	auth.store = &postRenameFailureStore{delegate: store}
-	if err := auth.Bootstrap("owner", "long-secure-password", "", true); err == nil {
+	if err := auth.Bootstrap("owner", "long-secure-password"); err == nil {
 		t.Fatal("expected post-rename durability error")
 	}
 	if ok, err := auth.Verify("owner", "long-secure-password"); err == nil || ok {
@@ -672,11 +622,10 @@ func TestMalformedAndUnsafeBootstrapFiles(t *testing.T) {
 		{"malformed", "{", 0600},
 		{"empty", "{}", 0600},
 		{"incomplete credentials", "{\"username\":\"owner\"}", 0600},
-		{"unknown field", `{"authorization":"` + testBootstrapAuthorization + `","extra":true}`, 0600},
-		{"short authorization", "{\"authorization\":\"short\"}", 0600},
-		{"weak authorization", `{"authorization":"` + weakBootstrapAuthorization + `"}`, 0600},
-		{"ambiguous", `{"authorization":"` + testBootstrapAuthorization + `","username":"owner","password":"long-secure-password"}`, 0600},
-		{"permissions", `{"authorization":"` + testBootstrapAuthorization + `"}`, 0644},
+		{"missing password", "{\"username\":\"owner\",\"password\":\"\"}", 0600},
+		{"unknown field", `{"username":"owner","password":"long-secure-password","extra":true}`, 0600},
+		{"removed authorization mode", `{"authorization":"` + testBootstrapAuthorization + `"}`, 0600},
+		{"permissions", `{"username":"owner","password":"long-secure-password"}`, 0644},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -694,7 +643,7 @@ func TestMalformedAndUnsafeBootstrapFiles(t *testing.T) {
 		dir := t.TempDir()
 		target := filepath.Join(dir, "target.json")
 		path := filepath.Join(dir, "bootstrap.json")
-		if err := os.WriteFile(target, []byte(`{"authorization":"`+testBootstrapAuthorization+`"}`), 0600); err != nil {
+		if err := os.WriteFile(target, []byte(`{"username":"owner","password":"long-secure-password"}`), 0600); err != nil {
 			t.Fatal(err)
 		}
 		if err := os.Symlink(target, path); err != nil {
