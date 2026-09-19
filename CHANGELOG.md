@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## v1.26.1 (19 September 2026)
+
+- Fixed GateSentry failing to start on Windows: Unix file permission checks on the installation key and bootstrap secret files always rejected files on Windows where NTFS ACLs don't map to Unix permission bits
+- Fixed directory fsync failures on Windows: directory handle syncing is now skipped on Windows where it returns "Access is denied"
+- Fixed restore endpoint returning invalid JSON on Windows: recovery point paths with backslashes are now properly JSON-escaped via json.Encoder instead of string concatenation
+- Proxy smoke test now runs on Windows CI alongside Linux, catching Windows-specific failures before merge
+
 ## v1.26.0 (19 September 2026)
 
 - Filtering explanations: block reasons surfaced with matched rule, layer, and policy provenance; device and policy drilldown views explain why a request was allowed or blocked
