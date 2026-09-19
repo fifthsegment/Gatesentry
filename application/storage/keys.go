@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 )
@@ -50,7 +51,7 @@ func readInstallationKeys(path string) (installationKeys, error) {
 	if !info.Mode().IsRegular() {
 		return installationKeys{}, errors.New("installation key file must be a regular file")
 	}
-	if info.Mode().Perm()&0077 != 0 {
+	if runtime.GOOS != "windows" && info.Mode().Perm()&0077 != 0 {
 		return installationKeys{}, fmt.Errorf("installation key file permissions are %04o; group and other access must be disabled", info.Mode().Perm())
 	}
 	file, err := os.Open(path)
