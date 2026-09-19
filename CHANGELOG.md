@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## v1.26.0 (19 September 2026)
+
+- Filtering explanations: block reasons surfaced with matched rule, layer, and policy provenance; device and policy drilldown views explain why a request was allowed or blocked
+- Scoped domain exceptions and public access requests: per-device or per-group exceptions with an audit trail, plus time-bound public access requests
+- Weekly schedules and temporary pauses: recurring weekly schedule windows for policy groups and on-demand filtering pauses with automatic resumption
+- Policy preview: simulate policy decisions against proposed changes without affecting live traffic
+- Validated backup and restore with rollback: export and restore configuration with integrity validation and automatic rollback on failure
+- Gateway diagnostics and redacted support bundle: health checks for DNS, proxy, and storage plus a redacted support bundle that excludes credentials and private data
+- Docs: moved the reproducible build section to the end of the README
+
 ## v1.25.0 (18 September 2026)
 
 - Structured filtering decisions: one canonical Decision type emitted at every enforcement point (DNS, explicit proxy, transparent proxy, content inspection)
