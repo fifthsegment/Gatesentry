@@ -369,6 +369,10 @@ func atomicCreate(path string, data []byte) (created, committed bool, err error)
 	if err != nil {
 		return true, true, fmt.Errorf("open directory for sync: %w", err)
 	}
+	if runtime.GOOS == "windows" {
+		_ = directory.Close()
+		return true, true, nil
+	}
 	if err := directory.Sync(); err != nil {
 		_ = directory.Close()
 		return true, true, fmt.Errorf("sync directory: %w", err)

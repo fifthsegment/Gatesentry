@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -314,6 +315,12 @@ var writeTemporaryFile = func(file *os.File, data []byte) error {
 	return err
 }
 var syncFile = func(file *os.File) error { return file.Sync() }
+var syncDirectory = func(file *os.File) error {
+	if runtime.GOOS == "windows" {
+		return nil
+	}
+	return file.Sync()
+}
 var closeFile = func(file *os.File) error { return file.Close() }
 var openDirectory = func(path string) (*os.File, error) { return os.Open(path) }
 
@@ -363,7 +370,7 @@ func atomicWrite(path string, data []byte) (committed bool, err error) {
 	if err != nil {
 		return true, fmt.Errorf("open storage directory for sync: %w", err)
 	}
-	if err = syncFile(directory); err != nil {
+	if err = syncDirectory(directory); err != nil {
 		syncErr := fmt.Errorf("sync storage directory: %w", err)
 		if closeErr := closeFile(directory); closeErr != nil {
 			return true, errors.Join(syncErr, fmt.Errorf("close storage directory: %w", closeErr))
