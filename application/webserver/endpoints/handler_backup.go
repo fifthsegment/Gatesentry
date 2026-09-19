@@ -1,9 +1,9 @@
 package gatesentryWebserverEndpoints
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -68,14 +68,20 @@ func GSApiRestorePOST(w http.ResponseWriter, r *http.Request, deps BackupDeps) {
 		if err := deps.Reload(); err != nil {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusPartialContent)
-			response := `{"warning":"Restore succeeded but reload failed; restart GateSentry to apply changes","recovery_point":"` + result.RecoveryPoint + `"}`
-			w.Write([]byte(response))
+		json.NewEncoder(w).Encode(map[string]string{
+			"warning":         "Restore succeeded but reload failed; restart GateSentry to apply changes",
+			"recovery_point":  result.RecoveryPoint,
+		})
 			return
 		}
 	}
 	w.Header().Set("Content-Type", "application/json")
-	response := `{"settings_keys":` + strconv.Itoa(result.SettingsKeys) + `,"device_keys":` + strconv.Itoa(result.DeviceKeys) + `,"recovery_point":"` + result.RecoveryPoint + `","restored_at":"` + result.RestoredAt.Format(time.RFC3339) + `"}`
-	w.Write([]byte(response))
+	json.NewEncoder(w).Encode(map[string]any{
+		"settings_keys":   result.SettingsKeys,
+		"device_keys":     result.DeviceKeys,
+		"recovery_point":  result.RecoveryPoint,
+		"restored_at":     result.RestoredAt.Format(time.RFC3339),
+	})
 }
 
 func isRestoreValidationError(err error) bool {
