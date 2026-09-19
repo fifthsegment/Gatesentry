@@ -12,6 +12,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"runtime"
 	"strings"
 	"time"
 
@@ -155,7 +156,7 @@ func loadBootstrapFile(path string) (bootstrapFile, error) {
 		return cfg, errors.New("cannot read bootstrap secret file")
 	}
 	openedInfo, statErr := file.Stat()
-	if statErr != nil || !openedInfo.Mode().IsRegular() || openedInfo.Mode().Perm()&0077 != 0 {
+	if statErr != nil || !openedInfo.Mode().IsRegular() || (runtime.GOOS != "windows" && openedInfo.Mode().Perm()&0077 != 0) {
 		if closeErr := file.Close(); closeErr != nil {
 			return cfg, errors.New("cannot close bootstrap secret file")
 		}

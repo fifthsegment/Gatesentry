@@ -477,6 +477,7 @@ func TestDirectorySyncFailureQuarantinesVisibleSnapshotUntilRestart(t *testing.T
 		t.Fatal(err)
 	}
 	oldSync := syncFile
+	oldDirSync := syncDirectory
 	oldWrite := writeTemporaryFile
 	writes := 0
 	writeTemporaryFile = func(file *os.File, data []byte) error {
@@ -486,15 +487,12 @@ func TestDirectorySyncFailureQuarantinesVisibleSnapshotUntilRestart(t *testing.T
 		}
 		return oldWrite(file, data)
 	}
-	syncFile = func(file *os.File) error {
-		info, err := file.Stat()
-		if err == nil && info.IsDir() {
-			return errors.New("injected directory sync failure")
-		}
-		return oldSync(file)
+	syncDirectory = func(file *os.File) error {
+		return errors.New("injected directory sync failure")
 	}
 	t.Cleanup(func() {
 		syncFile = oldSync
+		syncDirectory = oldDirSync
 		writeTemporaryFile = oldWrite
 	})
 	if err := store.Update("key", "value"); err == nil || !strings.Contains(err.Error(), "sync storage directory") {

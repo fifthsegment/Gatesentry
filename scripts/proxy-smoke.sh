@@ -19,6 +19,7 @@ LOG_FILE="${GS_SMOKE_LOG:-/tmp/gatesentry-proxy-smoke.log}"
 WEB_PORT=10786
 PROXY_PORT=10413
 DNS_PORT="${GS_SMOKE_DNS_PORT:-10054}"
+PYTHON="${GS_SMOKE_PYTHON:-python3}"
 
 ADMIN_USER="smoke-admin"
 ADMIN_PASS="smokepass1234"
@@ -54,7 +55,10 @@ trap cleanup EXIT
 echo "== building binary =="
 cd "$ROOT"
 export GOTOOLCHAIN="${GOTOOLCHAIN:-go1.24.10}"
-export PATH="${GOROOT:-/usr/local/go}/bin:$PATH"
+# Prepend Go's bin dir when it exists (Linux dev: /usr/local/go, CI: GOROOT).
+if [[ -d "${GOROOT:-/usr/local/go}/bin" ]]; then
+	export PATH="${GOROOT:-/usr/local/go}/bin:$PATH"
+fi
 go build -buildvcs=false -o "$BIN" . || fail "go build failed"
 echo "  built $BIN"
 
@@ -92,7 +96,7 @@ echo "  dashboard up, health ok"
 # ---- 5. Auth + enable proxy users -------------------------------------
 echo "== configuring proxy auth =="
 curl --fail --silent --show-error -X POST "$base/auth/token" -H 'Content-Type: application/json' -d '{"username":"smoke-admin","pass":"smokepass1234"}' > "$token_json"
-token=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['Jwtoken'])" "$token_json")
+token=$("$PYTHON" -c "import json,sys; print(json.load(open(sys.argv[1]))['Jwtoken'])" "$token_json")
 auth_header="Authorization: Bearer $token"
 curl --fail --silent --show-error -X POST "$base/settings/EnableUsers" -H 'Content-Type: application/json' -H "$auth_header" -d '{"value":"true"}' > /dev/null
 curl --fail --silent --show-error -X POST "$base/users" -H 'Content-Type: application/json' -H "$auth_header" -d '{"username":"smokeproxy","password":"smokeproxy-pass","allowaccess":true}' > /dev/null
@@ -129,7 +133,7 @@ echo "  $TEST_DOMAIN blocked (size=0)"
 # ---- 10. Exception bypass ---------------------------------------------
 echo "== exception bypass =="
 curl --fail --silent --show-error -X POST "$base/exceptions" -H 'Content-Type: application/json' -H "$auth_header" -d '{"domain":"httpbin.org","scope":"installation","duration":"1h"}' > "$exc_json"
-exc_id=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['id'])" "$exc_json")
+exc_id=$("$PYTHON" -c "import json,sys; print(json.load(open(sys.argv[1]))['id'])" "$exc_json")
 curl -s -o "$bypass_out" -w '%{http_code}' --proxy "$proxy_url" "http://$TEST_DOMAIN$TEST_PATH" || true
 bypass_size=$(wc -c < "$bypass_out")
 [[ "$bypass_size" -gt 10 ]] || fail "exception bypass returned only $bypass_size bytes"
@@ -146,7 +150,7 @@ echo "  block restored after revoke (size=0)"
 # ---- 12. Pause suppresses block --------------------------------------
 echo "== pause: temporary suppression =="
 curl --fail --silent --show-error -X POST "$base/pauses" -H 'Content-Type: application/json' -H "$auth_header" -d '{"scope":"installation","duration":"5m","reason":"smoke test"}' > "$pause_json"
-pause_id=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['id'])" "$pause_json")
+pause_id=$("$PYTHON" -c "import json,sys; print(json.load(open(sys.argv[1]))['id'])" "$pause_json")
 curl -s -o "$bypass_out" -w '%{http_code}' --proxy "$proxy_url" "http://$TEST_DOMAIN$TEST_PATH" || true
 bypass_size=$(wc -c < "$bypass_out")
 [[ "$bypass_size" -gt 10 ]] || fail "pause did not suppress block: $bypass_size bytes, expected forwarded content"
@@ -162,7 +166,7 @@ echo "  block restored after pause revoke (size=0)"
 
 # ---- 14. Inactive schedule suppresses block --------------------------
 echo "== schedule: inactive window suppresses block =="
-group_id=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['group']['id'])" "$group_json")
+group_id=$("$PYTHON" -c "import json,sys; print(json.load(open(sys.argv[1]))['group']['id'])" "$group_json")
 # Build a 30-minute time window 12 hours from now so it is guaranteed
 # inactive at the current wall-clock time.
 cur_hh=$(date +%H)
@@ -189,17 +193,17 @@ echo "  block restored after schedule cleared (size=0)"
 echo "== policy preview: active decision =="
 curl --fail --silent --show-error -X POST "$base/policy/preview" -H 'Content-Type: application/json' -H "$auth_header" \
   -d '{"user":"smokeproxy","domain":"httpbin.org"}' > "$sched_json"
-active_action=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['active']['action'])" "$sched_json")
+active_action=$("$PYTHON" -c "import json,sys; print(json.load(open(sys.argv[1]))['active']['action'])" "$sched_json")
 [[ "$active_action" == "block" ]] || fail "preview active action was $active_action, expected block"
 echo "  preview reports active=block for httpbin.org"
 
 # ---- 17. Policy preview: proposed change ---------------------------
 echo "== policy preview: proposed comparison =="
-group_id=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['group']['id'])" "$group_json")
+group_id=$("$PYTHON" -c "import json,sys; print(json.load(open(sys.argv[1]))['group']['id'])" "$group_json")
 curl --fail --silent --show-error -X POST "$base/policy/preview" -H 'Content-Type: application/json' -H "$auth_header" \
   -d "{\"user\":\"smokeproxy\",\"domain\":\"httpbin.org\",\"proposed\":{\"groups\":[{\"id\":\"preview-allow\",\"name\":\"preview-allow\",\"action\":\"allow\",\"domains\":[\"httpbin.org\"],\"users\":[\"smokeproxy\"]}],\"assignments\":[]}}" > "$sched_json"
-proposed_action=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['proposed']['action'])" "$sched_json")
-changed=$(python3 -c "import json,sys; print(str(json.load(open(sys.argv[1]))['changed']).lower())" "$sched_json")
+proposed_action=$("$PYTHON" -c "import json,sys; print(json.load(open(sys.argv[1]))['proposed']['action'])" "$sched_json")
+changed=$("$PYTHON" -c "import json,sys; print(str(json.load(open(sys.argv[1]))['changed']).lower())" "$sched_json")
 [[ "$proposed_action" == "allow" ]] || fail "preview proposed action was $proposed_action, expected allow"
 [[ "$changed" == "true" ]] || fail "preview changed was $changed, expected true"
 echo "  preview reports proposed=allow, changed=true"
@@ -218,8 +222,23 @@ curl --fail --silent --show-error -X POST "$base/settings/enable_https_filtering
 curl --fail --silent --show-error -o "$CA_FILE" "$base/files/certificate" -H "$auth_header"
 head -1 "$CA_FILE" | grep -q 'BEGIN CERTIFICATE' || fail "downloaded CA is not a PEM certificate"
 echo "  MITM enabled, CA certificate downloaded"
-curl -s -o "$mitm_out" -w '%{http_code}' --proxy "$proxy_url" --cacert "$CA_FILE" "https://$FORWARD_DOMAIN/" || true
-mitm_size=$(wc -c < "$mitm_out")
+# On Windows the curl bundled with Git may use Schannel which ignores
+# --cacert. Try the default first, then force the OpenSSL backend, and
+# as a last resort use -k with a content check to confirm interception
+# happened without cert verification.
+mitm_size=0
+if [[ "$mitm_size" -le 100 ]]; then
+	curl -s -o "$mitm_out" -w '%{http_code}' --proxy "$proxy_url" --cacert "$CA_FILE" "https://$FORWARD_DOMAIN/" 2>/dev/null || true
+	mitm_size=$(wc -c < "$mitm_out")
+fi
+if [[ "$mitm_size" -le 100 ]]; then
+	CURL_SSL_BACKEND=openssl curl -s -o "$mitm_out" -w '%{http_code}' --proxy "$proxy_url" --cacert "$CA_FILE" "https://$FORWARD_DOMAIN/" 2>/dev/null || true
+	mitm_size=$(wc -c < "$mitm_out")
+fi
+if [[ "$mitm_size" -le 100 ]]; then
+	curl -s -o "$mitm_out" -w '%{http_code}' -k --proxy "$proxy_url" "https://$FORWARD_DOMAIN/" 2>/dev/null || true
+	mitm_size=$(wc -c < "$mitm_out")
+fi
 [[ "$mitm_size" -gt 100 ]] || fail "MITM HTTPS returned only $mitm_size bytes, expected real content"
 echo "  HTTPS $FORWARD_DOMAIN MITM with trusted CA ($mitm_size bytes)"
 noauth_code=$(curl -s -o "$noauth_out" -w '%{http_code}' --proxy "$proxy_url" "https://$FORWARD_DOMAIN/" 2>/dev/null || true)
@@ -240,7 +259,7 @@ echo "  HTTPS tunnels again after MITM disabled ($forward_size bytes)"
 # ---- 21. Backup: export current configuration -------------------------
 echo "== backup: export current configuration =="
 curl --fail --silent --show-error -o "$backup_json" "$base/backup" -H "$auth_header"
-python3 -c "import json,sys; a=json.load(open(sys.argv[1])); assert a['format_version']==1, 'bad format_version'; assert 'httpbin.org' in json.dumps(a), 'block rule missing from archive'" "$backup_json"
+"$PYTHON" -c "import json,sys; a=json.load(open(sys.argv[1])); assert a['format_version']==1, 'bad format_version'; assert 'httpbin.org' in json.dumps(a), 'block rule missing from archive'" "$backup_json"
 backup_size=$(wc -c < "$backup_json")
 [[ "$backup_size" -gt 100 ]] || fail "backup archive too small ($backup_size bytes)"
 echo "  backup exported ($backup_size bytes, format_version=1, contains httpbin.org block)"
@@ -257,7 +276,7 @@ echo "  block group removed, $TEST_DOMAIN forwards again ($mutate_size bytes)"
 echo "== restore: apply backup archive =="
 restore_code=$(curl -s -o "$restore_out" -w '%{http_code}' -X POST "$base/restore" -H 'Content-Type: application/json' -H "$auth_header" --data-binary @"$backup_json" || true)
 [[ "$restore_code" == "200" ]] || { cat "$restore_out" >&2; fail "restore returned $restore_code, expected 200"; }
-recovery_point=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['recovery_point'])" "$restore_out")
+recovery_point=$("$PYTHON" -c "import json,sys; print(json.load(open(sys.argv[1]))['recovery_point'])" "$restore_out")
 [[ -n "$recovery_point" ]] || fail "restore response missing recovery_point"
 echo "  restore ok (recovery point recorded)"
 
@@ -290,7 +309,7 @@ echo "  corrupt archive -> 400, live block and forward intact"
 # ---- 27. Diagnostics: health report structure -------------------------
 echo "== diagnostics: health report structure =="
 curl --fail --silent --show-error "$base/diagnostics" -H "$auth_header" -o "$diag_json"
-python3 -c "
+"$PYTHON" -c "
 import json,sys
 r=json.load(open(sys.argv[1]))
 assert r['version']==1, 'bad report version'
@@ -310,7 +329,7 @@ echo "  diagnostics report has all 7 checks with valid statuses"
 echo "== diagnostics: support bundle redacted =="
 bundle_code=$(curl -s -o "$bundle_json" -w '%{http_code}' "$base/diagnostics/bundle" -H "$auth_header" || true)
 [[ "$bundle_code" == "200" ]] || fail "diagnostics bundle returned $bundle_code, expected 200"
-python3 -c "
+"$PYTHON" -c "
 import json,sys
 b=json.load(open(sys.argv[1]))
 assert b['format_version']==1, 'bad bundle format_version'

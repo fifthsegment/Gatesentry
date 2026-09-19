@@ -64,3 +64,31 @@ jobs:
           path: dist/
           if-no-files-found: error
           retention-days: 30
+
+  proxy-smoke-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version: 1.24.10
+          cache-dependency-path: |
+            go.sum
+            application/go.sum
+            gatesentryproxy/go.sum
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Proxy smoke (Windows binary + curl)
+        shell: bash
+        env:
+          GS_SMOKE_BIN: ${{ runner.temp }}/gatesentry-proxy-smoke.exe
+          GS_SMOKE_BOOTSTRAP: ${{ runner.temp }}/gs-smoke-bootstrap
+          GS_SMOKE_CA: ${{ runner.temp }}/gs-smoke-ca.pem
+          GS_SMOKE_PID: ${{ runner.temp }}/gs-smoke.pid
+          GS_SMOKE_LOG: ${{ runner.temp }}/gs-smoke.log
+          GS_SMOKE_PYTHON: python
+          GOTOOLCHAIN: go1.24.10
+        run: bash scripts/proxy-smoke.sh
