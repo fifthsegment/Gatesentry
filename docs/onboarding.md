@@ -74,6 +74,10 @@ onboarding steps above and does not extend the protection check; devices and
 protocols that do not use GateSentry for HTTPS remain outside HTTPS
 inspection.
 
+For consent, platform-specific certificate install/remove steps, a
+verification procedure, exclusions, and limits, see
+[HTTPS inspection](https-inspection.md).
+
 ## Ten-minute pilot protocol
 
 Run this script with pilot operators who have not seen the product before.

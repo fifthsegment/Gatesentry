@@ -4,6 +4,7 @@
 
   import ConnectedGeneralSettingInput from "../../components/connectedGeneralSettingInputs.svelte";
   import HttpsToggle from "../../components/httpsToggle.svelte";
+  import InspectionStatus from "../../components/inspectionStatus.svelte";
   import ConnectedCertificateComposed from "../../components/connectedCertificateComposed.svelte";
   import ConnectedSettingInput from "../../components/connectedSettingInput.svelte";
 	import { Breadcrumb, BreadcrumbItem, Button, InlineNotification, Tag, TextInput } from "carbon-components-svelte";
@@ -76,6 +77,8 @@
 />
 
 <HttpsToggle />
+
+<InspectionStatus />
 
 <ConnectedCertificateComposed />
 

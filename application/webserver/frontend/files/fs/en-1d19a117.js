@@ -1,1 +1,0 @@
-const e="Edit",o="Dashboard",s="Logs",d={"No results":"No results","Add row":"Add row","Delete item":"Delete item",Edit:e,"Blocked Keywords":"Blocked Keywords",Dashboard:o,Logs:s,"DNS Resolver":"DNS Resolver"};export{o as Dashboard,e as Edit,s as Logs,d as default};

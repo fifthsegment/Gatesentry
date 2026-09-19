@@ -193,3 +193,6 @@ trust stores, and review exclusions and limits in
 [Certificate trust and HTTPS interception](../SECURITY.md#certificate-trust-and-https-interception)
 before enabling it.
 
+For platform-specific certificate installation and removal, a verification
+step, and the inspection limits, see
+[HTTPS inspection](https-inspection.md).
