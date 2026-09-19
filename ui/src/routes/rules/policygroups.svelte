@@ -2,15 +2,17 @@
   import {
     Button,
     Column,
-    Grid,
     InlineLoading,
     InlineNotification,
+    ListItem,
     Row,
     Select,
     SelectItem,
     Tag,
     TextArea,
     TextInput,
+    Tile,
+    UnorderedList,
   } from "carbon-components-svelte";
   import { onMount } from "svelte";
   import { getBasePath } from "../../lib/navigate";
@@ -60,6 +62,21 @@
       unknown_device_policy: "",
       priority: 0,
     };
+  }
+
+  // Every starter ships the same DNS-scope caveat. State the caveats that all
+  // starters share once above the grid instead of repeating identical
+  // sentences inside every tile.
+  $: sharedLimitations = templates.length
+    ? (templates[0].limitations || []).filter((limitation) =>
+        templates.every((template) => (template.limitations || []).includes(limitation)),
+      )
+    : [];
+
+  function ownLimitations(template: PolicyTemplate): string[] {
+    return (template.limitations || []).filter(
+      (limitation) => !sharedLimitations.includes(limitation),
+    );
   }
 
   function token(): string {
@@ -236,13 +253,11 @@
     <div class="section-heading">
       <div>
         <h3>Policy templates</h3>
-        <p>
-          Review the protections and limitations first. Applying a template
-          creates an ordinary editable group; applying it again never resets a
-          group you have customized.
+        <p class="section-intro">
+          Applying a starter creates an ordinary editable group. Applying it
+          again never resets a group you have customized.
         </p>
       </div>
-      <Tag type="blue">Advanced rule editor remains below</Tag>
     </div>
 
     {#if error}
@@ -255,73 +270,98 @@
     {#if loading}
       <InlineLoading description="Loading policy templates and groups..." />
     {:else}
-      <Grid condensed>
-        {#each templates as template (template.id)}
-          <Column sm={4} md={4} lg={5} class="template-column">
-            <article class="template-card">
-              <h4>{template.name}</h4>
-              <p>{template.description}</p>
-              <h5>Before applying</h5>
-              <strong>Protections</strong>
-              <ul>
-                {#each template.protections as protection}
-                  <li>{protection}</li>
-                {/each}
-              </ul>
-              <strong>Limitations</strong>
-              <ul class="limitations">
-                {#each template.limitations as limitation}
-                  <li>{limitation}</li>
-                {/each}
-              </ul>
-              <Button size="small" disabled={saving || !template.available} on:click={() => applyTemplate(template)}>
-                Apply as editable group
-              </Button>
-            </article>
-          </Column>
-        {/each}
-      </Grid>
+      {#if sharedLimitations.length}
+        <div class="shared-caveats">
+          <InlineNotification
+            kind="info"
+            lowContrast
+            hideCloseButton
+            title="Applies to every starter"
+            subtitle={sharedLimitations.join(" ")}
+          />
+        </div>
+      {/if}
 
-      <div class="groups-heading">
+      <div class="template-grid">
+        <Row>
+          {#each templates as template (template.id)}
+            <Column sm={4} md={4} lg={4}>
+              <Tile>
+                <div class="template-tile">
+                  <h4>{template.name}</h4>
+                  <p class="tile-description">{template.description}</p>
+
+                  <h5>Protections</h5>
+                  <UnorderedList>
+                    {#each template.protections as protection}
+                      <ListItem>{protection}</ListItem>
+                    {/each}
+                  </UnorderedList>
+
+                  {#if ownLimitations(template).length}
+                    <h5>Limitations</h5>
+                    <UnorderedList>
+                      {#each ownLimitations(template) as limitation}
+                        <ListItem>{limitation}</ListItem>
+                      {/each}
+                    </UnorderedList>
+                  {/if}
+
+                  <Button size="small" disabled={saving || !template.available} on:click={() => applyTemplate(template)}>
+                    Apply as editable group
+                  </Button>
+                </div>
+              </Tile>
+            </Column>
+          {/each}
+        </Row>
+      </div>
+
+      <div class="section-heading groups-heading">
         <div>
           <h3>Editable policy groups</h3>
-          <p>These records drive explicit group assignment. Owner and category labels do not create policy rules.</p>
+          <p class="section-intro">
+            These records drive explicit group assignment. A name or category
+            label does not create a rule.
+          </p>
         </div>
         <Button size="small" kind="secondary" disabled={saving} on:click={beginCreate}>Create policy group</Button>
       </div>
 
       {#if editingGroupId === "new"}
-        <div class="group-editor">
-          <h4>New policy group</h4>
-          <TextInput labelText="Name" bind:value={draft.name} />
-          <TextArea labelText="Description" bind:value={draft.description} rows={2} />
-          <Select labelText="Domain action" bind:selected={draft.action}>
-            <SelectItem value="" text="No additional action" />
-            <SelectItem value="block" text="Block listed domains" />
-            <SelectItem value="allow" text="Allow listed domains" />
-          </Select>
-           <div class="domain-entry">
-            <TextInput labelText="Domain pattern" placeholder="example.com or *.example.com" bind:value={draftDomain} on:keydown={(event) => event.key === "Enter" && addDomain()} />
-            <Button size="small" kind="tertiary" on:click={addDomain}>Add domain</Button>
-          </div>
-          {#if draft.domains.length}
-            <div class="domain-tags">
-              {#each draft.domains as domain}
-                <Tag filter size="sm" on:close={() => removeDomain(domain)}>{domain}</Tag>
-              {/each}
+        <div class="group-slot">
+          <Tile>
+            <h4>New policy group</h4>
+            <TextInput labelText="Name" bind:value={draft.name} />
+            <TextArea labelText="Description" bind:value={draft.description} rows={2} />
+            <Select labelText="Domain action" bind:selected={draft.action}>
+              <SelectItem value="" text="No additional action" />
+              <SelectItem value="block" text="Block listed domains" />
+              <SelectItem value="allow" text="Allow listed domains" />
+            </Select>
+            <div class="domain-entry">
+              <TextInput labelText="Domain pattern" placeholder="example.com or *.example.com" bind:value={draftDomain} on:keydown={(event) => event.key === "Enter" && addDomain()} />
+              <Button size="small" kind="tertiary" on:click={addDomain}>Add domain</Button>
             </div>
-          {/if}
-          <div class="group-actions">
-            <Button size="small" disabled={saving} on:click={saveGroup}>Save group</Button>
-            <Button size="small" kind="ghost" on:click={cancelEdit}>Cancel</Button>
-          </div>
+            {#if draft.domains.length}
+              <div class="domain-tags">
+                {#each draft.domains as domain}
+                  <Tag filter size="sm" on:close={() => removeDomain(domain)}>{domain}</Tag>
+                {/each}
+              </div>
+            {/if}
+            <div class="group-actions">
+              <Button size="small" disabled={saving} on:click={saveGroup}>Save group</Button>
+              <Button size="small" kind="ghost" on:click={cancelEdit}>Cancel</Button>
+            </div>
+          </Tile>
         </div>
       {/if}
 
       {#each groups as group (group.id)}
-        <div class="group-row">
+        <div class="group-slot">
           {#if editingGroupId === group.id}
-            <div class="group-editor">
+            <Tile>
               <h4>Edit {group.name}</h4>
               <TextInput labelText="Name" bind:value={draft.name} />
               <TextArea labelText="Description" bind:value={draft.description} rows={2} />
@@ -345,28 +385,34 @@
                 <Button size="small" disabled={saving} on:click={saveGroup}>Save group</Button>
                 <Button size="small" kind="ghost" on:click={cancelEdit}>Cancel</Button>
               </div>
-            </div>
+            </Tile>
           {:else}
-            <div class="group-summary">
-              <h4>{group.name}</h4>
-              <Tag type={group.action === "block" ? "red" : group.action === "allow" ? "green" : "gray"}>
-                {group.action || "default behavior"}
-              </Tag>
-              <p>{group.description || "No description."}</p>
-              {#if group.domains?.length}
-                <div class="domain-tags">
-                  {#each group.domains as domain}
-                    <Tag size="sm" type="outline">{domain}</Tag>
-                  {/each}
+            <Tile>
+              <div class="group-row">
+                <div class="group-summary">
+                  <div class="group-title">
+                    <h4>{group.name}</h4>
+                    <Tag type={group.action === "block" ? "red" : group.action === "allow" ? "green" : "gray"}>
+                      {group.action || "default behavior"}
+                    </Tag>
+                  </div>
+                  <p>{group.description || "No description."}</p>
+                  {#if group.domains?.length}
+                    <div class="domain-tags">
+                      {#each group.domains as domain}
+                        <Tag size="sm" type="outline">{domain}</Tag>
+                      {/each}
+                    </div>
+                  {:else}
+                    <p class="muted">No explicit domain patterns. The gateway default policy remains in effect.</p>
+                  {/if}
                 </div>
-              {:else}
-                <p class="muted">No explicit domain patterns. The gateway default policy remains in effect.</p>
-              {/if}
-            </div>
-            <div class="group-actions">
-              <Button size="small" kind="ghost" disabled={saving} on:click={() => beginEdit(group)}>Edit</Button>
-              <Button size="small" kind="danger-tertiary" disabled={saving} on:click={() => deleteGroup(group)}>Delete</Button>
-            </div>
+                <div class="group-actions">
+                  <Button size="small" kind="ghost" disabled={saving} on:click={() => beginEdit(group)}>Edit</Button>
+                  <Button size="small" kind="danger-tertiary" disabled={saving} on:click={() => deleteGroup(group)}>Delete</Button>
+                </div>
+              </div>
+            </Tile>
           {/if}
         </div>
       {/each}
@@ -375,82 +421,130 @@
 </Row>
 
 <style>
-  .section-heading,
-  .groups-heading,
-  .group-row,
-  .domain-entry,
-  .group-actions {
-    display: flex;
-    align-items: flex-start;
-    gap: 1rem;
-  }
-  .section-heading,
-  .groups-heading {
-    justify-content: space-between;
-    margin: 1rem 0;
-  }
+  /* This build ships Carbon v10's compiled g10 theme, whose colors are literal
+     values rather than --cds-* custom properties, so v10 tokens are used
+     directly: #161616 text-01, #525252 text-02. Surfaces come from Carbon's
+     tile (#fff over the #f4f4f4 page background), so nothing here draws a
+     border or a shadow. */
   h3,
   h4,
   h5,
   p {
     margin-top: 0;
   }
-  .section-heading p,
-  .groups-heading p,
-  .template-card p,
-  .group-summary p,
-  .muted {
+  h3 {
+    margin-bottom: 0.25rem;
+    font-size: 1.25rem;
+    font-weight: 400;
+    line-height: 1.75rem;
+  }
+  h4 {
+    margin-bottom: 0.25rem;
+    font-size: 1rem;
+    font-weight: 600;
+    line-height: 1.375rem;
+  }
+  h5 {
+    margin: 1rem 0 0;
     color: #525252;
-    font-size: 0.875rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.32px;
+    line-height: 1rem;
   }
-  .template-card,
-  .group-row,
-  .group-editor {
-    border: 1px solid #c6c6c6;
-    padding: 1rem;
-    height: 100%;
-    box-sizing: border-box;
-  }
-  .template-card h4 {
-    margin-bottom: 0.5rem;
-  }
-  .template-card h5 {
-    margin: 1rem 0 0.35rem;
-  }
-  .template-card ul {
-    padding-left: 1.25rem;
-    font-size: 0.8125rem;
-  }
-  .template-card .limitations {
-    color: #525252;
+  .section-heading {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+    margin: 0 0 1rem;
   }
   .groups-heading {
     margin-top: 2rem;
   }
-  .group-row {
-    justify-content: space-between;
+  .section-intro,
+  .tile-description,
+  .group-summary p,
+  .muted {
+    color: #525252;
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+  }
+  .section-intro {
+    margin-bottom: 0;
+  }
+  /* Carbon's unordered list hangs its en dash one rem to the left of the item
+     text, so the list needs an inset to keep the dashes inside the tile. */
+  .template-tile :global(.bx--list--unordered) {
+    margin: 0.25rem 0 0;
+    padding-left: 1rem;
+  }
+  .template-tile :global(.bx--list__item) {
+    color: #525252;
+    font-size: 0.75rem;
+    line-height: 1.125rem;
+  }
+  .shared-caveats {
+    margin-bottom: 1rem;
+  }
+  /* The row is a flex container, so stretching the column and filling it from
+     the inside keeps every tile in a row the same height. */
+  .template-grid :global(.bx--col-sm-4),
+  .template-grid :global(.bx--col-md-4),
+  .template-grid :global(.bx--col-lg-4) {
+    display: flex;
+    margin-bottom: 1rem;
+  }
+  .template-grid :global(.bx--tile) {
+    display: flex;
+    flex-direction: column;
+  }
+  .template-tile {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+  }
+  .template-tile :global(.bx--btn) {
+    align-self: flex-start;
+    margin-top: auto;
+  }
+  .group-slot {
     margin-bottom: 0.75rem;
+  }
+  .group-slot :global(.bx--form-item) {
+    margin-bottom: 0.75rem;
+  }
+  .group-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
   }
   .group-summary {
     flex: 1;
   }
-  .group-summary h4 {
-    display: inline-block;
-    margin-right: 0.5rem;
+  .group-title {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.25rem;
   }
-  .group-editor {
-    width: 100%;
+  .group-title h4 {
+    margin: 0;
   }
-  .group-editor :global(.bx--text-input-wrapper),
-  .group-editor :global(.bx--text-area__wrapper),
-  .group-editor :global(.bx--select) {
-    margin-bottom: 0.75rem;
+  .group-title :global(.bx--tag),
+  .domain-tags :global(.bx--tag) {
+    margin: 0;
   }
   .domain-entry {
+    display: flex;
     align-items: flex-end;
+    gap: 1rem;
   }
   .domain-entry :global(.bx--text-input-wrapper) {
     flex: 1;
+  }
+  .domain-entry :global(.bx--form-item) {
+    margin-bottom: 0;
   }
   .domain-tags {
     display: flex;
@@ -459,8 +553,10 @@
     margin: 0.5rem 0;
   }
   .group-actions {
+    display: flex;
     align-items: center;
-    justify-content: flex-end;
     flex-shrink: 0;
+    gap: 0.5rem;
+    justify-content: flex-end;
   }
 </style>
