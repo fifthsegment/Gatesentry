@@ -30,10 +30,17 @@ async function setupButton() {
   })) as HTMLButtonElement;
 }
 
-// The hint is the only explanation the operator gets while the button is
-// disabled, so assert on it directly rather than on any matching field text.
+// Reasons that belong to one input are rendered as that field's own error text
+// (Carbon's red requirement line) instead of a paragraph below the form, so the
+// two assertions below have to be read together.
 function hint() {
   return document.querySelector(".hint")?.textContent?.trim() ?? "";
+}
+
+function fieldError(text: string) {
+  const message = screen.getByText(text);
+  expect(message.className).toContain("bx--form-requirement");
+  return message;
 }
 
 afterEach(() => {
@@ -57,16 +64,14 @@ test("enables setup once the confirmed password matches", async () => {
   mockStatus();
   render(Setup);
   const button = await setupButton();
-  const password = PASSWORD;
-
   await fill("Administrator username", "admin");
-  await fill("Password", password);
-  await fill("Confirm password", password);
+  await fill("Password", PASSWORD);
+  await fill("Confirm password", PASSWORD);
 
   expect(button.disabled).toBe(false);
 });
 
-test("reports a mismatched confirmation instead of staying silent", async () => {
+test("shows a mismatched confirmation as the confirm field's own error", async () => {
   mockStatus();
   render(Setup);
   const button = await setupButton();
@@ -76,21 +81,40 @@ test("reports a mismatched confirmation instead of staying silent", async () => 
   await fill("Confirm password", PASSWORD_MISMATCH);
 
   expect(button.disabled).toBe(true);
-  expect(hint()).toBe("Passwords do not match.");
+  expect(hint()).toBe("");
+  fieldError("Passwords do not match.");
 });
 
-test("reports the UTF-8 byte limit for an over-long password", async () => {
+test("shows the UTF-8 byte limit as the password field's own error", async () => {
   mockStatus();
   render(Setup);
   const button = await setupButton();
-  const tooLong = "a".repeat(80);
+
+  await fill("Administrator username", "admin");
+  await fill("Password", PASSWORD_SHORT);
+  await fill("Confirm password", PASSWORD_SHORT);
+
+  expect(button.disabled).toBe(true);
+  expect(hint()).toBe("");
+  fieldError(
+    "Password must contain between 12 and 72 UTF-8 bytes (currently 11).",
+  );
+});
+
+test("counts UTF-8 bytes rather than JavaScript characters in the field error", async () => {
+  mockStatus();
+  render(Setup);
+  const button = await setupButton();
+  // U+1F512 is four UTF-8 bytes but two JavaScript UTF-16 code units.
+  const tooLong = "\u{1F512}".repeat(19);
 
   await fill("Administrator username", "admin");
   await fill("Password", tooLong);
   await fill("Confirm password", tooLong);
 
   expect(button.disabled).toBe(true);
-  expect(hint()).toBe(
-    "Password must contain between 12 and 72 UTF-8 bytes (currently 80).",
+  expect(hint()).toBe("");
+  fieldError(
+    "Password must contain between 12 and 72 UTF-8 bytes (currently 76).",
   );
 });

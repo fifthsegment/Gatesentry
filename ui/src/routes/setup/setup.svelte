@@ -25,20 +25,27 @@
   let statusFailed = false;
   $: passwordBytes = utf8ByteLength(password);
   $: passwordLengthValid = passwordHasValidByteLength(password);
+  $: passwordLengthError = password.length > 0 && !passwordLengthValid;
+  $: passwordLengthMessage = `Password must contain between ${MIN_PASSWORD_BYTES} and ${MAX_PASSWORD_BYTES} UTF-8 bytes (currently ${passwordBytes}).`;
+  $: confirmationMismatch = confirmation.length > 0 && password !== confirmation;
   // Single source of truth for why "Complete setup" is disabled. The button
   // state and the visible explanation are derived from the same value so the
   // form can never sit disabled without telling the operator what is missing.
-  $: blockingReason = !username
-    ? "Enter an administrator username."
+  // Reasons that belong to one input are marked so they are rendered as that
+  // field's own error text instead of being repeated below the form.
+  $: blocker = !username
+    ? { message: "Enter an administrator username.", field: "" }
     : password.length === 0
-      ? "Enter a password."
-      : !passwordLengthValid
-        ? `Password must contain between ${MIN_PASSWORD_BYTES} and ${MAX_PASSWORD_BYTES} UTF-8 bytes (currently ${passwordBytes}).`
+      ? { message: "Enter a password.", field: "" }
+      : passwordLengthError
+        ? { message: passwordLengthMessage, field: "password" }
         : confirmation.length === 0
-          ? "Re-enter the password to confirm it."
-          : password !== confirmation
-            ? "Passwords do not match."
-            : "";
+          ? { message: "Re-enter the password to confirm it.", field: "" }
+          : confirmationMismatch
+            ? { message: "Passwords do not match.", field: "confirmation" }
+            : { message: "", field: "" };
+  $: blockingReason = blocker.message;
+  $: hintMessage = blocker.field === "" ? blocker.message : "";
 
   async function loadStatus() {
     statusFailed = false;
@@ -123,21 +130,21 @@
               autocomplete="new-password"
               labelText="Password"
               helperText={`Use ${MIN_PASSWORD_BYTES} to ${MAX_PASSWORD_BYTES} UTF-8 bytes.`}
-              invalid={password.length > 0 && !passwordLengthValid}
-              invalidText={`Password must contain between ${MIN_PASSWORD_BYTES} and ${MAX_PASSWORD_BYTES} UTF-8 bytes.`}
+              invalid={passwordLengthError}
+              invalidText={passwordLengthMessage}
               bind:value={password}
             />
             <PasswordInput
               required
               autocomplete="new-password"
               labelText="Confirm password"
-              invalid={confirmation.length > 0 && password !== confirmation}
+              invalid={confirmationMismatch}
               invalidText="Passwords do not match."
               bind:value={confirmation}
             />
             <br />
-            {#if statusLoaded && blockingReason}
-              <p class="hint" aria-live="polite">{blockingReason}</p>
+            {#if statusLoaded && hintMessage}
+              <p class="hint" aria-live="polite">{hintMessage}</p>
             {/if}
             <Button
               type="submit"
