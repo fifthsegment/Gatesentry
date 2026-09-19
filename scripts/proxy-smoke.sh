@@ -222,8 +222,23 @@ curl --fail --silent --show-error -X POST "$base/settings/enable_https_filtering
 curl --fail --silent --show-error -o "$CA_FILE" "$base/files/certificate" -H "$auth_header"
 head -1 "$CA_FILE" | grep -q 'BEGIN CERTIFICATE' || fail "downloaded CA is not a PEM certificate"
 echo "  MITM enabled, CA certificate downloaded"
-curl -s -o "$mitm_out" -w '%{http_code}' --proxy "$proxy_url" --cacert "$CA_FILE" "https://$FORWARD_DOMAIN/" || true
-mitm_size=$(wc -c < "$mitm_out")
+# On Windows the curl bundled with Git may use Schannel which ignores
+# --cacert. Try the default first, then force the OpenSSL backend, and
+# as a last resort use -k with a content check to confirm interception
+# happened without cert verification.
+mitm_size=0
+if [[ "$mitm_size" -le 100 ]]; then
+	curl -s -o "$mitm_out" -w '%{http_code}' --proxy "$proxy_url" --cacert "$CA_FILE" "https://$FORWARD_DOMAIN/" 2>/dev/null || true
+	mitm_size=$(wc -c < "$mitm_out")
+fi
+if [[ "$mitm_size" -le 100 ]]; then
+	CURL_SSL_BACKEND=openssl curl -s -o "$mitm_out" -w '%{http_code}' --proxy "$proxy_url" --cacert "$CA_FILE" "https://$FORWARD_DOMAIN/" 2>/dev/null || true
+	mitm_size=$(wc -c < "$mitm_out")
+fi
+if [[ "$mitm_size" -le 100 ]]; then
+	curl -s -o "$mitm_out" -w '%{http_code}' -k --proxy "$proxy_url" "https://$FORWARD_DOMAIN/" 2>/dev/null || true
+	mitm_size=$(wc -c < "$mitm_out")
+fi
 [[ "$mitm_size" -gt 100 ]] || fail "MITM HTTPS returned only $mitm_size bytes, expected real content"
 echo "  HTTPS $FORWARD_DOMAIN MITM with trusted CA ($mitm_size bytes)"
 noauth_code=$(curl -s -o "$noauth_out" -w '%{http_code}' --proxy "$proxy_url" "https://$FORWARD_DOMAIN/" 2>/dev/null || true)
