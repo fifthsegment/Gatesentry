@@ -12,6 +12,7 @@ HTTP/HTTPS proxy with SSL interception (MITM), content filtering, and a built-in
 Runs as a local proxy on your machine or network. Clients route traffic through it and Gatesentry can:
 
 - Inspect and filter HTTPS traffic when advanced MITM is enabled, routed, and configured with a trusted CA certificate
+    - Platform-specific certificate install/remove, verification, and coverage limits are documented in [HTTPS inspection](docs/https-inspection.md).
 - Block domains via DNS (runs its own DNS server, pulls blocklists from external sources)
 - Match URLs and content against keyword, MIME, and domain rules
 - Apply time-based and per-user access schedules
@@ -202,4 +203,3 @@ GateSentry builds with Go 1.24.10, Node.js 24.x, and Yarn 4.10.3. Enable the exa
 Use `make verify-go` when the frontend assets have already been freshly synced and only Go checks are needed. `make docker-smoke` separately builds the checked-out revision into an image and exercises the dashboard and explicit proxy; it requires Docker and network access. The slower privileged integration suite remains available through `make test`.
 
 `make release-artifacts` writes cross-platform binaries, checksums, and the exact source commit to `dist/`. Ordinary branch builds only produce reviewable artifacts. Release publication requires an existing tag that resolves to the checked-out commit, and Docker publication uses the same tagged source rather than downloading another release.
-

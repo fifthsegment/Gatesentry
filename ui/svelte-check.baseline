@@ -25,8 +25,6 @@ WARNING "src/components/connectedCertificateComposed.svelte" 25:3 "A11y: A form 
 WARNING "src/components/dnsArecords.svelte" 208:11 "Empty block"
 WARNING "src/components/filtereditor.svelte" 222:11 "A11y: <div> with click handler must have an ARIA role"
 WARNING "src/components/filtereditor.svelte" 222:11 "A11y: visible, non-interactive elements with an on:click event must be accompanied by an on:keydown, on:keyup, or on:keypress event."
-WARNING "src/components/httpsToggle.svelte" 18:3 "A11y: <div> with click handler must have an ARIA role"
-WARNING "src/components/httpsToggle.svelte" 18:3 "A11y: visible, non-interactive elements with an on:click event must be accompanied by an on:keydown, on:keyup, or on:keypress event."
 WARNING "src/components/modal.svelte" 7:14 "Component has unused export property 'children'. If it is for external reference only, please consider using `export const children`"
 WARNING "src/components/toggle.svelte" 60:3 "Empty block"
 WARNING "src/routes/dns/dns.svelte" 57:9 "A11y: <span> with click handler must have an ARIA role"
@@ -41,4 +39,4 @@ WARNING "src/routes/rules/rform.svelte" 109:5 "A11y: visible, non-interactive el
 WARNING "src/routes/rules/rform.svelte" 134:5 "A11y: <div> with click handler must have an ARIA role"
 WARNING "src/routes/rules/rform.svelte" 134:5 "A11y: visible, non-interactive elements with an on:click event must be accompanied by an on:keydown, on:keyup, or on:keypress event."
 WARNING "src/routes/users/usermodal.svelte" 17:14 "Component has unused export property 'showForm'. If it is for external reference only, please consider using `export const showForm`"
-COMPLETED 594 FILES 20 ERRORS 23 WARNINGS 16 FILES_WITH_PROBLEMS
+COMPLETED 596 FILES 20 ERRORS 21 WARNINGS 15 FILES_WITH_PROBLEMS

@@ -476,6 +476,13 @@ func RegisterEndpointsStartServer(
 		}
 		SendJSON(w, output)
 	})
+	internalServer.Get("/api/certificate/inspection", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiInspectionGET(w, r, gatesentryWebserverEndpoints.InspectionDeps{
+			Settings: internalSettings,
+			Filters:  Filters,
+			Logger:   logger,
+		})
+	})
 
 	internalServer.Get("/api/files/certificate", HttpHandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		output, err := gatesentryWebserverEndpoints.GetCertificateBytes(internalSettings)

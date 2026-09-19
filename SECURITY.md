@@ -54,6 +54,8 @@ Trust alone does not route traffic through GateSentry. HTTPS inspection requires
 
 When HTTPS filtering is disabled, or a host is configured not to be bumped, the proxy can tunnel the connection without inspecting its encrypted content. Certificate-pinned applications and clients with incompatible trust behavior can reject interception. Some interception failures in the current proxy can fall back to a direct connection. These cases can fail at the client or bypass content inspection depending on the path; test each important client. GateSentry does not provide universal HTTPS or malware coverage.
 
+For platform-specific certificate installation and removal steps, a verification procedure, and the full set of inspection limits, see [HTTPS inspection](docs/https-inspection.md).
+
 ## Local data and privacy
 
 For a binary installation, startup builds the data path as a `gatesentry` subdirectory of the directory component used to invoke the program, then converts that path to an absolute path. For the common `./gatesentry-{os}-{arch}` invocation, this is `./gatesentry` under the current working directory. A bare command found through `PATH` also uses the current working directory; the program does not resolve the executable's installed location. With the supplied Docker configuration, `./gatesentry-bin` is launched from `/usr/local/gatesentry`, so the data directory is `/usr/local/gatesentry/gatesentry` in the container and is mounted from `./docker_root` on the host.

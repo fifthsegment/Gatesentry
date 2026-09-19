@@ -109,3 +109,93 @@ func TestCreateBundleUsesSafeAllowlist(t *testing.T) {
 		t.Fatalf("filter summary missing: %+v", bundle.Filters)
 	}
 }
+
+func TestHttpsInspectionCheckDisabled(t *testing.T) {
+	now := time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC)
+	store := testStore(t)
+	if err := store.Update("enable_https_filtering", "false"); err != nil {
+		t.Fatal(err)
+	}
+	report := Run(Deps{Now: func() time.Time { return now }, Settings: store, DnsInfo: &gatesentryTypes.DnsServerInfo{NumberDomainsBlocked: 5, LastUpdated: int(now.Add(-1 * time.Hour).Unix())}, Listener: func(context.Context, string, string) error { return nil }, UpstreamCheck: func(context.Context, string) error { return nil }})
+	byName := map[string]Check{}
+	for _, c := range report.Checks {
+		byName[c.Name] = c
+	}
+	if byName["https_inspection"].Status != StatusOK {
+		t.Fatalf("disabled inspection should be ok: %+v", byName["https_inspection"])
+	}
+	if !strings.Contains(byName["https_inspection"].Message, "disabled") {
+		t.Fatalf("disabled inspection message should mention disabled: %+v", byName["https_inspection"])
+	}
+}
+
+func TestHttpsInspectionCheckEnabledValid(t *testing.T) {
+	now := time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC)
+	store := testStore(t)
+	if err := store.Update("enable_https_filtering", "true"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Update("capem", certificatePEM(t, now.Add(30*24*time.Hour))); err != nil {
+		t.Fatal(err)
+	}
+	report := Run(Deps{Now: func() time.Time { return now }, Settings: store, DnsInfo: &gatesentryTypes.DnsServerInfo{NumberDomainsBlocked: 5, LastUpdated: int(now.Add(-1 * time.Hour).Unix())}, Listener: func(context.Context, string, string) error { return nil }, UpstreamCheck: func(context.Context, string) error { return nil }})
+	byName := map[string]Check{}
+	for _, c := range report.Checks {
+		byName[c.Name] = c
+	}
+	if byName["https_inspection"].Status != StatusOK {
+		t.Fatalf("enabled with valid cert should be ok: %+v", byName["https_inspection"])
+	}
+	if !strings.Contains(byName["https_inspection"].Message, "enabled") {
+		t.Fatalf("message should mention enabled: %+v", byName["https_inspection"])
+	}
+}
+
+func TestHttpsInspectionCheckEnabledExpiredCertFailsWithRecovery(t *testing.T) {
+	now := time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC)
+	store := testStore(t)
+	if err := store.Update("enable_https_filtering", "true"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Update("capem", certificatePEM(t, now.Add(-24*time.Hour))); err != nil {
+		t.Fatal(err)
+	}
+	report := Run(Deps{Now: func() time.Time { return now }, Settings: store, DnsInfo: &gatesentryTypes.DnsServerInfo{NumberDomainsBlocked: 5, LastUpdated: int(now.Add(-1 * time.Hour).Unix())}, Listener: func(context.Context, string, string) error { return nil }, UpstreamCheck: func(context.Context, string) error { return nil }})
+	byName := map[string]Check{}
+	for _, c := range report.Checks {
+		byName[c.Name] = c
+	}
+	if byName["https_inspection"].Status != StatusFailed {
+		t.Fatalf("enabled with expired cert should fail: %+v", byName["https_inspection"])
+	}
+	if byName["https_inspection"].Recovery == "" {
+		t.Fatalf("expired cert should have a recovery step: %+v", byName["https_inspection"])
+	}
+	if !strings.Contains(byName["https_inspection"].Message, "expired") {
+		t.Fatalf("message should mention expired: %+v", byName["https_inspection"])
+	}
+	// The overall report must reflect the failure.
+	if report.Overall != StatusFailed {
+		t.Fatalf("overall = %q, want failed", report.Overall)
+	}
+}
+
+func TestHttpsInspectionCheckEnabledMissingCertFails(t *testing.T) {
+	now := time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC)
+	store := testStore(t)
+	if err := store.Update("enable_https_filtering", "true"); err != nil {
+		t.Fatal(err)
+	}
+	// No capem stored.
+	report := Run(Deps{Now: func() time.Time { return now }, Settings: store, DnsInfo: &gatesentryTypes.DnsServerInfo{NumberDomainsBlocked: 5, LastUpdated: int(now.Add(-1 * time.Hour).Unix())}, Listener: func(context.Context, string, string) error { return nil }, UpstreamCheck: func(context.Context, string) error { return nil }})
+	byName := map[string]Check{}
+	for _, c := range report.Checks {
+		byName[c.Name] = c
+	}
+	if byName["https_inspection"].Status != StatusFailed {
+		t.Fatalf("enabled with missing cert should fail: %+v", byName["https_inspection"])
+	}
+	if byName["https_inspection"].Recovery == "" {
+		t.Fatalf("missing cert should have a recovery step: %+v", byName["https_inspection"])
+	}
+}

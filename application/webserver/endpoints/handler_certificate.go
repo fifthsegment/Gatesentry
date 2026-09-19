@@ -4,6 +4,7 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"errors"
+	"time"
 
 	gatesentry2storage "bitbucket.org/abdullah_irfan/gatesentryf/storage"
 )
@@ -100,4 +101,44 @@ func getCertInfo(certPEM string) (string, string, error) {
 	expiry := cert.NotAfter.Format("2006-01-02 15:04:05")
 
 	return name, expiry, nil
+}
+
+// CertDetail is the parsed certificate metadata used by the HTTPS inspection
+// status endpoint and the diagnostics check. It carries no private-key
+// material and no secrets.
+type CertDetail struct {
+	Name      string `json:"name"`
+	NotBefore string `json:"not_before"`
+	NotAfter  string `json:"not_after"`
+	Expired   bool   `json:"expired"`
+}
+
+// ErrCertUnavailable reports that no CA certificate is configured. Callers
+// use it to tell "not configured" apart from "configured but unparseable".
+var ErrCertUnavailable = errors.New("certificate is not available")
+
+// ParseCertDetail decodes and parses the PEM-encoded CA certificate stored
+// under CERTIFICATE_KEY. It returns ErrCertUnavailable when the setting is
+// absent or empty, so callers can distinguish "not configured" from
+// "present but invalid".
+func ParseCertDetail(settings *gatesentry2storage.MapStore) (CertDetail, error) {
+	cert, err := settings.GetE(CERTIFICATE_KEY)
+	if err != nil || cert == "" {
+		return CertDetail{}, ErrCertUnavailable
+	}
+	block, _ := pem.Decode([]byte(cert))
+	if block == nil {
+		return CertDetail{}, errors.New("failed to decode PEM block")
+	}
+	parsed, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return CertDetail{}, err
+	}
+	now := time.Now().UTC()
+	return CertDetail{
+		Name:      parsed.Subject.CommonName,
+		NotBefore: parsed.NotBefore.UTC().Format(time.RFC3339),
+		NotAfter:  parsed.NotAfter.UTC().Format(time.RFC3339),
+		Expired:   !now.Before(parsed.NotAfter),
+	}, nil
 }

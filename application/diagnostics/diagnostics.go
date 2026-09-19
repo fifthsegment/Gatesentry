@@ -7,6 +7,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	"net"
+	"strings"
 	"time"
 
 	gatesentryDiscovery "bitbucket.org/abdullah_irfan/gatesentryf/dns/discovery"
@@ -65,7 +66,7 @@ func (d Deps) now() time.Time {
 
 func Run(d Deps) Report {
 	r := Report{Version: 1, CheckedAt: d.now()}
-	r.Checks = []Check{listenerCheck(d), upstreamCheck(d), blocklistCheck(d), certificateCheck(d), storageCheck(d), discoveryCheck(d), policyCheck(d)}
+	r.Checks = []Check{listenerCheck(d), upstreamCheck(d), blocklistCheck(d), certificateCheck(d), httpsInspectionCheck(d), storageCheck(d), discoveryCheck(d), policyCheck(d)}
 	r.Overall = StatusOK
 	for _, c := range r.Checks {
 		if c.Status == StatusFailed {
@@ -184,6 +185,40 @@ func certificateCheck(d Deps) Check {
 		return result("certificate", StatusFailed, fmt.Sprintf("The gateway certificate expired on %s.", cert.NotAfter.UTC().Format(time.RFC3339)), "Renew the gateway certificate and install the replacement.")
 	}
 	return result("certificate", StatusOK, fmt.Sprintf("The gateway certificate expires on %s.", cert.NotAfter.UTC().Format(time.RFC3339)), "")
+}
+
+// httpsInspectionCheck reports the state of optional HTTPS (MITM) inspection.
+// It is a read-only report: it never mutates configuration, rotates
+// certificates, or writes to the decision log. When inspection is disabled
+// it reports ok with a note that content inspection is off; when enabled it
+// reuses the same certificate parsing path as certificateCheck to report a
+// valid certificate or a failure with a recovery step.
+func httpsInspectionCheck(d Deps) Check {
+	if d.Settings == nil {
+		return unknown("https_inspection", "Settings storage is unavailable; inspection state cannot be determined.", "Check the data directory and its permissions.")
+	}
+	raw, err := d.Settings.GetE("enable_https_filtering")
+	if err != nil || raw == "" || !strings.EqualFold(raw, "true") {
+		return result("https_inspection", StatusOK, "HTTPS content inspection is disabled; TLS content scanning is not active.", "Enable HTTPS filtering only after installing the gateway CA certificate and reviewing the privacy notice.")
+	}
+	// Inspection is enabled; verify the certificate is present and valid so
+	// the operator gets a recovery step instead of a silent failure.
+	rawCert, err := d.Settings.GetE("capem")
+	if err != nil || rawCert == "" {
+		return result("https_inspection", StatusFailed, "HTTPS inspection is enabled but the gateway CA certificate is unavailable.", "Restore the CA certificate or regenerate it, then install it on clients following docs/https-inspection.md.")
+	}
+	block, _ := pem.Decode([]byte(rawCert))
+	if block == nil {
+		return result("https_inspection", StatusFailed, "HTTPS inspection is enabled but the gateway CA certificate is not valid PEM.", "Replace the CA certificate with a valid PEM encoded certificate and reinstall it on clients.")
+	}
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return result("https_inspection", StatusFailed, "HTTPS inspection is enabled but the gateway CA certificate could not be parsed.", "Replace the CA certificate with a valid X.509 certificate and reinstall it on clients.")
+	}
+	if !d.now().Before(cert.NotAfter) {
+		return result("https_inspection", StatusFailed, fmt.Sprintf("HTTPS inspection is enabled but the gateway CA certificate expired on %s.", cert.NotAfter.UTC().Format(time.RFC3339)), "Renew the CA certificate, install the replacement on clients, and verify interception following docs/https-inspection.md.")
+	}
+	return result("https_inspection", StatusOK, fmt.Sprintf("HTTPS inspection is enabled with a valid CA certificate expiring on %s.", cert.NotAfter.UTC().Format(time.RFC3339)), "Verify that clients trust the gateway CA and test interception following docs/https-inspection.md.")
 }
 
 func storageCheck(d Deps) Check {
