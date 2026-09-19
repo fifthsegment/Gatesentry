@@ -1,6 +1,9 @@
 <script lang="ts">
   import {
+    Accordion,
+    AccordionItem,
     Button,
+    Checkbox,
     Column,
     InlineLoading,
     InlineNotification,
@@ -24,6 +27,7 @@
     description: string;
     protections: string[];
     limitations: string[];
+    categories: string[];
     group_id: string;
     available: boolean;
   };
@@ -33,19 +37,44 @@
     name: string;
     description: string;
     domains: string[];
+    categories: string[];
     action: string;
     users: string[];
     unknown_device_policy: string;
     priority: number;
   };
 
+  // One self-updating domain feed. The counts come from the last download, so
+  // the page can show what a category actually covers.
+  type CategoryStatus = {
+    id: string;
+    name: string;
+    description: string;
+    domain_count: number;
+    updated_at?: string;
+    enabled: boolean;
+  };
+
+  // A device only leaves the gateway default policy once it is assigned to a
+  // group, so the group list shows the assignments that make it effective.
+  type DeviceAssignment = {
+    device_id: string;
+    group_id: string;
+  };
+
   const TEMPLATES_API = getBasePath() + "/api/policy/templates";
   const GROUPS_API = getBasePath() + "/api/policy/groups";
+  const CATEGORIES_API = getBasePath() + "/api/policy/categories";
+  const ASSIGNMENTS_API = getBasePath() + "/api/policy/assignments";
 
   let templates: PolicyTemplate[] = [];
   let groups: PolicyGroup[] = [];
+  let categories: CategoryStatus[] = [];
+  let assignments: DeviceAssignment[] = [];
+  let gatewaySelection: string[] = [];
   let loading = true;
   let saving = false;
+  let savingCategories = false;
   let error = "";
   let success = "";
   let editingGroupId = "";
@@ -57,6 +86,7 @@
       name: "",
       description: "",
       domains: [],
+      categories: [],
       action: "",
       users: [],
       unknown_device_policy: "",
@@ -106,20 +136,34 @@
     loading = true;
     error = "";
     try {
-      const [templateResponse, groupResponse] = await Promise.all([
-        fetch(TEMPLATES_API, { headers: headers() }),
-        fetch(GROUPS_API, { headers: headers() }),
-      ]);
+      const [templateResponse, groupResponse, categoryResponse, assignmentResponse] =
+        await Promise.all([
+          fetch(TEMPLATES_API, { headers: headers() }),
+          fetch(GROUPS_API, { headers: headers() }),
+          fetch(CATEGORIES_API, { headers: headers() }),
+          fetch(ASSIGNMENTS_API, { headers: headers() }),
+        ]);
       if (!templateResponse.ok) {
         throw new Error(await responseError(templateResponse));
       }
       if (!groupResponse.ok) {
         throw new Error(await responseError(groupResponse));
       }
+      if (!categoryResponse.ok) {
+        throw new Error(await responseError(categoryResponse));
+      }
+      if (!assignmentResponse.ok) {
+        throw new Error(await responseError(assignmentResponse));
+      }
       const templateData = await templateResponse.json();
       const groupData = await groupResponse.json();
+      const categoryData = await categoryResponse.json();
+      const assignmentData = await assignmentResponse.json();
       templates = templateData.templates || [];
       groups = groupData.groups || [];
+      categories = categoryData.categories || [];
+      assignments = assignmentData.assignments || [];
+      gatewaySelection = categories.filter((category) => category.enabled).map((category) => category.id);
     } catch (err) {
       error = err.message;
     } finally {
@@ -140,6 +184,7 @@
       name: group.name,
       description: group.description || "",
       domains: [...(group.domains || [])],
+      categories: [...(group.categories || [])],
       action: group.action || "",
       users: [...(group.users || [])],
       unknown_device_policy: group.unknown_device_policy || "",
@@ -165,6 +210,43 @@
     draft.domains = draft.domains.filter((candidate) => candidate !== domain);
   }
 
+  // Category checkboxes are driven by an explicit selection array rather than a
+  // bound group, so the same helper serves the gateway selection and the group
+  // draft and neither can drift from what the API stored.
+  function toggleSelection(selection: string[], id: string, checked: boolean): string[] {
+    const selected = selection.includes(id);
+    if (checked && !selected) return [...selection, id];
+    if (!checked && selected) return selection.filter((candidate) => candidate !== id);
+    return selection;
+  }
+
+  function setDraftCategory(id: string, checked: boolean) {
+    draft.categories = toggleSelection(draft.categories, id, checked);
+  }
+
+  function setGatewayCategory(id: string, checked: boolean) {
+    gatewaySelection = toggleSelection(gatewaySelection, id, checked);
+  }
+
+  function categoryName(id: string): string {
+    const found = categories.find((category) => category.id === id);
+    return found ? found.name : id;
+  }
+
+  function coverageLabel(category: CategoryStatus): string {
+    if (!category.domain_count) return "Not downloaded yet";
+    return category.domain_count.toLocaleString() + " domains";
+  }
+
+  // "Who does this apply to?" is the question the group list has to answer,
+  // and the answer is the devices assigned to it.
+  function assignmentLabel(groupID: string): string {
+    const count = assignments.filter((assignment) => assignment.group_id === groupID).length;
+    if (!count) return "No devices assigned, so it is not enforced on any device yet. Assign it from the device page.";
+    if (count === 1) return "Enforced on 1 assigned device.";
+    return "Enforced on " + count + " assigned devices.";
+  }
+
   let draftDomain = "";
 
   async function saveGroup() {
@@ -186,6 +268,7 @@
           name: draft.name.trim(),
           description: draft.description,
           domains: draft.domains,
+          categories: draft.categories,
           action: draft.action,
           users: draft.users,
           unknown_device_policy: draft.unknown_device_policy,
@@ -203,6 +286,32 @@
       error = err.message;
     } finally {
       saving = false;
+    }
+  }
+
+  async function saveGatewayCategories() {
+    savingCategories = true;
+    error = "";
+    success = "";
+    try {
+      const response = await fetch(CATEGORIES_API, {
+        method: "PUT",
+        headers: headers(true),
+        body: JSON.stringify({ categories: gatewaySelection }),
+      });
+      if (!response.ok) throw new Error(await responseError(response));
+      const data = await response.json();
+      categories = data.categories || [];
+      gatewaySelection = categories.filter((category) => category.enabled).map((category) => category.id);
+      // The download runs in the background, so the counts may still be the
+      // previous ones when this response is written.
+      success = data.refresh_scheduled
+        ? "Categories saved. The gateway is downloading the feeds now, so refresh in a moment to see the new counts."
+        : "Categories saved. A download was already running, so the counts update when it finishes.";
+    } catch (err) {
+      error = err.message;
+    } finally {
+      savingCategories = false;
     }
   }
 
@@ -250,16 +359,6 @@
 
 <Row>
   <Column>
-    <div class="section-heading">
-      <div>
-        <h3>Policy templates</h3>
-        <p class="section-intro">
-          Applying a starter creates an ordinary editable group. Applying it
-          again never resets a group you have customized.
-        </p>
-      </div>
-    </div>
-
     {#if error}
       <InlineNotification kind="error" title="Error" subtitle={error} on:close={() => (error = "")} />
     {/if}
@@ -270,6 +369,47 @@
     {#if loading}
       <InlineLoading description="Loading policy templates and groups..." />
     {:else}
+      <div class="section-heading">
+        <div>
+          <h3>Blocked categories</h3>
+          <p class="section-intro">
+            Domain lists the gateway downloads and keeps current, so no one has
+            to type domains. A category selected here is blocked for every
+            device, like the global blocklist.
+          </p>
+        </div>
+        <Button size="small" disabled={savingCategories} on:click={saveGatewayCategories}>
+          Save categories
+        </Button>
+      </div>
+
+      <div class="category-grid">
+        {#each categories as category (category.id)}
+          <div class="category-item">
+            <div class="category-line">
+              <Checkbox
+                labelText={category.name}
+                checked={gatewaySelection.includes(category.id)}
+                disabled={savingCategories}
+                on:check={(event) => setGatewayCategory(category.id, event.detail)}
+              />
+              <span class="category-count">{coverageLabel(category)}</span>
+            </div>
+            <p class="category-note">{category.description}</p>
+          </div>
+        {/each}
+      </div>
+
+      <div class="section-heading templates-heading">
+        <div>
+          <h3>Policy templates</h3>
+          <p class="section-intro">
+            Applying a starter creates an ordinary editable group. Applying it
+            again never resets a group you have customized.
+          </p>
+        </div>
+      </div>
+
       {#if sharedLimitations.length}
         <div class="shared-caveats">
           <InlineNotification
@@ -321,8 +461,9 @@
         <div>
           <h3>Editable policy groups</h3>
           <p class="section-intro">
-            These records drive explicit group assignment. A name or category
-            label does not create a rule.
+            A group is a list of categories and domains plus one action. It
+            applies only to the devices you assign to it; every other device
+            keeps the gateway default policy.
           </p>
         </div>
         <Button size="small" kind="secondary" disabled={saving} on:click={beginCreate}>Create policy group</Button>
@@ -336,20 +477,42 @@
             <TextArea labelText="Description" bind:value={draft.description} rows={2} />
             <Select labelText="Domain action" bind:selected={draft.action}>
               <SelectItem value="" text="No additional action" />
-              <SelectItem value="block" text="Block listed domains" />
-              <SelectItem value="allow" text="Allow listed domains" />
+              <SelectItem value="block" text="Block the selected categories and domains" />
+              <SelectItem value="allow" text="Allow the selected categories and domains" />
             </Select>
-            <div class="domain-entry">
-              <TextInput labelText="Domain pattern" placeholder="example.com or *.example.com" bind:value={draftDomain} on:keydown={(event) => event.key === "Enter" && addDomain()} />
-              <Button size="small" kind="tertiary" on:click={addDomain}>Add domain</Button>
-            </div>
-            {#if draft.domains.length}
-              <div class="domain-tags">
-                {#each draft.domains as domain}
-                  <Tag filter size="sm" on:close={() => removeDomain(domain)}>{domain}</Tag>
+            <fieldset class="category-fieldset">
+              <legend class="category-legend">Categories</legend>
+              <div class="category-grid">
+                {#each categories as category (category.id)}
+                  <div class="category-item">
+                    <div class="category-line">
+                      <Checkbox
+                        labelText={category.name}
+                        checked={draft.categories.includes(category.id)}
+                        on:check={(event) => setDraftCategory(category.id, event.detail)}
+                      />
+                      <span class="category-count">{coverageLabel(category)}</span>
+                    </div>
+                    <p class="category-note">{category.description}</p>
+                  </div>
                 {/each}
               </div>
-            {/if}
+            </fieldset>
+            <Accordion>
+              <AccordionItem title="Specific domains">
+                <div class="domain-entry">
+                  <TextInput labelText="Domain pattern" placeholder="example.com or *.example.com" bind:value={draftDomain} on:keydown={(event) => event.key === "Enter" && addDomain()} />
+                  <Button size="small" kind="tertiary" on:click={addDomain}>Add domain</Button>
+                </div>
+                {#if draft.domains.length}
+                  <div class="domain-tags">
+                    {#each draft.domains as domain}
+                      <Tag filter size="sm" on:close={() => removeDomain(domain)}>{domain}</Tag>
+                    {/each}
+                  </div>
+                {/if}
+              </AccordionItem>
+            </Accordion>
             <div class="group-actions">
               <Button size="small" disabled={saving} on:click={saveGroup}>Save group</Button>
               <Button size="small" kind="ghost" on:click={cancelEdit}>Cancel</Button>
@@ -367,20 +530,42 @@
               <TextArea labelText="Description" bind:value={draft.description} rows={2} />
               <Select labelText="Domain action" bind:selected={draft.action}>
                 <SelectItem value="" text="No additional action" />
-                <SelectItem value="block" text="Block listed domains" />
-                <SelectItem value="allow" text="Allow listed domains" />
+                <SelectItem value="block" text="Block the selected categories and domains" />
+                <SelectItem value="allow" text="Allow the selected categories and domains" />
               </Select>
-              <div class="domain-entry">
-                <TextInput labelText="Domain pattern" placeholder="example.com or *.example.com" bind:value={draftDomain} on:keydown={(event) => event.key === "Enter" && addDomain()} />
-                <Button size="small" kind="tertiary" on:click={addDomain}>Add domain</Button>
-              </div>
-              {#if draft.domains.length}
-                <div class="domain-tags">
-                  {#each draft.domains as domain}
-                    <Tag filter size="sm" on:close={() => removeDomain(domain)}>{domain}</Tag>
+              <fieldset class="category-fieldset">
+                <legend class="category-legend">Categories</legend>
+                <div class="category-grid">
+                  {#each categories as category (category.id)}
+                    <div class="category-item">
+                      <div class="category-line">
+                        <Checkbox
+                          labelText={category.name}
+                          checked={draft.categories.includes(category.id)}
+                          on:check={(event) => setDraftCategory(category.id, event.detail)}
+                        />
+                        <span class="category-count">{coverageLabel(category)}</span>
+                      </div>
+                      <p class="category-note">{category.description}</p>
+                    </div>
                   {/each}
                 </div>
-              {/if}
+              </fieldset>
+              <Accordion>
+                <AccordionItem title="Specific domains">
+                  <div class="domain-entry">
+                    <TextInput labelText="Domain pattern" placeholder="example.com or *.example.com" bind:value={draftDomain} on:keydown={(event) => event.key === "Enter" && addDomain()} />
+                    <Button size="small" kind="tertiary" on:click={addDomain}>Add domain</Button>
+                  </div>
+                  {#if draft.domains.length}
+                    <div class="domain-tags">
+                      {#each draft.domains as domain}
+                        <Tag filter size="sm" on:close={() => removeDomain(domain)}>{domain}</Tag>
+                      {/each}
+                    </div>
+                  {/if}
+                </AccordionItem>
+              </Accordion>
               <div class="group-actions">
                 <Button size="small" disabled={saving} on:click={saveGroup}>Save group</Button>
                 <Button size="small" kind="ghost" on:click={cancelEdit}>Cancel</Button>
@@ -397,15 +582,25 @@
                     </Tag>
                   </div>
                   <p>{group.description || "No description."}</p>
+                  {#if group.categories?.length}
+                    {@const categoryTagType = group.action === "block" ? "red" : group.action === "allow" ? "green" : "gray"}
+                    <div class="domain-tags">
+                      {#each group.categories as category}
+                        <Tag size="sm" type={categoryTagType}>{categoryName(category)}</Tag>
+                      {/each}
+                    </div>
+                  {/if}
                   {#if group.domains?.length}
                     <div class="domain-tags">
                       {#each group.domains as domain}
                         <Tag size="sm" type="outline">{domain}</Tag>
                       {/each}
                     </div>
-                  {:else}
-                    <p class="muted">No explicit domain patterns. The gateway default policy remains in effect.</p>
                   {/if}
+                  {#if !group.categories?.length && !group.domains?.length}
+                    <p class="muted">No categories or domains selected. Assigned devices use the gateway default policy.</p>
+                  {/if}
+                  <p class="muted">{assignmentLabel(group.id)}</p>
                 </div>
                 <div class="group-actions">
                   <Button size="small" kind="ghost" disabled={saving} on:click={() => beginEdit(group)}>Edit</Button>
@@ -459,6 +654,7 @@
     gap: 1rem;
     margin: 0 0 1rem;
   }
+  .templates-heading,
   .groups-heading {
     margin-top: 2rem;
   }
@@ -487,6 +683,54 @@
   .shared-caveats {
     margin-bottom: 1rem;
   }
+  /* A checkbox group needs the same label treatment as a single field, and a
+     fieldset/legend pair keeps the group's name associated with its boxes. */
+  .category-fieldset {
+    margin: 0;
+    padding: 0;
+    border: 0;
+  }
+  .category-legend {
+    margin-bottom: 0.5rem;
+    color: #161616;
+    font-size: 0.75rem;
+    font-weight: 400;
+    letter-spacing: 0.32px;
+    line-height: 1rem;
+  }
+  /* The entries are short, so a laptop fits two or three columns instead of
+     one long list. */
+  .category-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+    column-gap: 2rem;
+  }
+  .category-line {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 1rem;
+  }
+  /* Carbon's form item carries a 1rem bottom margin, which is taller than the
+     dense selection list needs. This rule is more specific than the group-slot
+     form-item margin below, so the order of these blocks does not matter. */
+  .category-grid .category-item :global(.bx--form-item) {
+    margin-bottom: 0;
+  }
+  /* The description says what a category covers and, more usefully, what it
+     leaves alone, so it sits under the box instead of in a tooltip. */
+  .category-note {
+    margin: 0 0 0.75rem;
+    color: #525252;
+    font-size: 0.75rem;
+    line-height: 1.125rem;
+  }
+  .category-count {
+    flex-shrink: 0;
+    color: #525252;
+    font-size: 0.75rem;
+    line-height: 1.125rem;
+  }
   /* The row is a flex container, so stretching the column and filling it from
      the inside keeps every tile in a row the same height. */
   .template-grid :global(.bx--col-sm-4),
@@ -512,6 +756,9 @@
     margin-bottom: 0.75rem;
   }
   .group-slot :global(.bx--form-item) {
+    margin-bottom: 0.75rem;
+  }
+  .group-slot :global(.bx--accordion) {
     margin-bottom: 0.75rem;
   }
   .group-row {

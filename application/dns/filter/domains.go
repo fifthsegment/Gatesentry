@@ -9,11 +9,12 @@ import (
 	"sync"
 	"time"
 
+	gatesentryPolicy "bitbucket.org/abdullah_irfan/gatesentryf/policy"
 	gatesentry2storage "bitbucket.org/abdullah_irfan/gatesentryf/storage"
 	gatesentryTypes "bitbucket.org/abdullah_irfan/gatesentryf/types"
 )
 
-func InitializeFilters(blockedDomains *map[string]bool, blockedLists *[]string, internalRecords *map[string]string, exceptionDomains *map[string]bool, mutex *sync.RWMutex, settings *gatesentry2storage.MapStore, dnsinfo *gatesentryTypes.DnsServerInfo) {
+func InitializeFilters(blockedDomains *map[string]bool, blockedLists *[]string, internalRecords *map[string]string, exceptionDomains *map[string]bool, mutex *sync.RWMutex, settings *gatesentry2storage.MapStore, dnsinfo *gatesentryTypes.DnsServerInfo, categories *gatesentryPolicy.CategoryIndex, referencedCategories func() []string) {
 	// Hold write lock while replacing the maps to prevent race with readers
 	mutex.Lock()
 	*blockedDomains = make(map[string]bool)
@@ -51,6 +52,9 @@ func InitializeFilters(blockedDomains *map[string]bool, blockedLists *[]string, 
 	}
 	InitializeInternalRecords(internalRecords, mutex, settings)
 	InitializeBlockedDomains(blockedDomains, blockedLists, mutex, dnsinfo)
+	// Category feeds are downloaded on the same refresh as the blocklists so a
+	// category rule cannot serve data older than the global blocklist.
+	InitializeCategories(settings, categories, referencedCategories)
 	InitializeExceptionDomains(exceptionDomains, mutex)
 }
 

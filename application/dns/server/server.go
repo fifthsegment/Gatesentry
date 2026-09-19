@@ -142,6 +142,12 @@ var deviceStore *discovery.DeviceStore
 // identity maps to an enforcement decision. Initialized in StartDNSServer().
 var policyService *gatesentryPolicy.Service
 
+// categoryIndex holds the downloaded per-category domain feeds. The blocklist
+// refresh is the only writer; policy evaluation and the API only read it. It is
+// process-wide because the refresh runs on the scheduler goroutine while
+// enforcement runs on the DNS query path, and both must see one set of data.
+var categoryIndex *gatesentryPolicy.CategoryIndex
+
 // mdnsBrowser performs periodic mDNS/Bonjour scanning to discover devices.
 // Initialized in StartDNSServer() when mDNS browsing is enabled.
 var mdnsBrowser *discovery.MDNSBrowser
@@ -197,6 +203,39 @@ func GetPolicyService() *gatesentryPolicy.Service {
 	return policyService
 }
 
+// GetCategoryIndex returns the downloaded category index, or nil before
+// startup. The API reads it to report category coverage; policy evaluation
+// reads it through the policy service.
+func GetCategoryIndex() *gatesentryPolicy.CategoryIndex {
+	return categoryIndex
+}
+
+// referencedCategoryIDs reports the categories policy groups select, which the
+// blocklist refresh downloads alongside the gateway-wide selection. When policy
+// failed to load no group exists, so nothing is referenced.
+func referencedCategoryIDs() []string {
+	if policyService == nil {
+		return nil
+	}
+	return policyService.ReferencedCategories()
+}
+
+// RequestBlocklistRefresh asks the DNS scheduler to re-download blocklists and
+// category feeds now instead of waiting for the next interval. It never blocks
+// the caller: when a refresh is already queued or the scheduler is not running
+// the request is dropped, because the periodic refresh still covers it.
+func RequestBlocklistRefresh() bool {
+	if restartDnsSchedulerChan == nil {
+		return false
+	}
+	select {
+	case restartDnsSchedulerChan <- true:
+		return true
+	default:
+		return false
+	}
+}
+
 // SetPolicyServiceForTests installs a policy service for handler tests. It
 // exists only so the webserver can exercise its endpoints against a real
 // service without starting the DNS listener; production wiring uses
@@ -228,6 +267,7 @@ func StartDNSServer(basePath string, ilogger *gatesentryLogger.Log, blockedLists
 		return
 	}
 	policyService = nil
+	categoryIndex = nil
 
 	logger = ilogger
 	logsPath = basePath + logsPath
@@ -285,6 +325,11 @@ func StartDNSServer(basePath string, ilogger *gatesentryLogger.Log, blockedLists
 	if policyErr != nil {
 		log.Printf("[DNS] Policy service unavailable, retaining default enforcement: %v", policyErr)
 	} else {
+		// Category rules are only as good as the downloaded feeds. The index is
+		// attached before the scheduler starts so the first refresh fills it and
+		// enforcement never reads a partially built map.
+		categoryIndex = gatesentryPolicy.NewCategoryIndex()
+		policySvc.SetCategoryIndex(categoryIndex)
 		if err := migrateLegacyDevicePolicy(policySvc, settings); err != nil {
 			log.Printf("[DNS] Legacy policy migration unavailable, retaining default enforcement: %v", err)
 		}
@@ -348,6 +393,8 @@ func StartDNSServer(basePath string, ilogger *gatesentryLogger.Log, blockedLists
 		&mutex,
 		settings,
 		dnsinfo,
+		categoryIndex,
+		referencedCategoryIDs,
 		BLOCKLIST_HOURLY_UPDATE_INTERVAL,
 		restartDnsSchedulerChan,
 	)
@@ -441,6 +488,28 @@ func RemoveBlockedDomainForTest(domain string) {
 	mutex.Lock()
 	defer mutex.Unlock()
 	delete(blockedDomains, strings.ToLower(domain))
+}
+
+// policyMatchLabel renders the group rule that decided a query for logs and
+// explanations. A category match is reported by the operator-facing category
+// name, because "category:social" alone does not tell an administrator what
+// list was applied.
+func policyMatchLabel(decision gatesentryPolicy.DNSDecision) string {
+	matched := decision.MatchedDomain
+	if id, ok := strings.CutPrefix(matched, "category:"); ok {
+		matched = categoryMatchLabel(id)
+	}
+	return "policy group " + decision.GroupID + ": " + matched
+}
+
+// categoryMatchLabel names a category for logs and explanations. The ID alone
+// does not tell an administrator what list was applied, and the catalog name is
+// what the UI showed when the category was selected.
+func categoryMatchLabel(categoryID string) string {
+	if category, found := gatesentryPolicy.GetCategory(categoryID); found {
+		return "category " + category.Name
+	}
+	return "category " + categoryID
 }
 
 // dnsDecision builds a structured DNS filtering decision for logging.
@@ -542,6 +611,22 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 		isBlocked := blockedDomains[domain]
 		mutex.RUnlock()
 
+		// Gateway-wide categories are the default policy for every client, and
+		// their feeds list registrable domains, so a category that contains
+		// "facebook.com" has to cover "www.facebook.com". The blocklist map is an
+		// exact-match lookup and cannot answer that, so the category index covers
+		// the queries the map misses. A policy group allow still exempts the
+		// domain in the precedence stage below.
+		blockLabel := "blocklist"
+		blockReason := "global blocklist"
+		if !isBlocked && policyService != nil {
+			if categoryID, matched := policyService.EnabledCategoryMatch(domain); matched {
+				isBlocked = true
+				blockLabel = categoryMatchLabel(categoryID)
+				blockReason = "gateway category " + categoryID
+			}
+		}
+
 		log.Println("[DNS] Domain requested:", domain, " Length of internal records = ", internalRecordsLen)
 
 		if isException {
@@ -576,7 +661,7 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 					policyDecision.GroupID, domain, policyDecision.InapplicableConditions)
 				logger.LogDecision(dnsDecision(gatesentryPolicy.ActionDecisionBlock,
 					domain, clientIP, "blocked",
-					"policy group "+policyDecision.GroupID+": "+policyDecision.MatchedDomain,
+					policyMatchLabel(policyDecision),
 					"group policy block", dnsIdentity, policyRevision))
 				response := new(dns.Msg)
 				response.SetRcode(r, dns.RcodeNameError)
@@ -591,7 +676,7 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 				log.Printf("[DNS] Domain allowed by policy group %s: %s", policyDecision.GroupID, domain)
 				logger.LogDecision(dnsDecision(gatesentryPolicy.ActionDecisionBypass,
 					domain, clientIP, "exception",
-					"policy group "+policyDecision.GroupID+": "+policyDecision.MatchedDomain,
+					policyMatchLabel(policyDecision),
 					"group policy allow exempts blocklist", dnsIdentity, policyRevision))
 			}
 		}
@@ -604,7 +689,7 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 				Target: "blocked.local.",
 			})
 			logger.LogDecision(dnsDecision(gatesentryPolicy.ActionDecisionBlock,
-				domain, clientIP, "blocked", "blocklist", "global blocklist", dnsIdentity, policyRevision))
+				domain, clientIP, "blocked", blockLabel, blockReason, dnsIdentity, policyRevision))
 			w.WriteMsg(response)
 			return
 		}

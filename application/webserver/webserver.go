@@ -558,6 +558,12 @@ func RegisterEndpointsStartServer(
 	internalServer.Post("/api/policy/templates/{id}/apply", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
 		gatesentryWebserverEndpoints.GSApiPolicyTemplateApply(w, r)
 	})
+	internalServer.Get("/api/policy/categories", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiPolicyCategoriesGet(w, r)
+	})
+	internalServer.Put("/api/policy/categories", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiPolicyCategoriesPut(w, r)
+	})
 	internalServer.Get("/api/policy/groups", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
 		gatesentryWebserverEndpoints.GSApiPolicyGroupsGet(w, r)
 	})

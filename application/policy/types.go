@@ -25,6 +25,11 @@ type PolicyGroup struct {
 	// Domains are wildcard domain patterns (same syntax as Rule.Domain:
 	// exact match or "*." suffix).
 	Domains []string `json:"domains,omitempty"`
+	// Categories are catalog category IDs (see CategoryCatalog) whose
+	// self-updating domain feeds this group enforces with Action. A category
+	// covers the listed registrable domains and their subdomains, so a group
+	// does not need one pattern per host.
+	Categories []string `json:"categories,omitempty"`
 	// Action applies to all Domains entries. ActionNone keeps the group
 	// informational-only and is equivalent to no group policy.
 	Action PolicyAction `json:"action"`

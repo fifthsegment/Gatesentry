@@ -240,3 +240,87 @@ func TestMigrateLegacyDevicePolicyRunsOnlyOnce(t *testing.T) {
 func setupTestPolicyPolicyServerForLegacy(t *testing.T) (*gatesentryPolicy.Service, func()) {
 	return setupTestPolicyServer(t)
 }
+
+func TestDNSGatewayCategoryBlocksSubdomains(t *testing.T) {
+	svc, cleanup := setupTestPolicyServer(t)
+	defer cleanup()
+
+	// A gateway-wide category is the default policy for every client, and its
+	// feed lists the registrable domain. The subdomain has to be blocked too, or
+	// selecting "Social media" would not block real traffic.
+	index := gatesentryPolicy.NewCategoryIndex()
+	index.Replace("social", []string{"facebook.com"}, time.Now())
+	svc.SetCategoryIndex(index)
+	if err := svc.SetEnabledCategories([]string{"social"}); err != nil {
+		t.Fatal(err)
+	}
+	if blockedDomains["www.facebook.com"] {
+		t.Fatal("test precondition: the global blocklist must not cover the subdomain")
+	}
+
+	req := new(dns.Msg)
+	req.SetQuestion("www.facebook.com.", dns.TypeA)
+	w := newMockResponseWriter("198.51.100.7")
+	handleDNSRequest(w, req)
+	if w.msg == nil || w.msg.Rcode != dns.RcodeNameError {
+		t.Fatalf("expected NXDOMAIN for a gateway-category subdomain, got %+v", w.msg)
+	}
+	if len(w.msg.Answer) != 1 {
+		t.Fatalf("answers = %d, want the blocked.local explanation", len(w.msg.Answer))
+	}
+	if cname, ok := w.msg.Answer[0].(*dns.CNAME); !ok || cname.Target != "blocked.local." {
+		t.Fatalf("block explanation = %+v, want blocked.local CNAME", w.msg.Answer[0])
+	}
+}
+
+func TestDNSGatewayCategoryIgnoresUnselectedCategories(t *testing.T) {
+	svc, cleanup := setupTestPolicyServer(t)
+	defer cleanup()
+
+	index := gatesentryPolicy.NewCategoryIndex()
+	index.Replace("social", []string{"facebook.com"}, time.Now())
+	svc.SetCategoryIndex(index)
+
+	req := new(dns.Msg)
+	req.SetQuestion("www.facebook.com.", dns.TypeA)
+	w := newMockResponseWriter("198.51.100.8")
+	handleDNSRequest(w, req)
+	if w.msg != nil && w.msg.Rcode == dns.RcodeNameError {
+		t.Fatal("an unselected category must not block anything")
+	}
+}
+
+func TestDNSPolicyGroupAllowExemptsGatewayCategory(t *testing.T) {
+	svc, cleanup := setupTestPolicyServer(t)
+	defer cleanup()
+
+	deviceStore.UpsertDevice(&discovery.Device{Hostnames: []string{"adults-pc"}, IPv4: "192.0.2.60"})
+	devices := deviceStore.GetAllDevices()
+	index := gatesentryPolicy.NewCategoryIndex()
+	index.Replace("social", []string{"facebook.com"}, time.Now())
+	svc.SetCategoryIndex(index)
+	if err := svc.SetEnabledCategories([]string{"social"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.SaveGroups([]gatesentryPolicy.PolicyGroup{{
+		ID: "adults", Action: gatesentryPolicy.ActionAllow, Categories: []string{"social"},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.SaveAssignments([]gatesentryPolicy.DeviceAssignment{{DeviceID: devices[0].ID, GroupID: "adults"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Reload(); err != nil {
+		t.Fatal(err)
+	}
+
+	req := new(dns.Msg)
+	req.SetQuestion("www.facebook.com.", dns.TypeA)
+	w := newMockResponseWriter("192.0.2.60")
+	handleDNSRequest(w, req)
+	// The assigned group allows the category, so the gateway-wide default must
+	// not override the explicit assignment.
+	if w.msg != nil && w.msg.Rcode == dns.RcodeNameError {
+		t.Fatal("group allow must exempt a gateway-wide category")
+	}
+}

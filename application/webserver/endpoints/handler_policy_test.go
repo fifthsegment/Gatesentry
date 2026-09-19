@@ -379,3 +379,105 @@ func policySnapshotGroup(t *testing.T, groupID string) gatesentryPolicy.PolicyGr
 	}
 	return group
 }
+
+func TestPolicyCategoriesRoundTrip(t *testing.T) {
+	service, cleanup := policyTestService(t)
+	defer cleanup()
+
+	get := httptest.NewRequest(http.MethodGet, "/api/policy/categories", nil)
+	getRecorder := httptest.NewRecorder()
+	GSApiPolicyCategoriesGet(getRecorder, get)
+	if getRecorder.Code != http.StatusOK {
+		t.Fatalf("GET status = %d, body = %s", getRecorder.Code, getRecorder.Body.String())
+	}
+	var getBody struct {
+		Categories []gatesentryPolicy.CategoryStatus `json:"categories"`
+	}
+	if err := json.Unmarshal(getRecorder.Body.Bytes(), &getBody); err != nil {
+		t.Fatal(err)
+	}
+	if len(getBody.Categories) != len(gatesentryPolicy.CategoryCatalog()) {
+		t.Fatalf("category count = %d, want the full catalog", len(getBody.Categories))
+	}
+	for _, status := range getBody.Categories {
+		if status.Enabled {
+			t.Fatalf("category %s reported enabled before any selection", status.ID)
+		}
+		if status.Name == "" || status.Description == "" {
+			t.Fatalf("category %s omitted its description: %+v", status.ID, status)
+		}
+	}
+
+	put := httptest.NewRequest(http.MethodPut, "/api/policy/categories", strings.NewReader(`{"categories":["social","ads"]}`))
+	putRecorder := httptest.NewRecorder()
+	GSApiPolicyCategoriesPut(putRecorder, put)
+	if putRecorder.Code != http.StatusOK {
+		t.Fatalf("PUT status = %d, body = %s", putRecorder.Code, putRecorder.Body.String())
+	}
+	var putBody struct {
+		Categories []gatesentryPolicy.CategoryStatus `json:"categories"`
+	}
+	if err := json.Unmarshal(putRecorder.Body.Bytes(), &putBody); err != nil {
+		t.Fatal(err)
+	}
+	enabled := make(map[string]bool)
+	for _, status := range putBody.Categories {
+		if status.Enabled {
+			enabled[status.ID] = true
+		}
+	}
+	if len(enabled) != 2 || !enabled["social"] || !enabled["ads"] {
+		t.Fatalf("enabled after PUT = %v, want social and ads", enabled)
+	}
+	if got := service.EnabledCategories(); len(got) != 2 {
+		t.Fatalf("persisted categories = %v, want two", got)
+	}
+
+	unknown := httptest.NewRequest(http.MethodPut, "/api/policy/categories", strings.NewReader(`{"categories":["social","typo-category"]}`))
+	unknownRecorder := httptest.NewRecorder()
+	GSApiPolicyCategoriesPut(unknownRecorder, unknown)
+	if unknownRecorder.Code != http.StatusBadRequest {
+		t.Fatalf("unknown category status = %d, body = %s", unknownRecorder.Code, unknownRecorder.Body.String())
+	}
+	if got := service.EnabledCategories(); len(got) != 2 {
+		t.Fatalf("a rejected PUT changed the stored selection: %v", got)
+	}
+
+	badJSON := httptest.NewRequest(http.MethodPut, "/api/policy/categories", strings.NewReader("{"))
+	badJSONRecorder := httptest.NewRecorder()
+	GSApiPolicyCategoriesPut(badJSONRecorder, badJSON)
+	if badJSONRecorder.Code != http.StatusBadRequest {
+		t.Fatalf("invalid JSON status = %d", badJSONRecorder.Code)
+	}
+}
+
+func TestPolicyGroupCategorySelectionIsValidatedAndNormalized(t *testing.T) {
+	_, cleanup := policyTestService(t)
+	defer cleanup()
+
+	unknown := httptest.NewRequest(http.MethodPost, "/api/policy/groups", strings.NewReader(`{"name":"Kids","action":"block","categories":["social","typo-category"]}`))
+	unknownRecorder := httptest.NewRecorder()
+	GSApiPolicyGroupCreate(unknownRecorder, unknown)
+	if unknownRecorder.Code != http.StatusBadRequest {
+		t.Fatalf("create with unknown category status = %d, body = %s", unknownRecorder.Code, unknownRecorder.Body.String())
+	}
+
+	replace := httptest.NewRequest(http.MethodPut, "/api/policy/groups", strings.NewReader(`{"groups":[{"id":"kids","name":"Kids","action":"block","categories":["typo-category"]}]}`))
+	replaceRecorder := httptest.NewRecorder()
+	GSApiPolicyGroupsReplace(replaceRecorder, replace)
+	if replaceRecorder.Code != http.StatusBadRequest {
+		t.Fatalf("replace with unknown category status = %d, body = %s", replaceRecorder.Code, replaceRecorder.Body.String())
+	}
+
+	// A selection that only differs by case must be stored normalized, or the
+	// rule would be persisted in a form that never matches the catalog.
+	valid := httptest.NewRequest(http.MethodPost, "/api/policy/groups", strings.NewReader(`{"id":"kids","name":"Kids","action":"block","categories":[" Social ", "social"]}`))
+	validRecorder := httptest.NewRecorder()
+	GSApiPolicyGroupCreate(validRecorder, valid)
+	if validRecorder.Code != http.StatusCreated {
+		t.Fatalf("valid create status = %d, body = %s", validRecorder.Code, validRecorder.Body.String())
+	}
+	if got := policySnapshotGroup(t, "kids").Categories; len(got) != 1 || got[0] != "social" {
+		t.Fatalf("stored categories = %v, want [social]", got)
+	}
+}

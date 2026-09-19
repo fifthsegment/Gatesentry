@@ -39,3 +39,19 @@ test("applying templates creates ordinary editable groups without overwrite", ()
   expect(groups).toContain("Delete");
   expect(groups).toContain("Domain pattern");
 });
+
+test("self-updating categories are selectable gateway-wide and per group", () => {
+  expect(groups).toContain("/api/policy/categories");
+  expect(groups).toContain("Blocked categories");
+  expect(groups).toContain("category.description");
+  expect(groups).toContain("coverageLabel(category)");
+  expect(groups).toContain("setGatewayCategory");
+  expect(groups).toContain("setDraftCategory");
+  expect(groups).toContain("categories: draft.categories");
+});
+
+test("policy groups report the assignment that makes them effective", () => {
+  expect(groups).toContain("/api/policy/assignments");
+  expect(groups).toContain("assignmentLabel(group.id)");
+  expect(groups).toContain("applies only to the devices you assign to it");
+});
