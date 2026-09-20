@@ -7,7 +7,6 @@
     Column,
     InlineLoading,
     InlineNotification,
-    ListItem,
     MultiSelect,
     Row,
     Select,
@@ -16,7 +15,6 @@
     TextArea,
     TextInput,
     Tile,
-    UnorderedList,
   } from "carbon-components-svelte";
   import { onMount } from "svelte";
   import { getBasePath } from "../../lib/navigate";
@@ -26,7 +24,6 @@
     name: string;
     group_name: string;
     description: string;
-    protections: string[];
     limitations: string[];
     categories: string[];
     group_id: string;
@@ -80,6 +77,8 @@
   const DEVICES_API = getBasePath() + "/api/devices";
 
   let templates: PolicyTemplate[] = [];
+  // Caveats the API states for the whole catalog, shown once above the grid.
+  let sharedLimitations: string[] = [];
   let groups: PolicyGroup[] = [];
   let categories: CategoryStatus[] = [];
   let assignments: DeviceAssignment[] = [];
@@ -106,21 +105,6 @@
       unknown_device_policy: "",
       priority: 0,
     };
-  }
-
-  // Every starter ships the same DNS-scope caveat. State the caveats that all
-  // starters share once above the grid instead of repeating identical
-  // sentences inside every tile.
-  $: sharedLimitations = templates.length
-    ? (templates[0].limitations || []).filter((limitation) =>
-        templates.every((template) => (template.limitations || []).includes(limitation)),
-      )
-    : [];
-
-  function ownLimitations(template: PolicyTemplate): string[] {
-    return (template.limitations || []).filter(
-      (limitation) => !sharedLimitations.includes(limitation),
-    );
   }
 
   function token(): string {
@@ -184,6 +168,7 @@
       const assignmentData = await assignmentResponse.json();
       const deviceData = await deviceResponse.json();
       templates = templateData.templates || [];
+      sharedLimitations = templateData.shared_limitations || [];
       groups = groupData.groups || [];
       categories = categoryData.categories || [];
       assignments = assignmentData.assignments || [];
@@ -549,20 +534,16 @@
                   <h4>{template.name}</h4>
                   <p class="tile-description">{template.description}</p>
 
-                  <h5>Protections</h5>
-                  <UnorderedList>
-                    {#each template.protections as protection}
-                      <ListItem>{protection}</ListItem>
-                    {/each}
-                  </UnorderedList>
-
-                  {#if ownLimitations(template).length}
-                    <h5>Limitations</h5>
-                    <UnorderedList>
-                      {#each ownLimitations(template) as limitation}
-                        <ListItem>{limitation}</ListItem>
+                  {#if template.categories?.length}
+                    <div class="domain-tags">
+                      {#each template.categories as category}
+                        <Tag size="sm" type="red">{categoryName(category)}</Tag>
                       {/each}
-                    </UnorderedList>
+                    </div>
+                  {/if}
+
+                  {#if template.limitations?.length}
+                    <p class="tile-caveat">{template.limitations.join(" ")}</p>
                   {/if}
 
                   <Button size="small" disabled={saving || !template.available} on:click={() => applyTemplate(template)}>
@@ -814,16 +795,18 @@
   .section-intro {
     margin-bottom: 0;
   }
-  /* Carbon's unordered list hangs its en dash one rem to the left of the item
-     text, so the list needs an inset to keep the dashes inside the tile. */
-  .template-tile :global(.bx--list--unordered) {
-    margin: 0.25rem 0 0;
-    padding-left: 1rem;
-  }
-  .template-tile :global(.bx--list__item) {
+  /* Each starter carries one caveat. A single muted line reads faster than a
+     heading plus a one-item list. */
+  .tile-caveat {
+    margin: 0 0 0.75rem;
     color: #525252;
     font-size: 0.75rem;
     line-height: 1.125rem;
+  }
+  /* The tiles keep one baseline for the tags and the caveat, so a starter
+     without categories still lines up with the rest of the row. */
+  .template-tile .domain-tags {
+    margin: 0.75rem 0 0.5rem;
   }
   .shared-caveats {
     margin-bottom: 1rem;

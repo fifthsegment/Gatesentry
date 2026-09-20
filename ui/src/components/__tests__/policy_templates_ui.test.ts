@@ -11,20 +11,21 @@ test("rules page keeps templates and advanced editor available", () => {
   expect(rules).toContain("Rulelist");
 });
 
-test("policy templates preview supported behavior and limitations", () => {
+test("policy templates preview their categories and their own caveat", () => {
   expect(groups).toContain("templateData.templates");
   expect(groups).toContain("template.name");
   expect(groups).toContain("group_name: string");
   expect(groups).toContain("available: boolean");
-  expect(groups).toContain("protections");
   expect(groups).toContain("limitations");
-  expect(groups).toContain("template.protections");
   expect(groups).toContain("template.limitations");
-  // Every starter ships the same DNS-scope caveat, so it is stated once above
-  // the grid while each tile keeps only the limitations it owns.
+  // The caveats that hold for every starter arrive once from the API, so no
+  // tile repeats them.
+  expect(groups).toContain("shared_limitations");
+  expect(groups).toContain("templateData.shared_limitations");
   expect(groups).toContain("Applies to every starter");
-  expect(groups).toContain("sharedLimitations");
-  expect(groups).toContain("ownLimitations(template)");
+  expect(groups).not.toContain("protections");
+  // A starter names its categories as tags instead of restating them in prose.
+  expect(groups).toContain("categoryName(category)");
 });
 
 test("applying templates creates ordinary editable groups without overwrite", () => {

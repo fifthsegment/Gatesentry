@@ -34,18 +34,41 @@ func TestPolicyTemplatesDescribeSupportedBehavior(t *testing.T) {
 		if templates[i].ID != wantID || !templates[i].Available {
 			t.Fatalf("template %d = %+v, want available %s", i, templates[i], wantID)
 		}
-		if len(templates[i].Protections) == 0 || len(templates[i].Limitations) == 0 {
-			t.Fatalf("template %s lacks preview protections or limitations", templates[i].ID)
+		if len(templates[i].Limitations) == 0 {
+			t.Fatalf("template %s lacks a limitation", templates[i].ID)
 		}
 	}
 	if templates[0].Group().ID != "template-child" || templates[0].Group().Name != "Child" {
 		t.Fatalf("child group = %+v", templates[0].Group())
 	}
+	if templates[0].Description == "" || templates[1].Description == "" {
+		t.Fatal("template is missing a description")
+	}
 
-	templates[0].Protections[0] = "mutated"
+	// The caveats that hold for every starter are stated once for the catalog,
+	// so no template repeats one of them.
+	shared := TemplateSharedLimitations()
+	if len(shared) == 0 {
+		t.Fatal("no shared template limitations")
+	}
+	for _, template := range templates {
+		for _, limitation := range template.Limitations {
+			for _, sharedLimitation := range shared {
+				if limitation == sharedLimitation {
+					t.Fatalf("template %s repeats the shared caveat %q", template.ID, limitation)
+				}
+			}
+		}
+	}
+	shared[0] = "mutated"
+	if TemplateSharedLimitations()[0] == "mutated" {
+		t.Fatal("shared limitations returned the package slice")
+	}
+
+	templates[0].Limitations[0] = "mutated"
 	again := PolicyTemplates()
-	if again[0].Protections[0] == "mutated" {
-		t.Fatal("catalog returned shared protection slice")
+	if again[0].Limitations[0] == "mutated" {
+		t.Fatal("catalog returned shared limitation slice")
 	}
 }
 

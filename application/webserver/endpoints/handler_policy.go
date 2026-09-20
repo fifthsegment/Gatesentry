@@ -134,16 +134,19 @@ func GSApiPolicyGroupsGet(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{"groups": groups})
 }
 
-// GSApiPolicyTemplatesGet returns the built-in starter catalog. The response
-// describes protections and limitations so the UI can show what a template
-// will do before it creates an ordinary editable group.
+// GSApiPolicyTemplatesGet returns the built-in starter catalog with the
+// caveats that hold for every starter, so the UI can show what a template will
+// do before it creates an ordinary editable group.
 // GET /api/policy/templates
 func GSApiPolicyTemplatesGet(w http.ResponseWriter, r *http.Request) {
 	if policyServiceOrError(w) == nil {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"templates": gatesentryPolicy.PolicyTemplates()})
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"templates":          gatesentryPolicy.PolicyTemplates(),
+		"shared_limitations": gatesentryPolicy.TemplateSharedLimitations(),
+	})
 }
 
 // GSApiPolicyTemplateApply creates the ordinary group represented by a

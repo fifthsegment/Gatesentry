@@ -273,7 +273,8 @@ func TestPolicyTemplatesPreviewAndApply(t *testing.T) {
 		t.Fatalf("template preview status = %d, body = %s", previewRecorder.Code, previewRecorder.Body.String())
 	}
 	var previewBody struct {
-		Templates []gatesentryPolicy.PolicyTemplate `json:"templates"`
+		Templates         []gatesentryPolicy.PolicyTemplate `json:"templates"`
+		SharedLimitations []string                          `json:"shared_limitations"`
 	}
 	if err := json.Unmarshal(previewRecorder.Body.Bytes(), &previewBody); err != nil {
 		t.Fatal(err)
@@ -281,9 +282,12 @@ func TestPolicyTemplatesPreviewAndApply(t *testing.T) {
 	if len(previewBody.Templates) != 7 {
 		t.Fatalf("template count = %d, want 7", len(previewBody.Templates))
 	}
+	if len(previewBody.SharedLimitations) == 0 {
+		t.Fatal("template preview omitted the shared limitations")
+	}
 	for _, template := range previewBody.Templates {
-		if len(template.Protections) == 0 || len(template.Limitations) == 0 {
-			t.Fatalf("template %s omitted preview details", template.ID)
+		if len(template.Limitations) == 0 || template.Description == "" {
+			t.Fatalf("template %s omitted its description or limitation", template.ID)
 		}
 	}
 
