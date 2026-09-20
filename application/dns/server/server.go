@@ -330,8 +330,8 @@ func StartDNSServer(basePath string, ilogger *gatesentryLogger.Log, blockedLists
 		// enforcement never reads a partially built map.
 		categoryIndex = gatesentryPolicy.NewCategoryIndex()
 		policySvc.SetCategoryIndex(categoryIndex)
-		if err := migrateLegacyDevicePolicy(policySvc, settings); err != nil {
-			log.Printf("[DNS] Legacy policy migration unavailable, retaining default enforcement: %v", err)
+		if err := migrateLegacyPolicy(policySvc, settings); err != nil {
+			log.Printf("[DNS] Legacy configuration migration unavailable, retaining default enforcement: %v", err)
 		}
 		policyService = policySvc
 	}

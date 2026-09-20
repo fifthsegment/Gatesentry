@@ -208,7 +208,7 @@ func TestMigrateLegacyDevicePolicyRunsOnlyOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := migrateLegacyDevicePolicy(svc, settings); err != nil {
+	if err := migrateLegacyPolicy(svc, settings); err != nil {
 		t.Fatal(err)
 	}
 	if err := svc.Reload(); err != nil {
@@ -223,7 +223,7 @@ func TestMigrateLegacyDevicePolicyRunsOnlyOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Re-running migration must not clobber the edit.
-	if err := migrateLegacyDevicePolicy(svc, settings); err != nil {
+	if err := migrateLegacyPolicy(svc, settings); err != nil {
 		t.Fatal(err)
 	}
 	if err := svc.Reload(); err != nil {
@@ -239,6 +239,76 @@ func TestMigrateLegacyDevicePolicyRunsOnlyOnce(t *testing.T) {
 // predate the service-based setup helper.
 func setupTestPolicyPolicyServerForLegacy(t *testing.T) (*gatesentryPolicy.Service, func()) {
 	return setupTestPolicyServer(t)
+}
+
+// The retired rule store held standalone rules. Those records have to arrive as
+// groups that enforce what the old engine enforced, and they must arrive
+// unassigned so importing them cannot change any device's filtering on its own.
+func TestMigrateLegacyRulesBecomesUnassignedGroups(t *testing.T) {
+	svc, cleanup := setupTestPolicyServer(t)
+	defer cleanup()
+
+	settings, err := gatesentry2storage.OpenMapStore("settings", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := settings.Update("timezone", "Europe/Berlin"); err != nil {
+		t.Fatal(err)
+	}
+	legacyRules := `{"rules":[{"id":"block-games","name":"No games","enabled":true,"priority":0,"domain":"games.example","action":"block","mitm_action":"enable","block_type":"url_regex","url_regex_patterns":["/play"],"time_restriction":{"from":"20:00","to":"07:00"}}]}`
+	if err := settings.Update("rules", legacyRules); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrateLegacyPolicy(svc, settings); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Reload(); err != nil {
+		t.Fatal(err)
+	}
+
+	snapshot := svc.Snapshot()
+	if len(snapshot.Groups) != 1 {
+		t.Fatalf("groups after rule migration = %d, want 1", len(snapshot.Groups))
+	}
+	var imported gatesentryPolicy.PolicyGroup
+	for _, group := range snapshot.Groups {
+		imported = group
+	}
+	if len(snapshot.Assignments) != 0 {
+		t.Fatalf("imported rules were assigned: %+v", snapshot.Assignments)
+	}
+	if imported.Name != "No games" || len(imported.Domains) != 1 || imported.Domains[0] != "games.example" {
+		t.Fatalf("imported group = %+v", imported)
+	}
+	if imported.Action != gatesentryPolicy.ActionBlock {
+		t.Fatalf("imported group action = %q, want block", imported.Action)
+	}
+	if len(imported.Rules) != 1 {
+		t.Fatalf("imported rules = %d, want 1", len(imported.Rules))
+	}
+	rule := imported.Rules[0]
+	if rule.Action != gatesentryPolicy.ActionBlock || rule.MITMAction != gatesentryPolicy.MITMActionEnable {
+		t.Fatalf("imported rule = %+v", rule)
+	}
+	if len(rule.URLRegexes) != 1 || rule.URLRegexes[0] != "/play" {
+		t.Fatalf("imported URL conditions = %v", rule.URLRegexes)
+	}
+	// The old window was evaluated in the gateway's time zone, so the schedule
+	// keeps that zone rather than defaulting to UTC.
+	if rule.Schedule == nil || rule.Schedule.Timezone != "Europe/Berlin" {
+		t.Fatalf("imported schedule = %+v", rule.Schedule)
+	}
+
+	// A second run must not duplicate the imported groups.
+	if err := migrateLegacyPolicy(svc, settings); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Reload(); err != nil {
+		t.Fatal(err)
+	}
+	if count := len(svc.Snapshot().Groups); count != 1 {
+		t.Fatalf("groups after repeated migration = %d, want 1", count)
+	}
 }
 
 func TestDNSGatewayCategoryBlocksSubdomains(t *testing.T) {

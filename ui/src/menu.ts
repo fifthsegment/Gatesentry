@@ -89,7 +89,7 @@ let menuItems = [
   },
   {
     type: "link",
-    text: "Rules",
+    text: "Policies",
     href: "/rules",
     icon: Rule,
   },

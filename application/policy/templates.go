@@ -28,7 +28,7 @@ type PolicyTemplate struct {
 // once instead of inside every template.
 var templateSharedLimitations = []string{
 	"Enforced by the DNS server: only devices that use Gatesentry for DNS are covered, and only after you assign them to the group.",
-	"DNS decides by domain: URL, MIME, keyword, and HTTPS inspection rules need the advanced editor and the proxy path.",
+	"DNS decides by domain: URL and response-type conditions need a block rule with TLS inspection, which the proxy enforces.",
 }
 
 // TemplateSharedLimitations returns a copy of the caveats that apply to every
@@ -92,7 +92,7 @@ var builtInTemplates = []PolicyTemplate{
 		ID: "unrestricted", Name: "Unrestricted starter", GroupName: "Unrestricted",
 		Description: "For a device that should get no group rules.",
 		Limitations: []string{
-			"Does not bypass the global blocklist or existing advanced rules.",
+			"Does not bypass the global blocklist or the gateway default policy.",
 		},
 		Action: ActionNone, GroupID: "template-unrestricted", Available: true,
 	},

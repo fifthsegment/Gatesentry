@@ -200,6 +200,14 @@ func decodePolicyGroup(r *http.Request) (gatesentryPolicy.PolicyGroup, error) {
 		return group, err
 	}
 	group.Categories = normalized
+	// Rules are validated and canonicalized here so a malformed rule is
+	// rejected at the API boundary instead of being stored as a record that
+	// silently matches nothing.
+	rules, err := gatesentryPolicy.NormalizeGroupRules(group.Rules)
+	if err != nil {
+		return group, err
+	}
+	group.Rules = rules
 	return group, nil
 }
 
@@ -308,6 +316,12 @@ func GSApiPolicyGroupsReplace(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		body.Groups[i].Categories = normalized
+		rules, err := gatesentryPolicy.NormalizeGroupRules(body.Groups[i].Rules)
+		if err != nil {
+			http.Error(w, `{"error":"Invalid rule in group "`+body.Groups[i].ID+`"}`, http.StatusBadRequest)
+			return
+		}
+		body.Groups[i].Rules = rules
 	}
 	if err := svc.SaveGroups(body.Groups); err != nil {
 		http.Error(w, `{"error":"Unable to persist policy groups"}`, http.StatusInternalServerError)

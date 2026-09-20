@@ -624,12 +624,11 @@ func (s *Service) evaluateDNSAt(identity Identity, domain string, snap PolicySna
 		return decision
 	}
 	if matched, categoryID := matchGroupRule(group, domain, s.categories); matched != "" {
-		decision.MatchedDomain = matched
-		decision.Action = group.Action
-		decision.Reason = "group policy"
-		if categoryID != "" {
-			decision.Reason = "group policy category " + categoryID
-		}
+		outcome := evaluateGroupRulesAt(group, matched, categoryID, identity.AuthUser, now, LayerDNS)
+		decision.MatchedDomain = outcome.MatchedDomain
+		decision.Action = outcome.Action
+		decision.RuleID = outcome.RuleID
+		decision.Reason = outcome.Reason
 	}
 	decision.InapplicableConditions = dnsInapplicableConditions()
 	return decision
@@ -637,6 +636,62 @@ func (s *Service) evaluateDNSAt(identity Identity, domain string, snap PolicySna
 
 func (s *Service) EvaluateDNS(identity Identity, domain string) DNSDecision {
 	return s.evaluateDNSAt(identity, domain, s.Snapshot(), s.ExceptionSnapshot(), s.PauseSnapshot(), s.now())
+}
+
+// EvaluateProxy is the policy decision for a proxy request: which group and
+// rule own the domain, whether the request is denied, whether TLS inspection
+// is needed to see the rule's URL and content conditions, and which patterns
+// and media types the proxy must test against the decrypted request and the
+// response. It is the same evaluator DNS uses, asked for the conditions the
+// proxy can actually see.
+//
+// Matched false means no policy group decided this request: the proxy keeps
+// the gateway's own settings, so a group never silently changes inspection for
+// traffic it does not cover.
+func (s *Service) EvaluateProxy(identity Identity, domain string) ProxyMatch {
+	return s.evaluateProxyAt(identity, domain, s.Snapshot(), s.ExceptionSnapshot(), s.PauseSnapshot(), s.now())
+}
+
+// evaluateProxyAt is the pure, snapshot-parametrized core of EvaluateProxy.
+func (s *Service) evaluateProxyAt(identity Identity, domain string, snap PolicySnapshot, exc ExceptionSnapshot, pa PauseSnapshot, now time.Time) ProxyMatch {
+	match := ProxyMatch{}
+	// A scoped exception exempts the domain entirely, and an allow rule is an
+	// exception inside the group. Both leave the gateway defaults in charge.
+	if _, ok := evaluateExceptionIn(identity, domain, exc); ok {
+		match.Reason = "scoped exception"
+		return match
+	}
+	group, ok := snap.Groups[identity.GroupID]
+	if !ok {
+		return match
+	}
+	if !scheduleActiveAt(group, now) {
+		match.Reason = "group schedule inactive"
+		return match
+	}
+	if _, ok := evaluatePauseIn(identity, pa); ok && group.Action == ActionBlock {
+		match.Reason = "paused"
+		return match
+	}
+	matched, categoryID := matchGroupRule(group, domain, s.categories)
+	if matched == "" {
+		return match
+	}
+	outcome := evaluateGroupRulesAt(group, matched, categoryID, identity.AuthUser, now, LayerExplicitProxy)
+	if outcome.Action != ActionBlock {
+		match.Reason = outcome.Reason
+		return match
+	}
+	match.Matched = true
+	match.GroupID = group.ID
+	match.RuleID = outcome.RuleID
+	match.MatchedDomain = outcome.MatchedDomain
+	match.Reason = outcome.Reason
+	match.ShouldBlock = true
+	match.ShouldMITM = outcome.ShouldMITM
+	match.BlockURLRegexes = outcome.BlockURLRegexes
+	match.BlockContentTypes = outcome.BlockContentTypes
+	return match
 }
 
 func dnsInapplicableConditions() []string {
@@ -674,8 +729,9 @@ func (s *Service) evaluateDomainAt(identity Identity, domain string, snap Policy
 	if _, ok := evaluatePauseIn(identity, pa); ok && group.Action == ActionBlock {
 		return ActionNone
 	}
-	if matched, _ := matchGroupRule(group, domain, s.categories); matched != "" {
-		return group.Action
+	if matched, categoryID := matchGroupRule(group, domain, s.categories); matched != "" {
+		outcome := evaluateGroupRulesAt(group, matched, categoryID, identity.AuthUser, now, LayerDNS)
+		return outcome.Action
 	}
 	return ActionNone
 }

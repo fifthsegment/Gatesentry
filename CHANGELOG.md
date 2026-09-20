@@ -1,5 +1,20 @@
 # CHANGELOG
 
+## v1.27.0 (20 September 2026)
+
+- Policy rules now belong to a policy group: a group owns its categories, domains, and rules, and one evaluator decides for both DNS and the proxy. A rule is no longer a separate record that has to be matched to a group by hand
+- Rule order is evaluation order, so the first matching rule decides; a group rule with no match falls back to the group's own action, and a disabled rule is ignored
+- URL and response-type conditions on a rule are enforced by the proxy, which is what a rule that turns on TLS inspection reaches; the group's categories and domains stay the DNS-enforced part of the same policy
+- Existing standalone rules migrate into one unassigned policy group each, so an upgrade keeps every rule and its conditions
+- The `/api/rules` endpoints are removed; rules are read and written with their group through `/api/policy/groups`
+- Self-updating domain categories: blocklist categories can be selected gateway-wide or per group, with the downloaded domain count shown for each category
+- Policy groups are assigned from the policies page itself, and each group states the devices it is enforced on
+- Policy template starters state their shared caveat once for the whole catalog instead of repeating the same text in every tile, and name the proxy path instead of a removed advanced rule editor
+- Policies page rebuilt on Carbon's grid around a single group form; the standalone advanced rule editor is gone
+- First-run setup no longer asks for a bootstrap authorization code
+- Setup shows the password byte limit as the field's own error rather than as a separate message
+- Dashboard rebuilt as a Carbon status page
+
 ## v1.26.1 (19 September 2026)
 
 - Fixed GateSentry failing to start on Windows: Unix file permission checks on the installation key and bootstrap secret files always rejected files on Windows where NTFS ACLs don't map to Unix permission bits

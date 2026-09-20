@@ -58,6 +58,7 @@ type PreviewStage struct {
 type PreviewEvaluation struct {
 	Action                 PolicyAction   `json:"action"`
 	GroupID                string         `json:"group_id"`
+	RuleID                 string         `json:"rule_id"`
 	MatchedDomain          string         `json:"matched_domain"`
 	Reason                 string         `json:"reason"`
 	Stages                 []PreviewStage `json:"stages"`
@@ -135,6 +136,7 @@ func (s *Service) previewEvaluation(base Identity, domain string, snap PolicySna
 	return PreviewEvaluation{
 		Action:                 dec.Action,
 		GroupID:                dec.GroupID,
+		RuleID:                 dec.RuleID,
 		MatchedDomain:          dec.MatchedDomain,
 		Reason:                 dec.Reason,
 		Stages:                 stages,
@@ -183,6 +185,15 @@ func buildPreviewStages(identity Identity, domain string, snap PolicySnapshot, e
 		stages = append(stages, PreviewStage{Name: "group_domain", Applied: true, Action: group.Action, Detail: matched})
 	default:
 		stages = append(stages, PreviewStage{Name: "group_category", Applied: true, Action: group.Action, Detail: categoryID})
+	}
+	if matched != "" {
+		outcome := evaluateGroupRulesAt(group, matched, categoryID, identity.AuthUser, now, LayerDNS)
+		if outcome.RuleID != "" {
+			stages = append(stages, PreviewStage{Name: "group_rule", Applied: true, Action: outcome.Action, Detail: outcome.Reason})
+		}
+		if len(outcome.Unresolved) > 0 {
+			stages = append(stages, PreviewStage{Name: "group_rule_conditions", Applied: false, Detail: "DNS cannot evaluate " + strings.Join(outcome.Unresolved, ", ")})
+		}
 	}
 	return stages
 }

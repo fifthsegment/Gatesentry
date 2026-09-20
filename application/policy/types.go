@@ -30,6 +30,13 @@ type PolicyGroup struct {
 	// covers the listed registrable domains and their subdomains, so a group
 	// does not need one pattern per host.
 	Categories []string `json:"categories,omitempty"`
+	// Rules are the group's enforcement rules. A rule does not carry its own
+	// domain list: Domains and Categories are the coverage a rule refines, so
+	// "what does this apply to" has one answer per group. Rules add the
+	// conditions DNS cannot see (URL patterns, response media types, TLS
+	// inspection) and can scope the group's action to a time window or to
+	// authenticated proxy users.
+	Rules []GroupRule `json:"rules,omitempty"`
 	// Action applies to all Domains entries. ActionNone keeps the group
 	// informational-only and is equivalent to no group policy.
 	Action PolicyAction `json:"action"`
@@ -55,6 +62,75 @@ type DeviceAssignment struct {
 	DeviceID   string    `json:"device_id"`
 	GroupID    string    `json:"group_id"`
 	AssignedAt time.Time `json:"assigned_at"`
+}
+
+// TLS inspection settings a group rule can request for the traffic it covers.
+const (
+	// MITMActionDefault keeps the gateway's own HTTPS inspection setting.
+	MITMActionDefault = "default"
+	// MITMActionEnable inspects the traffic this rule covers.
+	MITMActionEnable = "enable"
+	// MITMActionDisable passes the traffic this rule covers through
+	// uninspected.
+	MITMActionDisable = "disable"
+)
+
+// GroupRule is one enforcement rule inside a policy group. A rule is decided
+// by the layer that can see its conditions: a rule with only a schedule, a
+// user scope, or an inspection setting is decided by DNS and the proxy alike,
+// while URL patterns and response media types exist only inside a decrypted
+// request and are decided by the proxy.
+type GroupRule struct {
+	ID      string `json:"id"`
+	Name    string `json:"name,omitempty"`
+	Enabled bool   `json:"enabled"`
+	// Action is the outcome for requests this rule matches. ActionAllow is an
+	// exception inside the group; ActionBlock denies the request.
+	Action PolicyAction `json:"action"`
+	// MITMAction is the TLS inspection setting for the traffic this rule
+	// covers: "enable", "disable", or "default" (the gateway setting). A rule
+	// with URLRegexes or BlockedContentTypes always inspects, because those
+	// conditions exist only inside a decrypted request.
+	MITMAction string `json:"mitm_action,omitempty"`
+	// URLRegexes are Go regular expressions tested against the request URL.
+	URLRegexes []string `json:"url_regexes,omitempty"`
+	// BlockedContentTypes are response media types, matched as substrings so
+	// "video/" covers every video type.
+	BlockedContentTypes []string `json:"blocked_content_types,omitempty"`
+	// Schedule limits the rule to the listed windows. Nil means always active.
+	// Windows are evaluated in the schedule's own time zone.
+	Schedule *Schedule `json:"schedule,omitempty"`
+	// Users limits the rule to authenticated proxy users. Empty means every
+	// user the group applies to.
+	Users []string `json:"users,omitempty"`
+	// Priority orders rules inside one group; lower numbers win.
+	Priority int `json:"priority"`
+}
+
+// ProxyMatch is the proxy enforcement outcome for one request. The field names
+// are a contract: gatesentryproxy reads Matched, ShouldBlock, ShouldMITM,
+// BlockURLRegexes, and BlockContentTypes from this struct by reflection, so
+// the policy service answers in the shape the proxy already consumes.
+//
+// Matched reports whether a group decided this request at all. Matched false
+// means no policy applies and the gateway's own settings stay in charge,
+// including TLS inspection. ShouldBlock denies the request by domain.
+// BlockURLRegexes and BlockContentTypes are conditions the proxy tests after
+// the response is available; ShouldBlock is then true only when a URL pattern
+// also matched, so a rule can deny one path instead of a whole host.
+type ProxyMatch struct {
+	Matched           bool
+	GroupID           string
+	RuleID            string
+	MatchedDomain     string
+	Reason            string
+	ShouldBlock       bool
+	ShouldMITM        bool
+	BlockURLRegexes   []string
+	BlockContentTypes []string
+	// UnresolvedConditions lists rule conditions that could not be decided for
+	// the context this match was asked about.
+	UnresolvedConditions []string
 }
 
 // PolicySnapshot is the immutable evaluation view of the persisted policy
@@ -107,6 +183,9 @@ type DNSDecision struct {
 	Action        PolicyAction
 	GroupID       string
 	MatchedDomain string
+	// RuleID names the group rule that decided the query, when a rule rather
+	// than the group action produced the outcome.
+	RuleID string
 	// InapplicableConditions lists proxy-only conditions (url_regex,
 	// content_type, mitm) that DNS cannot enforce for this group.
 	InapplicableConditions []string

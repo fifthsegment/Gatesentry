@@ -168,7 +168,6 @@ func RegisterEndpointsStartServer(
 	boundAddress *string,
 	port string,
 	internalSettings *gatesentry2storage.MapStore,
-	ruleManager gatesentryWebserverEndpoints.RuleManagerInterface,
 	basePath string,
 	devices *gatesentry2storage.MapStore,
 	dataDir string,
@@ -488,42 +487,6 @@ func RegisterEndpointsStartServer(
 		w.Header().Set("Content-Type", "application/octet-stream")
 		w.Write(output)
 	}))
-
-	// Register rule endpoints with authentication
-	log.Println("Initializing rule manager...")
-	gatesentryWebserverEndpoints.InitRuleManager(ruleManager)
-	log.Println("Rule manager initialized")
-
-	log.Println("Registering GET /api/rules...")
-	internalServer.Get("/api/rules", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
-		gatesentryWebserverEndpoints.GSApiRulesGetAll(w, r)
-	})
-
-	log.Println("Registering POST /api/rules...")
-	internalServer.Post("/api/rules", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
-		gatesentryWebserverEndpoints.GSApiRuleCreate(w, r)
-	})
-
-	log.Println("Registering GET /api/rules/{id}...")
-	internalServer.Get("/api/rules/{id}", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
-		gatesentryWebserverEndpoints.GSApiRuleGet(w, r)
-	})
-
-	log.Println("Registering PUT /api/rules/{id}...")
-	internalServer.Put("/api/rules/{id}", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
-		gatesentryWebserverEndpoints.GSApiRuleUpdate(w, r)
-	})
-
-	log.Println("Registering DELETE /api/rules/{id}...")
-	internalServer.Delete("/api/rules/{id}", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
-		gatesentryWebserverEndpoints.GSApiRuleDelete(w, r)
-	})
-
-	log.Println("Registering POST /api/rules/test...")
-	internalServer.Post("/api/rules/test", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
-		gatesentryWebserverEndpoints.GSApiRuleTest(w, r)
-	})
-	log.Println("All rule endpoints registered successfully")
 
 	// Device inventory endpoints
 	log.Println("Registering device API endpoints...")

@@ -493,16 +493,58 @@ class TestStatsAPI:
         assert r.status_code == 200
 
 
-class TestRulesAPI:
-    def test_list_rules(self, client):
-        r = client.api_get("/api/rules")
-        assert r.status_code == 200
+class TestPolicyGroupsAPI:
+    """Policy groups own their rules: there is no separate rules API."""
 
-    def test_test_rule_match(self, client):
-        r = client.api_post(
-            "/api/rules/test", json={"domain": "example.com", "user": "testuser"}
-        )
+    def test_list_policy_groups(self, client):
+        r = client.api_get("/api/policy/groups")
         assert r.status_code == 200
+        assert "groups" in r.json()
+
+    def test_group_rule_round_trip(self, client):
+        payload = {
+            "name": "integration rule round trip",
+            "action": "block",
+            "domains": ["integration-rule-round-trip.example"],
+            "rules": [
+                {
+                    "name": "block video",
+                    "enabled": True,
+                    "action": "block",
+                    "mitm_action": "enable",
+                    "url_regexes": ["^/media/"],
+                    "blocked_content_types": ["video/"],
+                }
+            ],
+        }
+        r = client.api_post("/api/policy/groups", json=payload)
+        assert r.status_code == 201, r.text
+        group = r.json()["group"]
+        try:
+            assert group["rules"], "created group lost its rule"
+            rule = group["rules"][0]
+            assert rule["id"], "rule was stored without an id"
+            assert rule["blocked_content_types"] == ["video/"]
+        finally:
+            client.api_delete(f"/api/policy/groups/{group['id']}")
+
+    def test_allow_rule_with_url_condition_is_rejected(self, client):
+        # URL and content conditions narrow a block. The API rejects the
+        # combination instead of storing a rule that can never match.
+        payload = {
+            "name": "integration invalid rule",
+            "action": "allow",
+            "rules": [
+                {
+                    "name": "invalid",
+                    "enabled": True,
+                    "action": "allow",
+                    "url_regexes": ["^/media/"],
+                }
+            ],
+        }
+        r = client.api_post("/api/policy/groups", json=payload)
+        assert r.status_code == 400, r.text
 
 
 class TestConsumptionAPI:
