@@ -52,6 +52,23 @@ test("self-updating categories are selectable gateway-wide and per group", () =>
 
 test("policy groups report the assignment that makes them effective", () => {
   expect(groups).toContain("/api/policy/assignments");
-  expect(groups).toContain("assignmentLabel(group.id)");
+  expect(groups).toContain("assignmentLabel(assignedByGroup[group.id] || [])");
   expect(groups).toContain("applies only to the devices you assign to it");
+});
+
+test("devices are assigned to a group from the policy page itself", () => {
+  expect(groups).toContain("/api/devices");
+  expect(groups).toContain("deviceData.devices");
+  // Svelte only re-renders an expression that names the state it reads, so the
+  // assignments reach the template through a reactive map.
+  expect(groups).toContain("$: assignedByGroup = assignmentsByGroup(assignments)");
+  expect(groups).toContain("assignedByGroup[group.id]");
+  expect(groups).toContain("assignableDevices(assignedByGroup[group.id] || [])");
+  expect(groups).toContain("deviceName(deviceID)");
+  // Each change is written through the transactional per-device endpoint rather
+  // than the replace-all assignments document.
+  expect(groups).toContain('DEVICES_API + "/" + deviceID + "/assignment"');
+  expect(groups).toContain('method: "PUT"');
+  expect(groups).toContain("JSON.stringify({ group_id: groupID })");
+  expect(groups).toContain('writeAssignment([deviceID], "")');
 });

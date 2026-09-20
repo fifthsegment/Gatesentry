@@ -8,6 +8,7 @@
     InlineLoading,
     InlineNotification,
     ListItem,
+    MultiSelect,
     Row,
     Select,
     SelectItem,
@@ -62,18 +63,31 @@
     group_id: string;
   };
 
+  // Discovery owns the observed device record; this page only reads the labels
+  // it needs to name a device in an assignment control.
+  type Device = {
+    id: string;
+    display_name?: string;
+    hostnames?: string[];
+    ipv4?: string;
+    online?: boolean;
+  };
+
   const TEMPLATES_API = getBasePath() + "/api/policy/templates";
   const GROUPS_API = getBasePath() + "/api/policy/groups";
   const CATEGORIES_API = getBasePath() + "/api/policy/categories";
   const ASSIGNMENTS_API = getBasePath() + "/api/policy/assignments";
+  const DEVICES_API = getBasePath() + "/api/devices";
 
   let templates: PolicyTemplate[] = [];
   let groups: PolicyGroup[] = [];
   let categories: CategoryStatus[] = [];
   let assignments: DeviceAssignment[] = [];
+  let devices: Device[] = [];
   let gatewaySelection: string[] = [];
   let loading = true;
   let saving = false;
+  let assigning = false;
   let savingCategories = false;
   let error = "";
   let success = "";
@@ -136,13 +150,19 @@
     loading = true;
     error = "";
     try {
-      const [templateResponse, groupResponse, categoryResponse, assignmentResponse] =
-        await Promise.all([
-          fetch(TEMPLATES_API, { headers: headers() }),
-          fetch(GROUPS_API, { headers: headers() }),
-          fetch(CATEGORIES_API, { headers: headers() }),
-          fetch(ASSIGNMENTS_API, { headers: headers() }),
-        ]);
+      const [
+        templateResponse,
+        groupResponse,
+        categoryResponse,
+        assignmentResponse,
+        deviceResponse,
+      ] = await Promise.all([
+        fetch(TEMPLATES_API, { headers: headers() }),
+        fetch(GROUPS_API, { headers: headers() }),
+        fetch(CATEGORIES_API, { headers: headers() }),
+        fetch(ASSIGNMENTS_API, { headers: headers() }),
+        fetch(DEVICES_API, { headers: headers() }),
+      ]);
       if (!templateResponse.ok) {
         throw new Error(await responseError(templateResponse));
       }
@@ -155,20 +175,83 @@
       if (!assignmentResponse.ok) {
         throw new Error(await responseError(assignmentResponse));
       }
+      if (!deviceResponse.ok) {
+        throw new Error(await responseError(deviceResponse));
+      }
       const templateData = await templateResponse.json();
       const groupData = await groupResponse.json();
       const categoryData = await categoryResponse.json();
       const assignmentData = await assignmentResponse.json();
+      const deviceData = await deviceResponse.json();
       templates = templateData.templates || [];
       groups = groupData.groups || [];
       categories = categoryData.categories || [];
       assignments = assignmentData.assignments || [];
+      devices = deviceData.devices || [];
       gatewaySelection = categories.filter((category) => category.enabled).map((category) => category.id);
     } catch (err) {
       error = err.message;
     } finally {
       loading = false;
     }
+  }
+
+  // Assignment is written one device at a time through the transactional
+  // per-device endpoint, so two administrators editing different devices never
+  // overwrite each other's work the way a whole-document replace would.
+  async function assignDevice(deviceID: string, groupID: string) {
+    const response = await fetch(DEVICES_API + "/" + deviceID + "/assignment", {
+      method: "PUT",
+      headers: headers(true),
+      body: JSON.stringify({ group_id: groupID }),
+    });
+    if (!response.ok) throw new Error(await responseError(response));
+  }
+
+  // The optimistic update keeps the checkbox responsive; any failure reloads
+  // the stored assignments so the page never shows an assignment the gateway
+  // did not accept.
+  async function writeAssignment(deviceIDs: string[], groupID: string) {
+    const changed = deviceIDs.filter((deviceID) =>
+      groupID
+        ? assignments.find((assignment) => assignment.device_id === deviceID)?.group_id !== groupID
+        : assignments.some((assignment) => assignment.device_id === deviceID),
+    );
+    if (!changed.length) return;
+    assigning = true;
+    error = "";
+    success = "";
+    const previous = assignments;
+    const next = assignments.filter((assignment) => !changed.includes(assignment.device_id));
+    if (groupID) {
+      next.push(...changed.map((deviceID) => ({ device_id: deviceID, group_id: groupID })));
+    }
+    assignments = next;
+    try {
+      for (const deviceID of changed) {
+        await assignDevice(deviceID, groupID);
+      }
+      success = groupID
+        ? describeAssignment(changed, groupID)
+        : describeClear(changed);
+    } catch (err) {
+      assignments = previous;
+      error = err.message;
+    } finally {
+      assigning = false;
+    }
+  }
+
+  function describeAssignment(deviceIDs: string[], groupID: string): string {
+    const group = groups.find((candidate) => candidate.id === groupID);
+    const name = group ? group.name : groupID;
+    if (deviceIDs.length === 1) return deviceName(deviceIDs[0]) + " now uses " + name + ".";
+    return deviceIDs.length + " devices now use " + name + ".";
+  }
+
+  function describeClear(deviceIDs: string[]): string {
+    if (deviceIDs.length === 1) return deviceName(deviceIDs[0]) + " now uses the gateway default policy.";
+    return deviceIDs.length + " devices now use the gateway default policy.";
   }
 
   function beginCreate() {
@@ -238,13 +321,48 @@
     return category.domain_count.toLocaleString() + " domains";
   }
 
+  // Svelte re-renders a template expression only when a variable that the
+  // expression names changes, so the assignments are grouped into a plain map
+  // the template reads directly. A helper that closed over `assignments` would
+  // render once and then keep showing stale assignments.
+  $: assignedByGroup = assignmentsByGroup(assignments);
+
+  function assignmentsByGroup(list: DeviceAssignment[]): Record<string, string[]> {
+    const map: Record<string, string[]> = {};
+    for (const assignment of list) {
+      (map[assignment.group_id] ||= []).push(assignment.device_id);
+    }
+    return map;
+  }
+
   // "Who does this apply to?" is the question the group list has to answer,
   // and the answer is the devices assigned to it.
-  function assignmentLabel(groupID: string): string {
-    const count = assignments.filter((assignment) => assignment.group_id === groupID).length;
-    if (!count) return "No devices assigned, so it is not enforced on any device yet. Assign it from the device page.";
+  function assignmentLabel(deviceIDs: string[]): string {
+    const count = deviceIDs.length;
+    if (!count) return "No devices assigned, so this group changes nothing yet.";
     if (count === 1) return "Enforced on 1 assigned device.";
     return "Enforced on " + count + " assigned devices.";
+  }
+
+  // A device is named the way discovery recorded it: the administrator's label
+  // first, then a hostname, then the address it was last seen on.
+  function deviceLabel(device: Device): string {
+    const name = device.display_name || (device.hostnames || [])[0] || device.ipv4 || device.id;
+    if (device.ipv4 && name !== device.ipv4) return name + " (" + device.ipv4 + ")";
+    return name;
+  }
+
+  function deviceName(deviceID: string): string {
+    const device = devices.find((candidate) => candidate.id === deviceID);
+    return device ? deviceLabel(device) : deviceID;
+  }
+
+  // Only unassigned devices are offered, so adding a device never needs a
+  // second control and a device cannot be silently moved between two groups.
+  function assignableDevices(assigned: string[]): { id: string; text: string }[] {
+    return devices
+      .filter((device) => !assigned.includes(device.id))
+      .map((device) => ({ id: device.id, text: deviceLabel(device) }));
   }
 
   let draftDomain = "";
@@ -600,7 +718,34 @@
                   {#if !group.categories?.length && !group.domains?.length}
                     <p class="muted">No categories or domains selected. Assigned devices use the gateway default policy.</p>
                   {/if}
-                  <p class="muted">{assignmentLabel(group.id)}</p>
+                  <div class="group-assignment">
+                    <h5>Assigned devices</h5>
+                    <p class="muted">{assignmentLabel(assignedByGroup[group.id] || [])}</p>
+                    {#if assignedByGroup[group.id]?.length}
+                      <div class="domain-tags">
+                        {#each assignedByGroup[group.id] as deviceID (deviceID)}
+                          <Tag filter size="sm" on:close={() => writeAssignment([deviceID], "")}>
+                            {deviceName(deviceID)}
+                          </Tag>
+                        {/each}
+                      </div>
+                    {/if}
+                    {#if assignableDevices(assignedByGroup[group.id] || []).length}
+                      <div class="device-add">
+                        <MultiSelect
+                          titleText="Add devices to this group"
+                          label="Choose a discovered device"
+                          items={assignableDevices(assignedByGroup[group.id] || [])}
+                          disabled={assigning}
+                          on:select={(event) => writeAssignment(event.detail.selectedIds, group.id)}
+                        />
+                      </div>
+                    {:else if devices.length}
+                      <p class="muted">Every discovered device is already assigned to a group.</p>
+                    {:else}
+                      <p class="muted">No devices discovered yet. A device appears here once it uses GateSentry for DNS.</p>
+                    {/if}
+                  </div>
                 </div>
                 <div class="group-actions">
                   <Button size="small" kind="ghost" disabled={saving} on:click={() => beginEdit(group)}>Edit</Button>
@@ -781,6 +926,22 @@
   .group-title :global(.bx--tag),
   .domain-tags :global(.bx--tag) {
     margin: 0;
+  }
+  /* Assignment belongs on the card whose rules it applies, so the group list
+     answers "who does this apply to?" without a trip to the device page. */
+  .group-assignment {
+    margin-top: 0.75rem;
+  }
+  .group-assignment h5 {
+    margin: 0 0 0.25rem;
+  }
+  .group-assignment .muted {
+    margin-bottom: 0.5rem;
+  }
+  /* The device names are short, so the picker does not need the full width of
+     the card. */
+  .device-add {
+    max-width: 22rem;
   }
   .domain-entry {
     display: flex;

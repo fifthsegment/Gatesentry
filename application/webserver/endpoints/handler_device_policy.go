@@ -230,6 +230,12 @@ func GSApiDeviceAssignmentSet(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"Unable to reload policy"}`, http.StatusInternalServerError)
 		return
 	}
+	// Assigning a device is the moment a group starts enforcing, so a group whose
+	// categories have never been downloaded asks for a refresh here too. Without
+	// this an assignment could match nothing until the next scheduled refresh.
+	if group, ok := svc.Snapshot().Groups[req.GroupID]; ok {
+		ensureCategoryFeeds(group)
+	}
 	GSApiDevicePolicyGet(w, r)
 }
 
