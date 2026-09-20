@@ -208,7 +208,7 @@ func TestMigrateLegacyDevicePolicyRunsOnlyOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := migrateLegacyDevicePolicy(svc, settings); err != nil {
+	if err := migrateLegacyPolicy(svc, settings); err != nil {
 		t.Fatal(err)
 	}
 	if err := svc.Reload(); err != nil {
@@ -223,7 +223,7 @@ func TestMigrateLegacyDevicePolicyRunsOnlyOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Re-running migration must not clobber the edit.
-	if err := migrateLegacyDevicePolicy(svc, settings); err != nil {
+	if err := migrateLegacyPolicy(svc, settings); err != nil {
 		t.Fatal(err)
 	}
 	if err := svc.Reload(); err != nil {
@@ -239,4 +239,158 @@ func TestMigrateLegacyDevicePolicyRunsOnlyOnce(t *testing.T) {
 // predate the service-based setup helper.
 func setupTestPolicyPolicyServerForLegacy(t *testing.T) (*gatesentryPolicy.Service, func()) {
 	return setupTestPolicyServer(t)
+}
+
+// The retired rule store held standalone rules. Those records have to arrive as
+// groups that enforce what the old engine enforced, and they must arrive
+// unassigned so importing them cannot change any device's filtering on its own.
+func TestMigrateLegacyRulesBecomesUnassignedGroups(t *testing.T) {
+	svc, cleanup := setupTestPolicyServer(t)
+	defer cleanup()
+
+	settings, err := gatesentry2storage.OpenMapStore("settings", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := settings.Update("timezone", "Europe/Berlin"); err != nil {
+		t.Fatal(err)
+	}
+	legacyRules := `{"rules":[{"id":"block-games","name":"No games","enabled":true,"priority":0,"domain":"games.example","action":"block","mitm_action":"enable","block_type":"url_regex","url_regex_patterns":["/play"],"time_restriction":{"from":"20:00","to":"07:00"}}]}`
+	if err := settings.Update("rules", legacyRules); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrateLegacyPolicy(svc, settings); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Reload(); err != nil {
+		t.Fatal(err)
+	}
+
+	snapshot := svc.Snapshot()
+	if len(snapshot.Groups) != 1 {
+		t.Fatalf("groups after rule migration = %d, want 1", len(snapshot.Groups))
+	}
+	var imported gatesentryPolicy.PolicyGroup
+	for _, group := range snapshot.Groups {
+		imported = group
+	}
+	if len(snapshot.Assignments) != 0 {
+		t.Fatalf("imported rules were assigned: %+v", snapshot.Assignments)
+	}
+	if imported.Name != "No games" || len(imported.Domains) != 1 || imported.Domains[0] != "games.example" {
+		t.Fatalf("imported group = %+v", imported)
+	}
+	if imported.Action != gatesentryPolicy.ActionBlock {
+		t.Fatalf("imported group action = %q, want block", imported.Action)
+	}
+	if len(imported.Rules) != 1 {
+		t.Fatalf("imported rules = %d, want 1", len(imported.Rules))
+	}
+	rule := imported.Rules[0]
+	if rule.Action != gatesentryPolicy.ActionBlock || rule.MITMAction != gatesentryPolicy.MITMActionEnable {
+		t.Fatalf("imported rule = %+v", rule)
+	}
+	if len(rule.URLRegexes) != 1 || rule.URLRegexes[0] != "/play" {
+		t.Fatalf("imported URL conditions = %v", rule.URLRegexes)
+	}
+	// The old window was evaluated in the gateway's time zone, so the schedule
+	// keeps that zone rather than defaulting to UTC.
+	if rule.Schedule == nil || rule.Schedule.Timezone != "Europe/Berlin" {
+		t.Fatalf("imported schedule = %+v", rule.Schedule)
+	}
+
+	// A second run must not duplicate the imported groups.
+	if err := migrateLegacyPolicy(svc, settings); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Reload(); err != nil {
+		t.Fatal(err)
+	}
+	if count := len(svc.Snapshot().Groups); count != 1 {
+		t.Fatalf("groups after repeated migration = %d, want 1", count)
+	}
+}
+
+func TestDNSGatewayCategoryBlocksSubdomains(t *testing.T) {
+	svc, cleanup := setupTestPolicyServer(t)
+	defer cleanup()
+
+	// A gateway-wide category is the default policy for every client, and its
+	// feed lists the registrable domain. The subdomain has to be blocked too, or
+	// selecting "Social media" would not block real traffic.
+	index := gatesentryPolicy.NewCategoryIndex()
+	index.Replace("social", []string{"facebook.com"}, time.Now())
+	svc.SetCategoryIndex(index)
+	if err := svc.SetEnabledCategories([]string{"social"}); err != nil {
+		t.Fatal(err)
+	}
+	if blockedDomains["www.facebook.com"] {
+		t.Fatal("test precondition: the global blocklist must not cover the subdomain")
+	}
+
+	req := new(dns.Msg)
+	req.SetQuestion("www.facebook.com.", dns.TypeA)
+	w := newMockResponseWriter("198.51.100.7")
+	handleDNSRequest(w, req)
+	if w.msg == nil || w.msg.Rcode != dns.RcodeNameError {
+		t.Fatalf("expected NXDOMAIN for a gateway-category subdomain, got %+v", w.msg)
+	}
+	if len(w.msg.Answer) != 1 {
+		t.Fatalf("answers = %d, want the blocked.local explanation", len(w.msg.Answer))
+	}
+	if cname, ok := w.msg.Answer[0].(*dns.CNAME); !ok || cname.Target != "blocked.local." {
+		t.Fatalf("block explanation = %+v, want blocked.local CNAME", w.msg.Answer[0])
+	}
+}
+
+func TestDNSGatewayCategoryIgnoresUnselectedCategories(t *testing.T) {
+	svc, cleanup := setupTestPolicyServer(t)
+	defer cleanup()
+
+	index := gatesentryPolicy.NewCategoryIndex()
+	index.Replace("social", []string{"facebook.com"}, time.Now())
+	svc.SetCategoryIndex(index)
+
+	req := new(dns.Msg)
+	req.SetQuestion("www.facebook.com.", dns.TypeA)
+	w := newMockResponseWriter("198.51.100.8")
+	handleDNSRequest(w, req)
+	if w.msg != nil && w.msg.Rcode == dns.RcodeNameError {
+		t.Fatal("an unselected category must not block anything")
+	}
+}
+
+func TestDNSPolicyGroupAllowExemptsGatewayCategory(t *testing.T) {
+	svc, cleanup := setupTestPolicyServer(t)
+	defer cleanup()
+
+	deviceStore.UpsertDevice(&discovery.Device{Hostnames: []string{"adults-pc"}, IPv4: "192.0.2.60"})
+	devices := deviceStore.GetAllDevices()
+	index := gatesentryPolicy.NewCategoryIndex()
+	index.Replace("social", []string{"facebook.com"}, time.Now())
+	svc.SetCategoryIndex(index)
+	if err := svc.SetEnabledCategories([]string{"social"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.SaveGroups([]gatesentryPolicy.PolicyGroup{{
+		ID: "adults", Action: gatesentryPolicy.ActionAllow, Categories: []string{"social"},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.SaveAssignments([]gatesentryPolicy.DeviceAssignment{{DeviceID: devices[0].ID, GroupID: "adults"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Reload(); err != nil {
+		t.Fatal(err)
+	}
+
+	req := new(dns.Msg)
+	req.SetQuestion("www.facebook.com.", dns.TypeA)
+	w := newMockResponseWriter("192.0.2.60")
+	handleDNSRequest(w, req)
+	// The assigned group allows the category, so the gateway-wide default must
+	// not override the explicit assignment.
+	if w.msg != nil && w.msg.Rcode == dns.RcodeNameError {
+		t.Fatal("group allow must exempt a gateway-wide category")
+	}
 }

@@ -59,10 +59,11 @@ release including secure first-run is published.
 
 Open `http://127.0.0.1:10786` (or `http://[::1]:10786`) in a browser on the
 Docker host and create the administrator on the one-time setup screen. Fresh
-installations built from current source have no default credentials. To set
-up from another machine, mount the one-time bootstrap file shown in the
-compose file and see [Secure first-run administration](secure-first-run.md);
-remove the mount after setup completes.
+installations built from current source have no default credentials. Setup is
+not authenticated, so complete it before the port is reachable from an
+untrusted network; see [Secure first-run administration](secure-first-run.md).
+To skip the screen entirely, mount the credentials file shown in the compose
+file and remove the mount after setup completes.
 
 ## Host networking and DNS port conflicts
 
@@ -129,8 +130,8 @@ docker compose logs --follow gatesentry
 ```
 
 Logs may contain visited domains and blocked URLs (private browsing data), so
-share them selectively. Administrator credentials, bootstrap authorization
-values, and encryption keys are never written to the logs. Avoid pasting
+share them selectively. Administrator credentials, unattended bootstrap
+credentials, and encryption keys are never written to the logs. Avoid pasting
 `docker inspect` output, which can include environment details, into public
 reports.
 
@@ -192,4 +193,3 @@ opt-in: generate the GateSentry CA in the dashboard, install it in client
 trust stores, and review exclusions and limits in
 [Certificate trust and HTTPS interception](../SECURITY.md#certificate-trust-and-https-interception)
 before enabling it.
-

@@ -1,13 +1,11 @@
 package gatesentryf
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
 
 	gatesentry2storage "bitbucket.org/abdullah_irfan/gatesentryf/storage"
-	GatesentryTypes "bitbucket.org/abdullah_irfan/gatesentryf/types"
 )
 
 // SettingsSchemaKey names the persisted settings content schema version. It is
@@ -30,46 +28,14 @@ type settingsMigration struct {
 
 // settingsMigrations is ordered by version. Entry i converts the store from
 // version i-1 to version i (entry.version is the version it produces).
-var settingsMigrations = []settingsMigration{
-	{
-		version: 1,
-		apply: func(values map[string]string) (map[string]string, error) {
-			// Migration 1 normalizes the legacy bare-array rules value into
-			// the RuleList format later code writes. Missing optional
-			// settings stay missing here; runtime default seeding fills them.
-			rulesJSON, ok := values["rules"]
-			if !ok || rulesJSON == "" {
-				return values, nil
-			}
-			var ruleList GatesentryTypes.RuleList
-			if err := json.Unmarshal([]byte(rulesJSON), &ruleList); err == nil {
-				encoded, err := json.Marshal(ruleList)
-				if err != nil {
-					return nil, fmt.Errorf("normalize rules list: %w", err)
-				}
-				if encoded := string(encoded); encoded != rulesJSON {
-					values["rules"] = encoded
-				}
-				return values, nil
-			}
-			var rules []GatesentryTypes.Rule
-			if err := json.Unmarshal([]byte(rulesJSON), &rules); err != nil {
-				// Malformed rules fail migration instead of being silently
-				// replaced: configuration corruption must be visible.
-				return nil, fmt.Errorf("migrate legacy rules value: %w", err)
-			}
-			if rules == nil {
-				rules = []GatesentryTypes.Rule{}
-			}
-			encoded, err := json.Marshal(GatesentryTypes.RuleList{Rules: rules})
-			if err != nil {
-				return nil, fmt.Errorf("encode migrated rules list: %w", err)
-			}
-			values["rules"] = string(encoded)
-			return values, nil
-		},
-	},
-}
+//
+// The registry is empty at schema 1, which only declares that the settings
+// content is versioned. The retired standalone rule store (the "rules" key) is
+// deliberately not a migration here: its records are read once by the policy
+// import, which accepts both shapes the key held, and the key is left
+// byte-identical so the import is the single, auditable owner of that
+// conversion. A store with no conversion to run is still stamped below.
+var settingsMigrations = []settingsMigration{}
 
 // MigrateSettings applies ordered GSSettings content migrations and stamps the
 // resulting schema version. A store from a newer GateSentry fails closed so an
@@ -116,6 +82,16 @@ func MigrateSettings(store *gatesentry2storage.MapStore) error {
 			return nil
 		}); err != nil {
 			return fmt.Errorf("migrate settings to schema %d: %w", migration.version, err)
+		}
+		current = migration.version
+	}
+	// A store whose content needed no conversion still records the schema it
+	// now conforms to, so a later binary can tell which format it is reading.
+	// Without this, a fresh install would look like a pre-schema store forever
+	// and a future migration would run against content it already processed.
+	if current < CurrentSettingsSchema {
+		if err := store.Update(SettingsSchemaKey, strconv.Itoa(CurrentSettingsSchema)); err != nil {
+			return fmt.Errorf("migrate settings: stamp schema %d: %w", CurrentSettingsSchema, err)
 		}
 	}
 	return nil

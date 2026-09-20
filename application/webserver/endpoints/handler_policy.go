@@ -46,6 +46,78 @@ func policyServiceOrError(w http.ResponseWriter) *gatesentryPolicy.Service {
 	return svc
 }
 
+// ensureCategoryFeeds schedules a blocklist refresh when a group selects a
+// category the gateway has never downloaded. Category feeds download during a
+// refresh, so without this a group could reference a category that matches
+// nothing until the next scheduled refresh.
+func ensureCategoryFeeds(groups ...gatesentryPolicy.PolicyGroup) {
+	index := gatesentryDnsServer.GetCategoryIndex()
+	if index == nil {
+		return
+	}
+	for _, group := range groups {
+		for _, categoryID := range group.Categories {
+			if index.UpdatedAt(categoryID).IsZero() {
+				gatesentryDnsServer.RequestBlocklistRefresh()
+				return
+			}
+		}
+	}
+}
+
+// GSApiPolicyCategoriesGet returns the category catalog with its current
+// coverage and gateway-wide state. The UI shows domain counts from here so an
+// administrator can see what a category actually covers.
+// GET /api/policy/categories
+func GSApiPolicyCategoriesGet(w http.ResponseWriter, r *http.Request) {
+	svc := policyServiceOrError(w)
+	if svc == nil {
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"categories": svc.CategoryStatuses()})
+}
+
+// GSApiPolicyCategoriesPut saves the gateway-wide category selection and asks
+// the DNS scheduler to download the feeds now, so the new coverage is applied
+// without waiting for the next refresh interval. Categories selected here
+// apply to every client that has no policy group assignment.
+// PUT /api/policy/categories
+func GSApiPolicyCategoriesPut(w http.ResponseWriter, r *http.Request) {
+	svc := policyServiceOrError(w)
+	if svc == nil {
+		return
+	}
+	var body struct {
+		Categories []string `json:"categories"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writePolicyJSONError(w, http.StatusBadRequest, "Invalid JSON body")
+		return
+	}
+	if _, err := gatesentryPolicy.NormalizeCategories(body.Categories); err != nil {
+		writePolicyJSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := svc.SetEnabledCategories(body.Categories); err != nil {
+		if errors.Is(err, gatesentryPolicy.ErrUnknownCategory) {
+			writePolicyJSONError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		writePolicyJSONError(w, http.StatusInternalServerError, "Unable to persist category selection")
+		return
+	}
+	// The refresh runs on the scheduler goroutine. Reporting whether it was
+	// queued keeps the response honest: the statuses below can still show the
+	// previous coverage when a refresh was already in flight.
+	refreshQueued := gatesentryDnsServer.RequestBlocklistRefresh()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"categories":        svc.CategoryStatuses(),
+		"refresh_scheduled": refreshQueued,
+	})
+}
+
 // GSApiPolicyGroupsGet returns the persisted policy groups.
 // GET /api/policy/groups
 func GSApiPolicyGroupsGet(w http.ResponseWriter, r *http.Request) {
@@ -62,16 +134,19 @@ func GSApiPolicyGroupsGet(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{"groups": groups})
 }
 
-// GSApiPolicyTemplatesGet returns the built-in starter catalog. The response
-// describes protections and limitations so the UI can show what a template
-// will do before it creates an ordinary editable group.
+// GSApiPolicyTemplatesGet returns the built-in starter catalog with the
+// caveats that hold for every starter, so the UI can show what a template will
+// do before it creates an ordinary editable group.
 // GET /api/policy/templates
 func GSApiPolicyTemplatesGet(w http.ResponseWriter, r *http.Request) {
 	if policyServiceOrError(w) == nil {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"templates": gatesentryPolicy.PolicyTemplates()})
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"templates":          gatesentryPolicy.PolicyTemplates(),
+		"shared_limitations": gatesentryPolicy.TemplateSharedLimitations(),
+	})
 }
 
 // GSApiPolicyTemplateApply creates the ordinary group represented by a
@@ -97,6 +172,7 @@ func GSApiPolicyTemplateApply(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	group = svc.Snapshot().Groups[group.ID]
+	ensureCategoryFeeds(group)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(map[string]interface{}{"template": template, "group": group})
@@ -115,6 +191,23 @@ func decodePolicyGroup(r *http.Request) (gatesentryPolicy.PolicyGroup, error) {
 	default:
 		return group, errors.New("invalid policy action")
 	}
+	// Category selections are validated against the shipped catalog so a typo
+	// cannot be stored as a rule that silently never matches. The normalized
+	// result is stored because category matching is case-sensitive against the
+	// catalog IDs.
+	normalized, err := gatesentryPolicy.NormalizeCategories(group.Categories)
+	if err != nil {
+		return group, err
+	}
+	group.Categories = normalized
+	// Rules are validated and canonicalized here so a malformed rule is
+	// rejected at the API boundary instead of being stored as a record that
+	// silently matches nothing.
+	rules, err := gatesentryPolicy.NormalizeGroupRules(group.Rules)
+	if err != nil {
+		return group, err
+	}
+	group.Rules = rules
 	return group, nil
 }
 
@@ -140,6 +233,7 @@ func GSApiPolicyGroupCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	group = svc.Snapshot().Groups[group.ID]
+	ensureCategoryFeeds(group)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(map[string]interface{}{"group": group})
@@ -167,6 +261,7 @@ func GSApiPolicyGroupUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	group = svc.Snapshot().Groups[groupID]
+	ensureCategoryFeeds(group)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{"group": group})
 }
@@ -215,6 +310,18 @@ func GSApiPolicyGroupsReplace(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, `{"error":"Invalid policy action"}`, http.StatusBadRequest)
 			return
 		}
+		normalized, err := gatesentryPolicy.NormalizeCategories(body.Groups[i].Categories)
+		if err != nil {
+			http.Error(w, `{"error":"Unknown policy category in group "`+body.Groups[i].ID+`"}`, http.StatusBadRequest)
+			return
+		}
+		body.Groups[i].Categories = normalized
+		rules, err := gatesentryPolicy.NormalizeGroupRules(body.Groups[i].Rules)
+		if err != nil {
+			http.Error(w, `{"error":"Invalid rule in group "`+body.Groups[i].ID+`"}`, http.StatusBadRequest)
+			return
+		}
+		body.Groups[i].Rules = rules
 	}
 	if err := svc.SaveGroups(body.Groups); err != nil {
 		http.Error(w, `{"error":"Unable to persist policy groups"}`, http.StatusInternalServerError)
@@ -224,6 +331,7 @@ func GSApiPolicyGroupsReplace(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"Unable to reload policy"}`, http.StatusInternalServerError)
 		return
 	}
+	ensureCategoryFeeds(body.Groups...)
 	GSApiPolicyGroupsGet(w, r)
 }
 

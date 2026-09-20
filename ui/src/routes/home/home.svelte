@@ -1,15 +1,30 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { Column, Row, Button, Tag } from "carbon-components-svelte";
+  import {
+    Button,
+    CodeSnippet,
+    Column,
+    InlineNotification,
+    ProgressIndicator,
+    ProgressStep,
+    Row,
+    StructuredList,
+    StructuredListBody,
+    StructuredListCell,
+    StructuredListRow,
+    Tag,
+  } from "carbon-components-svelte";
   import { Restart } from "carbon-icons-svelte";
   import { store } from "../../store/apistore";
+  import { gsNavigate } from "../../lib/navigate";
   import { _ } from "svelte-i18n";
 
   type CheckStep = { state: string; action?: string; detail?: string };
+  type OnboardingStep = { name: string; state: string };
   type Progress = {
     started_at?: string;
     first_explained_protection_at?: string;
-    };
+  };
   type ProtectionCheck = {
     at: string;
     domain: string;
@@ -29,8 +44,20 @@
     bind: CheckStep;
     resolver: CheckStep;
     blocklist: CheckStep;
+    steps: OnboardingStep[];
     progress: Progress;
   };
+  type Notice = { key: string; title: string; subtitle: string };
+
+  // The backend reports six steps. Only these four carry a state that setup can
+  // actually reach: "clients" is an instruction and "https_inspection" is
+  // optional, so both are described outside the readiness indicator.
+  const measuredSteps = [
+    "resolver",
+    "blocklist",
+    "first_device",
+    "protection_check",
+  ];
 
   let status: OnboardingStatus | null = null;
   let statusError = "";
@@ -75,16 +102,57 @@
     }
   };
 
-  const checkTag = (state: string) => {
-    if (state === "ok") return "green";
-    if (state === "failed") return "red";
-    return "gray";
+  const stepLabel = (name: string) => {
+    if (name === "resolver") return $_("Resolver and listener");
+    if (name === "blocklist") return $_("Blocklists loaded");
+    if (name === "first_device") return $_("First device discovered");
+    return $_("Protection verified");
   };
 
-  const stateLabel = (state: string) => {
-    if (state === "ok") return $_("Ready");
-    if (state === "failed") return $_("Needs attention");
+  const stepDetail = (name: string) => {
+    if (!status) return "";
+    if (name === "resolver") return status.resolver.detail || "";
+    if (name === "blocklist") return status.blocklist.detail || "";
+    if (name === "first_device") {
+      return `${status.device_count} ${$_("devices discovered")}`;
+    }
+    if (status.progress.first_explained_protection_at) {
+      return `${$_("First explained protection recorded")}: ${new Date(
+        status.progress.first_explained_protection_at,
+      ).toLocaleString()}`;
+    }
     return $_("Not verified yet");
+  };
+
+  const collectNotices = (current: OnboardingStatus): Notice[] => {
+    const notices: Notice[] = [];
+    // The readiness steps already show each check's detail, so the resolver and
+    // blocklist notices carry only the fix. The listener check has no step of
+    // its own, so it keeps both.
+    if (current.bind.state !== "ok") {
+      notices.push({
+        key: "bind",
+        title: $_("DNS listener is not ready"),
+        subtitle: [current.bind.detail, current.bind.action]
+          .filter(Boolean)
+          .join(" "),
+      });
+    }
+    if (current.resolver.state !== "ok" && current.resolver.action) {
+      notices.push({
+        key: "resolver",
+        title: $_("Upstream resolver is not reachable"),
+        subtitle: current.resolver.action,
+      });
+    }
+    if (current.blocklist.state !== "ok" && current.blocklist.action) {
+      notices.push({
+        key: "blocklist",
+        title: $_("Blocklist empty"),
+        subtitle: current.blocklist.action,
+      });
+    }
+    return notices;
   };
 
   const elapsedMinutes = () => {
@@ -97,133 +165,95 @@
     return Math.max(0, Math.round((protectedAt - started) / 60000));
   };
 
+  // A loopback listener address is not reachable from other devices, so the
+  // snippet keeps the placeholder until GateSentry is bound to a real address.
+  const unreachableHosts = ["", "0.0.0.0", "::", "[::]", "127.0.0.1", "::1"];
+  const dnsHost = () => {
+    const addr = status?.listen_addr || "";
+    return unreachableHosts.includes(addr) ? "<gatesentry-host-ip>" : addr;
+  };
+
+  $: readiness = (status?.steps || []).filter((step) =>
+    measuredSteps.includes(step.name),
+  );
+  $: pendingIndex = readiness.findIndex((step) => step.state !== "ok");
+  $: notices = status ? collectNotices(status) : [];
+  $: protectedYet = Boolean(status?.progress.first_explained_protection_at);
+
   onMount(loadStatus);
 </script>
 
-<h2>{$_("Get protected in five guided steps")}</h2>
-<p>
-  {$_(
-    "This page walks through DNS-first setup: pick a resolver, load blocklists, point a device or router at GateSentry, wait for the first device, then run the protection check.",
-  )}
-</p>
+<Row>
+  <Column>
+    <h2>{$_("Gateway status")}</h2>
+    <p class="lede">
+      {$_(
+        "GateSentry is a self-hosted internet safety gateway for a home or small office. It answers DNS for the devices that use it, blocks the domains on your blocklists, and records the decision behind each block.",
+      )}
+    </p>
 
-{#if statusError}
-  <div class="simple-border" role="alert">{statusError}</div>
-  <Button kind="secondary" on:click={loadStatus}>
-    {$_("Retry status check")}
-  </Button>
-{/if}
+    {#if statusError}
+      <InlineNotification
+        kind="error"
+        title={$_("Setup status unavailable")}
+        subtitle={statusError}
+        on:close={() => (statusError = "")}
+      />
+      <Button kind="secondary" size="small" icon={Restart} on:click={loadStatus}>
+        {$_("Retry status check")}
+      </Button>
+    {/if}
 
-{#if status}
-  <Row>
-    <Column>
-      <div class="simple-border onboarding-card">
-        <h4>
-          1. {$_("Resolver and listener")}
-          <Tag type={checkTag(status.resolver.state)}>
-            {stateLabel(status.resolver.state)}
+    {#if status}
+      <section>
+        <div class="section-head">
+          <h3>{$_("Readiness")}</h3>
+          <Tag type={protectedYet ? "green" : "red"}>
+            {protectedYet ? $_("Protected") : $_("Not protected yet")}
           </Tag>
-        </h4>
-        <p>
-          {$_("Upstream resolver")}: <strong>{status.upstream}</strong><br />
-          {$_("DNS listener")}:
-          <strong>{status.listen_addr}:{status.listen_port}</strong>
-        </p>
-        <p class="detail">{status.resolver.detail}</p>
-        {#if status.resolver.action}
-          <p class="action">{status.resolver.action}</p>
-        {/if}
-        <p class="hint">
-          {$_(
-            "Change the resolver from DNS Server settings if this upstream is unreachable.",
-          )}
-        </p>
-        {#if status.bind.state !== "ok"}
-          <p class="action">{status.bind.detail} {status.bind.action}</p>
-        {/if}
-      </div>
-    </Column>
-  </Row>
+        </div>
 
-  <Row>
-    <Column>
-      <div class="simple-border onboarding-card">
-        <h4>
-          2. {$_("Blocklist readiness")}
-          <Tag type={checkTag(status.blocklist.state)}>
-            {stateLabel(status.blocklist.state)}
-          </Tag>
-        </h4>
-        <p>
-          {$_("Blocked domains loaded")}:
-          <strong>{status.blocked_domains}</strong>
-        </p>
-        <p class="detail">{status.blocklist.detail}</p>
-        {#if status.blocklist.action}
-          <p class="action">{status.blocklist.action}</p>
+        {#if readiness.length > 0}
+          <!-- A negative index keeps every step in its final state once setup
+               is complete: Carbon draws the "current" marker with a pending
+               icon, which would hide the checkmark on the last step. -->
+          <ProgressIndicator vertical preventChangeOnClick currentIndex={pendingIndex}>
+            {#each readiness as step (step.name)}
+              <ProgressStep
+                complete={step.state === "ok"}
+                invalid={step.state === "failed"}
+                label={stepLabel(step.name)}
+                secondaryLabel={stepDetail(step.name)}
+              />
+            {/each}
+          </ProgressIndicator>
         {/if}
-        <p class="hint">
+
+        {#each notices as notice (notice.key)}
+          <InlineNotification
+            kind="error"
+            lowContrast
+            hideCloseButton
+            title={notice.title}
+            subtitle={notice.subtitle}
+          />
+        {/each}
+
+        <p class="helper">
           {$_(
             "DNS blocking acts on domains. It cannot inspect or explain URL, MIME, keyword, or image-content decisions.",
           )}
         </p>
-      </div>
-    </Column>
-  </Row>
-
-  <Row>
-    <Column>
-      <div class="simple-border onboarding-card">
-        <h4>3. {$_("Point clients or your router at GateSentry")}</h4>
-        <p>
-          {$_(
-            "Set the DNS server on a device, or the DHCP/DNS setting on your router, to the GateSentry host address.",
-          )}
-        </p>
-        <pre>
-  dig @&lt;gatesentry-host-ip&gt; example.com</pre>
-        <p class="hint">
-          {$_(
-            "Devices that use GateSentry for DNS are the only devices covered. Devices that use a different resolver are unverified.",
-          )}
-        </p>
-      </div>
-    </Column>
-  </Row>
-
-  <Row>
-    <Column>
-      <div class="simple-border onboarding-card">
-        <h4>
-          4. {$_("First device")}
-          <Tag type={status.device_count > 0 ? "green" : "red"}>
-            {status.device_count > 0
-              ? $_("Discovered")
-              : $_("Waiting for a device")}
-          </Tag>
-        </h4>
-        <p>
-          {$_("Discovered devices")}: <strong>{status.device_count}</strong>
-        </p>
-        <p class="hint">
-          {$_(
-            "Point a device at GateSentry, browse briefly, then refresh. Devices are verified only when GateSentry observes their DNS traffic.",
-          )}
-        </p>
-        <Button kind="secondary" icon={Restart} on:click={loadStatus}>
-          {$_("Refresh devices")}
+        <Button kind="secondary" size="small" icon={Restart} on:click={loadStatus}>
+          {$_("Refresh status")}
         </Button>
-      </div>
-    </Column>
-  </Row>
+      </section>
 
-  <Row>
-    <Column>
-      <div class="simple-border onboarding-card">
-        <h4>5. {$_("Verify actual protection")}</h4>
-        <p>
+      <section>
+        <h3>{$_("Verify protection")}</h3>
+        <p class="lede">
           {$_(
-            "Startup is not protection. This check asks the running GateSentry DNS server to resolve a controlled test domain and records the decision it made.",
+            "Startup is not protection. This asks the running GateSentry DNS server to resolve a controlled test domain and records the decision it made.",
           )}
         </p>
         <Button
@@ -232,92 +262,122 @@
         >
           {checking ? $_("Checking...") : $_("Run protection check")}
         </Button>
+
         {#if checkState}
-          <div class="check-result" role="status">
-            <Tag type={checkTag(checkState)}>
+          <div class="check-result">
+            <Tag type={checkState === "ok" ? "green" : "red"}>
               {checkState === "ok" ? $_("Protected") : $_("Not protected yet")}
             </Tag>
-            <p class="detail">{checkDetail}</p>
+            <p>{checkDetail}</p>
             {#if check}
-              <p>
-                {$_("Test domain")}: <code>{check.domain}</code><br />
-                {$_("Answer")}: <code>{check.rcode}</code>
-                {#if check.cname}
-                  <br />{$_("Explanation")}:
-                  <code>{check.cname}</code>
-                {/if}<br />
-                {$_("Upstream")}:
-                <code>{check.upstream}</code>
-              </p>
+              <StructuredList condensed flush>
+                <StructuredListBody>
+                  <StructuredListRow>
+                    <StructuredListCell noWrap>{$_("Test domain")}</StructuredListCell>
+                    <StructuredListCell>{check.domain}</StructuredListCell>
+                  </StructuredListRow>
+                  <StructuredListRow>
+                    <StructuredListCell noWrap>{$_("Answer")}</StructuredListCell>
+                    <StructuredListCell>{check.rcode}</StructuredListCell>
+                  </StructuredListRow>
+                  {#if check.cname}
+                    <StructuredListRow>
+                      <StructuredListCell noWrap>{$_("Explanation")}</StructuredListCell>
+                      <StructuredListCell>{check.cname}</StructuredListCell>
+                    </StructuredListRow>
+                  {/if}
+                  <StructuredListRow>
+                    <StructuredListCell noWrap>{$_("Upstream")}</StructuredListCell>
+                    <StructuredListCell>{check.upstream}</StructuredListCell>
+                  </StructuredListRow>
+                </StructuredListBody>
+              </StructuredList>
             {/if}
-            {#if checkAction}<p class="action">{checkAction}</p>{/if}
+            {#if checkAction}
+              <InlineNotification
+                kind="error"
+                lowContrast
+                hideCloseButton
+                title={$_("Protection check failed")}
+                subtitle={checkAction}
+              />
+            {/if}
           </div>
         {/if}
-        {#if status.progress.first_explained_protection_at}
-          <p>
-            <strong>
-              {$_("First explained protection recorded")}:
-              {new Date(
-                status.progress.first_explained_protection_at,
-              ).toLocaleString()}
-            </strong>
-          </p>
-          {#if elapsedMinutes() !== null}
-            <p>
-              {$_("Time from setup start to first explained protection")}:
-              {elapsedMinutes()}
-              {$_("minutes")} ({$_("target")} ≤ 10).
-            </p>
-          {/if}
-        {/if}
-      </div>
-    </Column>
-  </Row>
 
-  <Row>
-    <Column>
-      <div class="simple-border onboarding-card">
-        <h4>{$_("Optional: HTTPS inspection")}</h4>
-        <p>
+        {#if status.progress.first_explained_protection_at && elapsedMinutes() !== null}
+          <p class="helper">
+            {$_("Time from setup start to first explained protection")}:
+            {elapsedMinutes()}
+            {$_("minutes")} ({$_("target")} ≤ 10).
+          </p>
+        {/if}
+      </section>
+
+      <section>
+        <h3>{$_("Point devices at GateSentry")}</h3>
+        <p class="lede">
           {$_(
-            "DNS filtering needs no certificates and is the simple default. HTTPS inspection is advanced and opt-in: it enables URL, MIME, keyword, and content filtering by trusting the GateSentry CA certificate.",
+            "Set the DNS server on a device, or the DHCP/DNS setting on your router, to the GateSentry host address.",
           )}
         </p>
-        <p class="hint">
-          {$_(
-            "It is not required for the steps above. Devices that have not installed the certificate, and traffic that bypasses the proxy, remain outside HTTPS inspection.",
+        <CodeSnippet type="single" code={`dig @${dnsHost()} example.com`} />
+        <p class="helper">
+          {$_("DNS listener")}:
+          <code class="listen-address">{status.listen_addr}:{status.listen_port}</code
+          >. {$_(
+            "Devices that use GateSentry for DNS are the only devices covered. Devices that use a different resolver are unverified.",
           )}
         </p>
-        <p class="hint">
+        <Button kind="ghost" size="small" on:click={() => gsNavigate("/dns")}>
+          {$_("DNS settings")}
+        </Button>
+      </section>
+
+      <section>
+        <h3>{$_("HTTPS inspection")}</h3>
+        <p class="helper">
           {$_(
-            "Enable it from the dashboard after reviewing the certificate trust and exclusion guidance.",
+            "Optional and advanced: it enables URL, MIME, keyword, and content filtering for devices that trust the GateSentry CA certificate. It is not required for the steps above. Devices that have not installed the certificate, and traffic that bypasses the proxy, remain outside HTTPS inspection.",
           )}
         </p>
-      </div>
-    </Column>
-  </Row>
-{/if}
+        <Button kind="ghost" size="small" on:click={() => gsNavigate("/settings")}>
+          {$_("Settings")}
+        </Button>
+      </section>
+    {/if}
+  </Column>
+</Row>
 
 <style>
-  .onboarding-card {
-    margin-top: 1rem;
-    padding: 1rem;
-    line-height: 1.6;
+  .lede {
+    max-width: 42rem;
+    color: var(--cds-text-secondary, #525252);
   }
-  .detail {
-    color: #525252;
+  .helper {
+    max-width: 48rem;
+    color: var(--cds-text-helper, #6f6f6f);
   }
-  .action {
-    color: #da1e28;
+  section {
+    margin-top: 2rem;
   }
-  .hint {
-    color: #6f6f6f;
+  .section-head {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .listen-address {
+    font-family: var(--cds-code-01-font-family, monospace);
   }
   .check-result {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.75rem;
     margin-top: 1rem;
   }
-  pre {
-    background: #f4f4f4;
-    padding: 0.5rem;
+  .check-result > p {
+    max-width: 48rem;
+    margin: 0;
   }
 </style>

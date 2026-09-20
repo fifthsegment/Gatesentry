@@ -2,65 +2,57 @@
   import {
     Button,
     Column,
-    Grid,
     InlineLoading,
     InlineNotification,
+    MultiSelect,
     Row,
-    Select,
-    SelectItem,
     Tag,
-    TextArea,
-    TextInput,
+    Tile,
   } from "carbon-components-svelte";
   import { onMount } from "svelte";
   import { getBasePath } from "../../lib/navigate";
-
-  type PolicyTemplate = {
-    id: string;
-    name: string;
-    group_name: string;
-    description: string;
-    protections: string[];
-    limitations: string[];
-    group_id: string;
-    available: boolean;
-  };
-
-  type PolicyGroup = {
-    id: string;
-    name: string;
-    description: string;
-    domains: string[];
-    action: string;
-    users: string[];
-    unknown_device_policy: string;
-    priority: number;
-  };
+  import Categoryselect from "./categoryselect.svelte";
+  import Groupform from "./groupform.svelte";
+  import { conditionLabel, copyGroup, emptyGroup, persistableGroup } from "./policymodel";
+  import type {
+    CategoryStatus,
+    Device,
+    DeviceAssignment,
+    PolicyGroup,
+    PolicyTemplate,
+    SchedulePreset,
+  } from "./policymodel";
 
   const TEMPLATES_API = getBasePath() + "/api/policy/templates";
   const GROUPS_API = getBasePath() + "/api/policy/groups";
+  const CATEGORIES_API = getBasePath() + "/api/policy/categories";
+  const ASSIGNMENTS_API = getBasePath() + "/api/policy/assignments";
+  const DEVICES_API = getBasePath() + "/api/devices";
+  const PRESETS_API = getBasePath() + "/api/policy/schedule-presets";
+  const USERS_API = getBasePath() + "/api/users";
+  const TIMEZONE_API = getBasePath() + "/api/settings/timezone";
 
   let templates: PolicyTemplate[] = [];
+  // Caveats the API states for the whole catalog, shown once above the grid.
+  let sharedLimitations: string[] = [];
   let groups: PolicyGroup[] = [];
+  let categories: CategoryStatus[] = [];
+  let assignments: DeviceAssignment[] = [];
+  let devices: Device[] = [];
+  let gatewaySelection: string[] = [];
+  let schedulePresets: SchedulePreset[] = [];
+  // Authenticated proxy users, so a rule can be scoped to the logins the
+  // gateway can actually identify instead of to a name typed from memory.
+  let users: string[] = [];
+  let timezone = "UTC";
   let loading = true;
   let saving = false;
+  let assigning = false;
+  let savingCategories = false;
   let error = "";
   let success = "";
   let editingGroupId = "";
   let draft: PolicyGroup = emptyGroup();
-
-  function emptyGroup(): PolicyGroup {
-    return {
-      id: "",
-      name: "",
-      description: "",
-      domains: [],
-      action: "",
-      users: [],
-      unknown_device_policy: "",
-      priority: 0,
-    };
-  }
 
   function token(): string {
     return localStorage.getItem("jwt") || "";
@@ -85,13 +77,58 @@
     return body || "Request failed (" + response.status + ")";
   }
 
+  // The schedule presets, the user logins, and the installation time zone
+  // support the rule editor. None of them is worth failing the policy list
+  // over, so each is read on its own and the control that needs it is simply
+  // absent when the gateway cannot answer.
+  async function loadSupporting() {
+    try {
+      const response = await fetch(PRESETS_API, { headers: headers() });
+      if (response.ok) {
+        const data = await response.json();
+        schedulePresets = data.presets || [];
+      }
+    } catch {
+      schedulePresets = [];
+    }
+    try {
+      const response = await fetch(USERS_API, { headers: headers() });
+      if (response.ok) {
+        const data = await response.json();
+        users = (data.users || []).map((user) => user.username).filter(Boolean);
+      }
+    } catch {
+      users = [];
+    }
+    try {
+      const response = await fetch(TIMEZONE_API, { headers: headers() });
+      if (response.ok) {
+        const data = await response.json();
+        if (data.Value) timezone = data.Value;
+      }
+    } catch {
+      // The schedule falls back to UTC, which is what the evaluator uses when
+      // no time zone is stored.
+    }
+  }
+
   async function load() {
     loading = true;
     error = "";
     try {
-      const [templateResponse, groupResponse] = await Promise.all([
+      const [
+        templateResponse,
+        groupResponse,
+        categoryResponse,
+        assignmentResponse,
+        deviceResponse,
+      ] = await Promise.all([
         fetch(TEMPLATES_API, { headers: headers() }),
         fetch(GROUPS_API, { headers: headers() }),
+        fetch(CATEGORIES_API, { headers: headers() }),
+        fetch(ASSIGNMENTS_API, { headers: headers() }),
+        fetch(DEVICES_API, { headers: headers() }),
+        loadSupporting(),
       ]);
       if (!templateResponse.ok) {
         throw new Error(await responseError(templateResponse));
@@ -99,10 +136,27 @@
       if (!groupResponse.ok) {
         throw new Error(await responseError(groupResponse));
       }
+      if (!categoryResponse.ok) {
+        throw new Error(await responseError(categoryResponse));
+      }
+      if (!assignmentResponse.ok) {
+        throw new Error(await responseError(assignmentResponse));
+      }
+      if (!deviceResponse.ok) {
+        throw new Error(await responseError(deviceResponse));
+      }
       const templateData = await templateResponse.json();
       const groupData = await groupResponse.json();
+      const categoryData = await categoryResponse.json();
+      const assignmentData = await assignmentResponse.json();
+      const deviceData = await deviceResponse.json();
       templates = templateData.templates || [];
+      sharedLimitations = templateData.shared_limitations || [];
       groups = groupData.groups || [];
+      categories = categoryData.categories || [];
+      assignments = assignmentData.assignments || [];
+      devices = deviceData.devices || [];
+      gatewaySelection = categories.filter((category) => category.enabled).map((category) => category.id);
     } catch (err) {
       error = err.message;
     } finally {
@@ -110,45 +164,137 @@
     }
   }
 
+  // Assignment is written one device at a time through the transactional
+  // per-device endpoint, so two administrators editing different devices never
+  // overwrite each other's work the way a whole-document replace would.
+  async function assignDevice(deviceID: string, groupID: string) {
+    const response = await fetch(DEVICES_API + "/" + deviceID + "/assignment", {
+      method: "PUT",
+      headers: headers(true),
+      body: JSON.stringify({ group_id: groupID }),
+    });
+    if (!response.ok) throw new Error(await responseError(response));
+  }
+
+  // The optimistic update keeps the checkbox responsive; any failure reloads
+  // the stored assignments so the page never shows an assignment the gateway
+  // did not accept.
+  async function writeAssignment(deviceIDs: string[], groupID: string) {
+    const changed = deviceIDs.filter((deviceID) =>
+      groupID
+        ? assignments.find((assignment) => assignment.device_id === deviceID)?.group_id !== groupID
+        : assignments.some((assignment) => assignment.device_id === deviceID),
+    );
+    if (!changed.length) return;
+    assigning = true;
+    error = "";
+    success = "";
+    const previous = assignments;
+    const next = assignments.filter((assignment) => !changed.includes(assignment.device_id));
+    if (groupID) {
+      next.push(...changed.map((deviceID) => ({ device_id: deviceID, group_id: groupID })));
+    }
+    assignments = next;
+    try {
+      for (const deviceID of changed) {
+        await assignDevice(deviceID, groupID);
+      }
+      success = groupID ? describeAssignment(changed, groupID) : describeClear(changed);
+    } catch (err) {
+      assignments = previous;
+      error = err.message;
+    } finally {
+      assigning = false;
+    }
+  }
+
+  function describeAssignment(deviceIDs: string[], groupID: string): string {
+    const group = groups.find((candidate) => candidate.id === groupID);
+    const name = group ? group.name : groupID;
+    if (deviceIDs.length === 1) return deviceName(deviceIDs[0]) + " now uses " + name + ".";
+    return deviceIDs.length + " devices now use " + name + ".";
+  }
+
+  function describeClear(deviceIDs: string[]): string {
+    if (deviceIDs.length === 1) return deviceName(deviceIDs[0]) + " now uses the gateway default policy.";
+    return deviceIDs.length + " devices now use the gateway default policy.";
+  }
+
   function beginCreate() {
     editingGroupId = "new";
     draft = emptyGroup();
-    draftDomain = "";
   }
 
   function beginEdit(group: PolicyGroup) {
     editingGroupId = group.id;
-    draft = {
-      id: group.id,
-      name: group.name,
-      description: group.description || "",
-      domains: [...(group.domains || [])],
-      action: group.action || "",
-      users: [...(group.users || [])],
-      unknown_device_policy: group.unknown_device_policy || "",
-      priority: group.priority || 0,
-    };
-    draftDomain = "";
+    draft = copyGroup(group);
   }
 
   function cancelEdit() {
     editingGroupId = "";
     draft = emptyGroup();
-    draftDomain = "";
   }
 
-  function addDomain() {
-    const domain = draftDomain.trim();
-    if (!domain) return;
-    draft.domains = [...draft.domains, domain];
-    draftDomain = "";
+  function categoryName(id: string): string {
+    const found = categories.find((category) => category.id === id);
+    return found ? found.name : id;
   }
 
-  function removeDomain(domain: string) {
-    draft.domains = draft.domains.filter((candidate) => candidate !== domain);
+  // Carbon's Tag accepts a fixed set of theme names, so the return type is the
+  // subset this page uses rather than a bare string.
+  function actionTagType(action: string): "red" | "green" | "gray" {
+    if (action === "block") return "red";
+    if (action === "allow") return "green";
+    return "gray";
   }
 
-  let draftDomain = "";
+  function actionLabel(action: string): string {
+    return action || "no action of its own";
+  }
+
+  // Svelte re-renders a template expression only when a variable that the
+  // expression names changes, so the assignments are grouped into a plain map
+  // the template reads directly. A helper that closed over `assignments` would
+  // render once and then keep showing stale assignments.
+  $: assignedByGroup = assignmentsByGroup(assignments);
+
+  function assignmentsByGroup(list: DeviceAssignment[]): Record<string, string[]> {
+    const map: Record<string, string[]> = {};
+    for (const assignment of list) {
+      (map[assignment.group_id] ||= []).push(assignment.device_id);
+    }
+    return map;
+  }
+
+  // "Who does this apply to?" is the question the group list has to answer,
+  // and the answer is the devices assigned to it.
+  function assignmentLabel(deviceIDs: string[]): string {
+    const count = deviceIDs.length;
+    if (!count) return "No devices assigned, so this group changes nothing yet.";
+    if (count === 1) return "Enforced on 1 assigned device.";
+    return "Enforced on " + count + " assigned devices.";
+  }
+
+  // A device is named the way discovery recorded it: the administrator's label
+  // first, then a hostname, then the address it was last seen on.
+  function deviceLabel(device: Device): string {
+    const name = device.display_name || (device.hostnames || [])[0] || device.ipv4 || device.id;
+    if (device.ipv4 && name !== device.ipv4) return name + " (" + device.ipv4 + ")";
+    return name;
+  }
+
+  function deviceName(deviceID: string): string {
+    const device = devices.find((candidate) => candidate.id === deviceID);
+    return device ? deviceLabel(device) : deviceID;
+  }
+
+  // Only unassigned devices are offered, so adding a device never needs a
+  // second control and a device cannot be silently moved between two groups.
+  function assignableDevices(assigned: string[]): { id: string; text: string }[] {
+    return devices
+      .filter((device) => !assigned.includes(device.id))
+      .map((device) => ({ id: device.id, text: deviceLabel(device) }));
+  }
 
   async function saveGroup() {
     if (!draft.name.trim()) {
@@ -164,16 +310,7 @@
       const response = await fetch(url, {
         method: isNew ? "POST" : "PUT",
         headers: headers(true),
-        body: JSON.stringify({
-          id: isNew ? "" : draft.id,
-          name: draft.name.trim(),
-          description: draft.description,
-          domains: draft.domains,
-          action: draft.action,
-          users: draft.users,
-          unknown_device_policy: draft.unknown_device_policy,
-          priority: draft.priority,
-        }),
+        body: JSON.stringify(persistableGroup(draft)),
       });
       if (!response.ok) throw new Error(await responseError(response));
       const data = await response.json();
@@ -186,6 +323,32 @@
       error = err.message;
     } finally {
       saving = false;
+    }
+  }
+
+  async function saveGatewayCategories() {
+    savingCategories = true;
+    error = "";
+    success = "";
+    try {
+      const response = await fetch(CATEGORIES_API, {
+        method: "PUT",
+        headers: headers(true),
+        body: JSON.stringify({ categories: gatewaySelection }),
+      });
+      if (!response.ok) throw new Error(await responseError(response));
+      const data = await response.json();
+      categories = data.categories || [];
+      gatewaySelection = categories.filter((category) => category.enabled).map((category) => category.id);
+      // The download runs in the background, so the counts may still be the
+      // previous ones when this response is written.
+      success = data.refresh_scheduled
+        ? "Categories saved. The gateway is downloading the feeds now, so refresh in a moment to see the new counts."
+        : "Categories saved. A download was already running, so the counts update when it finishes.";
+    } catch (err) {
+      error = err.message;
+    } finally {
+      savingCategories = false;
     }
   }
 
@@ -233,18 +396,6 @@
 
 <Row>
   <Column>
-    <div class="section-heading">
-      <div>
-        <h3>Policy templates</h3>
-        <p>
-          Review the protections and limitations first. Applying a template
-          creates an ordinary editable group; applying it again never resets a
-          group you have customized.
-        </p>
-      </div>
-      <Tag type="blue">Advanced rule editor remains below</Tag>
-    </div>
-
     {#if error}
       <InlineNotification kind="error" title="Error" subtitle={error} on:close={() => (error = "")} />
     {/if}
@@ -255,118 +406,212 @@
     {#if loading}
       <InlineLoading description="Loading policy templates and groups..." />
     {:else}
-      <Grid condensed>
-        {#each templates as template (template.id)}
-          <Column sm={4} md={4} lg={5} class="template-column">
-            <article class="template-card">
-              <h4>{template.name}</h4>
-              <p>{template.description}</p>
-              <h5>Before applying</h5>
-              <strong>Protections</strong>
-              <ul>
-                {#each template.protections as protection}
-                  <li>{protection}</li>
-                {/each}
-              </ul>
-              <strong>Limitations</strong>
-              <ul class="limitations">
-                {#each template.limitations as limitation}
-                  <li>{limitation}</li>
-                {/each}
-              </ul>
-              <Button size="small" disabled={saving || !template.available} on:click={() => applyTemplate(template)}>
-                Apply as editable group
-              </Button>
-            </article>
-          </Column>
-        {/each}
-      </Grid>
-
-      <div class="groups-heading">
+      <div class="section-heading">
         <div>
-          <h3>Editable policy groups</h3>
-          <p>These records drive explicit group assignment. Owner and category labels do not create policy rules.</p>
+          <h3>Blocked categories</h3>
+          <p class="section-intro">
+            Domain lists the gateway downloads and keeps current, so no one has
+            to type domains. A category selected here is blocked for every
+            device, like the global blocklist.
+          </p>
+        </div>
+        <Button size="small" disabled={savingCategories} on:click={saveGatewayCategories}>
+          Save categories
+        </Button>
+      </div>
+
+      <Categoryselect
+        {categories}
+        selection={gatewaySelection}
+        disabled={savingCategories}
+        on:change={(event) => (gatewaySelection = event.detail)}
+      />
+
+      <div class="section-heading templates-heading">
+        <div>
+          <h3>Policy templates</h3>
+          <p class="section-intro">
+            Applying a starter creates an ordinary editable group. Applying it
+            again never resets a group you have customized.
+          </p>
+        </div>
+      </div>
+
+      {#if sharedLimitations.length}
+        <div class="shared-caveats">
+          <InlineNotification
+            kind="info"
+            lowContrast
+            hideCloseButton
+            title="Applies to every starter"
+            subtitle={sharedLimitations.join(" ")}
+          />
+        </div>
+      {/if}
+
+      <div class="template-grid">
+        <Row>
+          {#each templates as template (template.id)}
+            <Column sm={4} md={4} lg={4}>
+              <Tile>
+                <div class="template-tile">
+                  <h4>{template.name}</h4>
+                  <p class="tile-description">{template.description}</p>
+
+                  {#if template.categories?.length}
+                    <div class="tags">
+                      {#each template.categories as category}
+                        <Tag size="sm" type="red">{categoryName(category)}</Tag>
+                      {/each}
+                    </div>
+                  {/if}
+
+                  {#if template.limitations?.length}
+                    <p class="tile-caveat">{template.limitations.join(" ")}</p>
+                  {/if}
+
+                  <Button size="small" disabled={saving || !template.available} on:click={() => applyTemplate(template)}>
+                    Apply as editable group
+                  </Button>
+                </div>
+              </Tile>
+            </Column>
+          {/each}
+        </Row>
+      </div>
+
+      <div class="section-heading groups-heading">
+        <div>
+          <h3>Policy groups</h3>
+          <p class="section-intro">
+            A group holds the categories, domains, and rules for one action, and
+            it applies only to the devices you assign to it; every other device
+            keeps the gateway default policy. DNS enforces the group decision by
+            domain, and a rule that turns on TLS inspection is also enforced by
+            the proxy, which is what lets it match URL paths and response types.
+          </p>
         </div>
         <Button size="small" kind="secondary" disabled={saving} on:click={beginCreate}>Create policy group</Button>
       </div>
 
       {#if editingGroupId === "new"}
-        <div class="group-editor">
-          <h4>New policy group</h4>
-          <TextInput labelText="Name" bind:value={draft.name} />
-          <TextArea labelText="Description" bind:value={draft.description} rows={2} />
-          <Select labelText="Domain action" bind:selected={draft.action}>
-            <SelectItem value="" text="No additional action" />
-            <SelectItem value="block" text="Block listed domains" />
-            <SelectItem value="allow" text="Allow listed domains" />
-          </Select>
-           <div class="domain-entry">
-            <TextInput labelText="Domain pattern" placeholder="example.com or *.example.com" bind:value={draftDomain} on:keydown={(event) => event.key === "Enter" && addDomain()} />
-            <Button size="small" kind="tertiary" on:click={addDomain}>Add domain</Button>
-          </div>
-          {#if draft.domains.length}
-            <div class="domain-tags">
-              {#each draft.domains as domain}
-                <Tag filter size="sm" on:close={() => removeDomain(domain)}>{domain}</Tag>
-              {/each}
-            </div>
-          {/if}
-          <div class="group-actions">
-            <Button size="small" disabled={saving} on:click={saveGroup}>Save group</Button>
-            <Button size="small" kind="ghost" on:click={cancelEdit}>Cancel</Button>
-          </div>
+        <div class="group-slot">
+          <Tile>
+            <h4>New policy group</h4>
+            <Groupform
+              {draft}
+              {categories}
+              {users}
+              {schedulePresets}
+              {timezone}
+              {saving}
+              onSave={saveGroup}
+              onCancel={cancelEdit}
+            />
+          </Tile>
         </div>
       {/if}
 
       {#each groups as group (group.id)}
-        <div class="group-row">
+        <div class="group-slot">
           {#if editingGroupId === group.id}
-            <div class="group-editor">
+            <Tile>
               <h4>Edit {group.name}</h4>
-              <TextInput labelText="Name" bind:value={draft.name} />
-              <TextArea labelText="Description" bind:value={draft.description} rows={2} />
-              <Select labelText="Domain action" bind:selected={draft.action}>
-                <SelectItem value="" text="No additional action" />
-                <SelectItem value="block" text="Block listed domains" />
-                <SelectItem value="allow" text="Allow listed domains" />
-              </Select>
-              <div class="domain-entry">
-                <TextInput labelText="Domain pattern" placeholder="example.com or *.example.com" bind:value={draftDomain} on:keydown={(event) => event.key === "Enter" && addDomain()} />
-                <Button size="small" kind="tertiary" on:click={addDomain}>Add domain</Button>
-              </div>
-              {#if draft.domains.length}
-                <div class="domain-tags">
-                  {#each draft.domains as domain}
-                    <Tag filter size="sm" on:close={() => removeDomain(domain)}>{domain}</Tag>
-                  {/each}
-                </div>
-              {/if}
-              <div class="group-actions">
-                <Button size="small" disabled={saving} on:click={saveGroup}>Save group</Button>
-                <Button size="small" kind="ghost" on:click={cancelEdit}>Cancel</Button>
-              </div>
-            </div>
+              <Groupform
+                {draft}
+                {categories}
+                {users}
+                {schedulePresets}
+                {timezone}
+                {saving}
+                onSave={saveGroup}
+                onCancel={cancelEdit}
+              />
+            </Tile>
           {:else}
-            <div class="group-summary">
-              <h4>{group.name}</h4>
-              <Tag type={group.action === "block" ? "red" : group.action === "allow" ? "green" : "gray"}>
-                {group.action || "default behavior"}
-              </Tag>
-              <p>{group.description || "No description."}</p>
-              {#if group.domains?.length}
-                <div class="domain-tags">
-                  {#each group.domains as domain}
-                    <Tag size="sm" type="outline">{domain}</Tag>
-                  {/each}
+            <Tile>
+              <div class="group-row">
+                <div class="group-summary">
+                  <div class="group-title">
+                    <h4>{group.name}</h4>
+                    <Tag type={actionTagType(group.action)}>{actionLabel(group.action)}</Tag>
+                  </div>
+                  {#if group.description}
+                    <p>{group.description}</p>
+                  {/if}
+                  {#if group.categories?.length}
+                    <div class="tags">
+                      {#each group.categories as category}
+                        <Tag size="sm" type={actionTagType(group.action)}>{categoryName(category)}</Tag>
+                      {/each}
+                    </div>
+                  {/if}
+                  {#if group.domains?.length}
+                    <div class="tags">
+                      {#each group.domains as domain}
+                        <Tag size="sm" type="outline">{domain}</Tag>
+                      {/each}
+                    </div>
+                  {/if}
+                  {#if !group.categories?.length && !group.domains?.length}
+                    <p class="muted">No categories or domains selected, so this group matches nothing yet.</p>
+                  {/if}
+
+                  <div class="group-rules">
+                    <h5>Rules</h5>
+                    {#if group.rules?.length}
+                      <ul class="rule-list">
+                        {#each group.rules as rule (rule.id)}
+                          <li>
+                            <span class="rule-name">{rule.name || "Untitled rule"}</span>
+                            <Tag size="sm" type={actionTagType(rule.action)}>{rule.action}</Tag>
+                            {#if !rule.enabled}
+                              <Tag size="sm" type="gray">off</Tag>
+                            {/if}
+                            <span class="rule-conditions">{conditionLabel(rule)}</span>
+                          </li>
+                        {/each}
+                      </ul>
+                    {:else}
+                      <p class="muted">No rules. The action above applies to the whole group.</p>
+                    {/if}
+                  </div>
+
+                  <div class="group-assignment">
+                    <h5>Assigned devices</h5>
+                    <p class="muted">{assignmentLabel(assignedByGroup[group.id] || [])}</p>
+                    {#if assignedByGroup[group.id]?.length}
+                      <div class="tags">
+                        {#each assignedByGroup[group.id] as deviceID (deviceID)}
+                          <Tag filter size="sm" on:close={() => writeAssignment([deviceID], "")}>
+                            {deviceName(deviceID)}
+                          </Tag>
+                        {/each}
+                      </div>
+                    {/if}
+                    {#if assignableDevices(assignedByGroup[group.id] || []).length}
+                      <div class="device-add">
+                        <MultiSelect
+                          titleText="Add devices to this group"
+                          label="Choose a discovered device"
+                          items={assignableDevices(assignedByGroup[group.id] || [])}
+                          disabled={assigning}
+                          on:select={(event) => writeAssignment(event.detail.selectedIds, group.id)}
+                        />
+                      </div>
+                    {:else if devices.length}
+                      <p class="muted">Every discovered device is already assigned to a group.</p>
+                    {:else}
+                      <p class="muted">No devices discovered yet. A device appears here once it uses GateSentry for DNS.</p>
+                    {/if}
+                  </div>
                 </div>
-              {:else}
-                <p class="muted">No explicit domain patterns. The gateway default policy remains in effect.</p>
-              {/if}
-            </div>
-            <div class="group-actions">
-              <Button size="small" kind="ghost" disabled={saving} on:click={() => beginEdit(group)}>Edit</Button>
-              <Button size="small" kind="danger-tertiary" disabled={saving} on:click={() => deleteGroup(group)}>Delete</Button>
-            </div>
+                <div class="group-actions">
+                  <Button size="small" kind="ghost" disabled={saving} on:click={() => beginEdit(group)}>Edit</Button>
+                  <Button size="small" kind="danger-tertiary" disabled={saving} on:click={() => deleteGroup(group)}>Delete</Button>
+                </div>
+              </div>
+            </Tile>
           {/if}
         </div>
       {/each}
@@ -375,92 +620,174 @@
 </Row>
 
 <style>
-  .section-heading,
-  .groups-heading,
-  .group-row,
-  .domain-entry,
-  .group-actions {
-    display: flex;
-    align-items: flex-start;
-    gap: 1rem;
-  }
-  .section-heading,
-  .groups-heading {
-    justify-content: space-between;
-    margin: 1rem 0;
-  }
+  /* This build ships Carbon v10's compiled g10 theme, whose colors are literal
+     values rather than --cds-* custom properties, so v10 tokens are used
+     directly: #161616 text-01, #525252 text-02. Surfaces come from Carbon's
+     tile (#fff over the #f4f4f4 page background), so nothing here draws a
+     border or a shadow. */
   h3,
   h4,
   h5,
   p {
     margin-top: 0;
   }
-  .section-heading p,
-  .groups-heading p,
-  .template-card p,
+  h3 {
+    margin-bottom: 0.25rem;
+    font-size: 1.25rem;
+    font-weight: 400;
+    line-height: 1.75rem;
+  }
+  h4 {
+    margin-bottom: 0.25rem;
+    font-size: 1rem;
+    font-weight: 600;
+    line-height: 1.375rem;
+  }
+  h5 {
+    margin: 0;
+    color: #525252;
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.32px;
+    line-height: 1rem;
+  }
+  .section-heading {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+    margin: 0 0 1rem;
+  }
+  .templates-heading,
+  .groups-heading {
+    margin-top: 2rem;
+  }
+  .section-intro,
+  .tile-description,
   .group-summary p,
   .muted {
     color: #525252;
     font-size: 0.875rem;
+    line-height: 1.25rem;
   }
-  .template-card,
-  .group-row,
-  .group-editor {
-    border: 1px solid #c6c6c6;
-    padding: 1rem;
-    height: 100%;
-    box-sizing: border-box;
+  .section-intro {
+    margin-bottom: 0;
   }
-  .template-card h4 {
-    margin-bottom: 0.5rem;
-  }
-  .template-card h5 {
-    margin: 1rem 0 0.35rem;
-  }
-  .template-card ul {
-    padding-left: 1.25rem;
-    font-size: 0.8125rem;
-  }
-  .template-card .limitations {
+  /* Each starter carries one caveat. A single muted line reads faster than a
+     heading plus a one-item list. */
+  .tile-caveat {
+    margin: 0 0 0.75rem;
     color: #525252;
+    font-size: 0.75rem;
+    line-height: 1.125rem;
   }
-  .groups-heading {
-    margin-top: 2rem;
+  /* The tiles keep one baseline for the tags and the caveat, so a starter
+     without categories still lines up with the rest of the row. */
+  .template-tile .tags {
+    margin: 0.75rem 0 0.5rem;
+  }
+  .shared-caveats {
+    margin-bottom: 1rem;
+  }
+  /* The row is a flex container, so stretching the column and filling it from
+     the inside keeps every tile in a row the same height. */
+  .template-grid :global(.bx--col-sm-4),
+  .template-grid :global(.bx--col-md-4),
+  .template-grid :global(.bx--col-lg-4) {
+    display: flex;
+    margin-bottom: 1rem;
+  }
+  .template-grid :global(.bx--tile) {
+    display: flex;
+    flex-direction: column;
+  }
+  .template-tile {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+  }
+  .template-tile :global(.bx--btn) {
+    align-self: flex-start;
+    margin-top: auto;
+  }
+  .group-slot {
+    margin-bottom: 0.75rem;
   }
   .group-row {
+    display: flex;
     justify-content: space-between;
-    margin-bottom: 0.75rem;
+    gap: 1rem;
   }
   .group-summary {
     flex: 1;
   }
-  .group-summary h4 {
-    display: inline-block;
-    margin-right: 0.5rem;
+  .group-title {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.25rem;
   }
-  .group-editor {
-    width: 100%;
+  .group-title h4 {
+    margin: 0;
   }
-  .group-editor :global(.bx--text-input-wrapper),
-  .group-editor :global(.bx--text-area__wrapper),
-  .group-editor :global(.bx--select) {
-    margin-bottom: 0.75rem;
+  .group-title :global(.bx--tag),
+  .tags :global(.bx--tag) {
+    margin: 0;
   }
-  .domain-entry {
-    align-items: flex-end;
-  }
-  .domain-entry :global(.bx--text-input-wrapper) {
-    flex: 1;
-  }
-  .domain-tags {
+  .tags {
     display: flex;
     flex-wrap: wrap;
     gap: 0.35rem;
     margin: 0.5rem 0;
   }
+  /* The rules of a group are read as one line each: what it is, what it does,
+     and the conditions that narrow it. Editing them belongs in the group's own
+     form, not in the summary. */
+  .group-rules {
+    margin-top: 0.75rem;
+  }
+  .rule-list {
+    margin: 0.25rem 0 0;
+    padding: 0;
+    list-style: none;
+  }
+  .rule-list li {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    padding: 0.25rem 0;
+  }
+  .rule-name {
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+  }
+  .rule-conditions {
+    color: #525252;
+    font-size: 0.75rem;
+    line-height: 1.125rem;
+  }
+  /* Assignment belongs on the card whose rules it applies, so the group list
+     answers "who does this apply to?" without a trip to the device page. */
+  .group-assignment {
+    margin-top: 0.75rem;
+  }
+  .group-assignment h5 {
+    margin-bottom: 0.25rem;
+  }
+  .group-assignment .muted {
+    margin-bottom: 0.5rem;
+  }
+  /* The device names are short, so the picker does not need the full width of
+     the card. */
+  .device-add {
+    max-width: 22rem;
+  }
   .group-actions {
-    align-items: center;
-    justify-content: flex-end;
+    display: flex;
+    align-items: flex-start;
     flex-shrink: 0;
+    gap: 0.5rem;
+    justify-content: flex-end;
   }
 </style>

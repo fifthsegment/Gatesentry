@@ -53,7 +53,17 @@ type Service struct {
 	// accessRL rate-limits public access requests per client IP. It is
 	// in-memory only so a restart resets the counter.
 	accessRL *rateLimiter
-	nowFunc  func() time.Time
+	// categories is the downloaded per-category domain index. Startup attaches
+	// it once before the DNS listener accepts queries; the blocklist refresh is
+	// the only writer of its contents. A nil index means no category data is
+	// loaded yet, and category rules match nothing.
+	categories *CategoryIndex
+	// enabledCategories caches the gateway-wide category selection. The settings
+	// store revalidates against disk on every read, so the DNS adapter cannot
+	// call it once per query; the writes that change the selection and Reload
+	// refresh this cache instead.
+	enabledCategories []string
+	nowFunc           func() time.Time
 }
 
 // NewService creates a policy service. A nil storage is supported for tests
@@ -65,6 +75,7 @@ func NewService(storage *gatesentry2storage.MapStore, devices DeviceResolver) (*
 		return nil, err
 	}
 	s.snapshot = snapshotFromDocument(doc)
+	s.enabledCategories = LoadEnabledCategories(storage)
 	if err := s.loadExceptions(); err != nil {
 		return nil, err
 	}
@@ -214,6 +225,26 @@ func (s *Service) Snapshot() PolicySnapshot {
 	return PolicySnapshot{Groups: groups, Assignments: assignments, Version: s.snapshot.Version, UpdatedAt: s.snapshot.UpdatedAt}
 }
 
+// ReferencedCategories returns the category IDs any policy group selects. The
+// DNS blocklist refresh downloads exactly these categories plus the ones
+// enabled gateway-wide, so a feed nobody selected never occupies memory.
+func (s *Service) ReferencedCategories() []string {
+	snapshot := s.Snapshot()
+	seen := make(map[string]bool)
+	ids := make([]string, 0, len(snapshot.Groups))
+	for _, group := range snapshot.Groups {
+		for _, id := range group.Categories {
+			if id == "" || seen[id] {
+				continue
+			}
+			seen[id] = true
+			ids = append(ids, id)
+		}
+	}
+	sort.Strings(ids)
+	return ids
+}
+
 // Reload re-reads the persisted document. On error the previous snapshot is
 // retained and the error is returned, so a transient read failure cannot
 // silently change live enforcement.
@@ -228,9 +259,11 @@ func (s *Service) Reload() error {
 	if err := s.loadPauses(); err != nil {
 		return err
 	}
+	enabled := LoadEnabledCategories(s.storage)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.snapshot = snapshotFromDocument(doc)
+	s.enabledCategories = enabled
 	return nil
 }
 
@@ -590,13 +623,12 @@ func (s *Service) evaluateDNSAt(identity Identity, domain string, snap PolicySna
 		decision.InapplicableConditions = dnsInapplicableConditions()
 		return decision
 	}
-	for _, pattern := range group.Domains {
-		if matchDomain(pattern, domain) {
-			decision.MatchedDomain = pattern
-			decision.Action = group.Action
-			decision.Reason = "group policy"
-			break
-		}
+	if matched, categoryID := matchGroupRule(group, domain, s.categories); matched != "" {
+		outcome := evaluateGroupRulesAt(group, matched, categoryID, identity.AuthUser, now, LayerDNS)
+		decision.MatchedDomain = outcome.MatchedDomain
+		decision.Action = outcome.Action
+		decision.RuleID = outcome.RuleID
+		decision.Reason = outcome.Reason
 	}
 	decision.InapplicableConditions = dnsInapplicableConditions()
 	return decision
@@ -604,6 +636,62 @@ func (s *Service) evaluateDNSAt(identity Identity, domain string, snap PolicySna
 
 func (s *Service) EvaluateDNS(identity Identity, domain string) DNSDecision {
 	return s.evaluateDNSAt(identity, domain, s.Snapshot(), s.ExceptionSnapshot(), s.PauseSnapshot(), s.now())
+}
+
+// EvaluateProxy is the policy decision for a proxy request: which group and
+// rule own the domain, whether the request is denied, whether TLS inspection
+// is needed to see the rule's URL and content conditions, and which patterns
+// and media types the proxy must test against the decrypted request and the
+// response. It is the same evaluator DNS uses, asked for the conditions the
+// proxy can actually see.
+//
+// Matched false means no policy group decided this request: the proxy keeps
+// the gateway's own settings, so a group never silently changes inspection for
+// traffic it does not cover.
+func (s *Service) EvaluateProxy(identity Identity, domain string) ProxyMatch {
+	return s.evaluateProxyAt(identity, domain, s.Snapshot(), s.ExceptionSnapshot(), s.PauseSnapshot(), s.now())
+}
+
+// evaluateProxyAt is the pure, snapshot-parametrized core of EvaluateProxy.
+func (s *Service) evaluateProxyAt(identity Identity, domain string, snap PolicySnapshot, exc ExceptionSnapshot, pa PauseSnapshot, now time.Time) ProxyMatch {
+	match := ProxyMatch{}
+	// A scoped exception exempts the domain entirely, and an allow rule is an
+	// exception inside the group. Both leave the gateway defaults in charge.
+	if _, ok := evaluateExceptionIn(identity, domain, exc); ok {
+		match.Reason = "scoped exception"
+		return match
+	}
+	group, ok := snap.Groups[identity.GroupID]
+	if !ok {
+		return match
+	}
+	if !scheduleActiveAt(group, now) {
+		match.Reason = "group schedule inactive"
+		return match
+	}
+	if _, ok := evaluatePauseIn(identity, pa); ok && group.Action == ActionBlock {
+		match.Reason = "paused"
+		return match
+	}
+	matched, categoryID := matchGroupRule(group, domain, s.categories)
+	if matched == "" {
+		return match
+	}
+	outcome := evaluateGroupRulesAt(group, matched, categoryID, identity.AuthUser, now, LayerExplicitProxy)
+	if outcome.Action != ActionBlock {
+		match.Reason = outcome.Reason
+		return match
+	}
+	match.Matched = true
+	match.GroupID = group.ID
+	match.RuleID = outcome.RuleID
+	match.MatchedDomain = outcome.MatchedDomain
+	match.Reason = outcome.Reason
+	match.ShouldBlock = true
+	match.ShouldMITM = outcome.ShouldMITM
+	match.BlockURLRegexes = outcome.BlockURLRegexes
+	match.BlockContentTypes = outcome.BlockContentTypes
+	return match
 }
 
 func dnsInapplicableConditions() []string {
@@ -641,12 +729,35 @@ func (s *Service) evaluateDomainAt(identity Identity, domain string, snap Policy
 	if _, ok := evaluatePauseIn(identity, pa); ok && group.Action == ActionBlock {
 		return ActionNone
 	}
-	for _, pattern := range group.Domains {
-		if matchDomain(pattern, domain) {
-			return group.Action
-		}
+	if matched, categoryID := matchGroupRule(group, domain, s.categories); matched != "" {
+		outcome := evaluateGroupRulesAt(group, matched, categoryID, identity.AuthUser, now, LayerDNS)
+		return outcome.Action
 	}
 	return ActionNone
+}
+
+// matchGroupRule reports which rule in a group covers a domain. matched is the
+// explicit domain pattern or "category:<id>", and categoryID is non-empty when
+// the match came from a category. An empty matched value means the group
+// expresses no opinion about this domain. Live enforcement and preview share
+// this matcher so category coverage cannot drift between them.
+//
+// Explicit patterns are checked before categories so the log and the preview
+// name the operator's own entry when both match. The group action is the same
+// either way; the difference is which rule an administrator can trace back to
+// an edit they made rather than to a shared feed.
+func matchGroupRule(group PolicyGroup, domain string, index *CategoryIndex) (matched string, categoryID string) {
+	for _, pattern := range group.Domains {
+		if matchDomain(pattern, domain) {
+			return pattern, ""
+		}
+	}
+	for _, id := range group.Categories {
+		if index.Contains(id, domain) {
+			return "category:" + id, id
+		}
+	}
+	return "", ""
 }
 
 func (s *Service) EvaluateDomain(identity Identity, domain string) PolicyAction {

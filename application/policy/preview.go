@@ -58,6 +58,7 @@ type PreviewStage struct {
 type PreviewEvaluation struct {
 	Action                 PolicyAction   `json:"action"`
 	GroupID                string         `json:"group_id"`
+	RuleID                 string         `json:"rule_id"`
 	MatchedDomain          string         `json:"matched_domain"`
 	Reason                 string         `json:"reason"`
 	Stages                 []PreviewStage `json:"stages"`
@@ -129,12 +130,13 @@ func (s *Service) previewEvaluation(base Identity, domain string, snap PolicySna
 	identity.GroupID = groupIDForSnapshot(base, snap)
 
 	dec := s.evaluateDNSAt(identity, domain, snap, exc, pa, now)
-	stages := buildPreviewStages(identity, domain, snap, exc, pa, now)
+	stages := buildPreviewStages(identity, domain, snap, exc, pa, now, s.categories)
 	inapplicable, unevaluated := previewConditions(protocolDNS)
 
 	return PreviewEvaluation{
 		Action:                 dec.Action,
 		GroupID:                dec.GroupID,
+		RuleID:                 dec.RuleID,
 		MatchedDomain:          dec.MatchedDomain,
 		Reason:                 dec.Reason,
 		Stages:                 stages,
@@ -145,9 +147,10 @@ func (s *Service) previewEvaluation(base Identity, domain string, snap PolicySna
 }
 
 // buildPreviewStages walks the precedence order (exception, group, schedule,
-// pause, domain match) using the same pure helpers the evaluator uses, so the
-// trail always explains the final action without diverging from it.
-func buildPreviewStages(identity Identity, domain string, snap PolicySnapshot, exc ExceptionSnapshot, pa PauseSnapshot, now time.Time) []PreviewStage {
+// pause, domain or category match) using the same pure helpers the evaluator
+// uses, so the trail always explains the final action without diverging from
+// it.
+func buildPreviewStages(identity Identity, domain string, snap PolicySnapshot, exc ExceptionSnapshot, pa PauseSnapshot, now time.Time, index *CategoryIndex) []PreviewStage {
 	stages := make([]PreviewStage, 0, 5)
 	if e, ok := evaluateExceptionIn(identity, domain, exc); ok {
 		stages = append(stages, PreviewStage{Name: "exception", Applied: true, Action: ActionAllow, Detail: fmt.Sprintf("scope=%s domain=%s", e.Scope, e.Domain)})
@@ -174,16 +177,23 @@ func buildPreviewStages(identity Identity, domain string, snap PolicySnapshot, e
 	}
 	stages = append(stages, PreviewStage{Name: "pause", Applied: false})
 
-	matched := false
-	for _, pattern := range group.Domains {
-		if matchDomain(pattern, domain) {
-			stages = append(stages, PreviewStage{Name: "group_domain", Applied: true, Action: group.Action, Detail: pattern})
-			matched = true
-			break
-		}
+	matched, categoryID := matchGroupRule(group, domain, index)
+	switch {
+	case matched == "":
+		stages = append(stages, PreviewStage{Name: "group_domain", Applied: false, Detail: "no domain or category match"})
+	case categoryID == "":
+		stages = append(stages, PreviewStage{Name: "group_domain", Applied: true, Action: group.Action, Detail: matched})
+	default:
+		stages = append(stages, PreviewStage{Name: "group_category", Applied: true, Action: group.Action, Detail: categoryID})
 	}
-	if !matched {
-		stages = append(stages, PreviewStage{Name: "group_domain", Applied: false, Detail: "no domain match"})
+	if matched != "" {
+		outcome := evaluateGroupRulesAt(group, matched, categoryID, identity.AuthUser, now, LayerDNS)
+		if outcome.RuleID != "" {
+			stages = append(stages, PreviewStage{Name: "group_rule", Applied: true, Action: outcome.Action, Detail: outcome.Reason})
+		}
+		if len(outcome.Unresolved) > 0 {
+			stages = append(stages, PreviewStage{Name: "group_rule_conditions", Applied: false, Detail: "DNS cannot evaluate " + strings.Join(outcome.Unresolved, ", ")})
+		}
 	}
 	return stages
 }

@@ -81,18 +81,14 @@ func tokenCreationHandlerFor(auth *AuthManager) HttpHandlerFunc {
 func setupStatusHandlerFor(auth *AuthManager) HttpHandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
-		complete, requiresAuthorization, err := auth.Status()
+		complete, err := auth.Status()
 		if err != nil {
 			SendError(w, errors.New("unable to read setup status"), http.StatusInternalServerError)
 			return
 		}
-		if !complete {
-			requiresAuthorization = requiresAuthorization || !requestIsLoopback(r)
-		}
 		SendJSON(w, struct {
-			Complete              bool `json:"complete"`
-			RequiresAuthorization bool `json:"requires_authorization"`
-		}{complete, requiresAuthorization})
+			Complete bool `json:"complete"`
+		}{complete})
 	}
 }
 
@@ -100,20 +96,17 @@ func setupHandlerFor(auth *AuthManager) HttpHandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		var data struct {
-			Username      string `json:"username"`
-			Password      string `json:"password"`
-			Authorization string `json:"authorization"`
+			Username string `json:"username"`
+			Password string `json:"password"`
 		}
 		if err := ParseJSONRequest(r, &data); err != nil {
 			SendError(w, errors.New("invalid setup request"), http.StatusBadRequest)
 			return
 		}
-		if err := auth.Bootstrap(data.Username, data.Password, data.Authorization, requestIsLoopback(r)); err != nil {
-			status := http.StatusForbidden
+		if err := auth.Bootstrap(data.Username, data.Password); err != nil {
+			status := http.StatusBadRequest
 			if errors.Is(err, errSetupComplete) {
 				status = http.StatusConflict
-			} else if !errors.Is(err, errSetupAuth) {
-				status = http.StatusBadRequest
 			}
 			SendError(w, errors.New("setup could not be completed"), status)
 			return
@@ -175,7 +168,6 @@ func RegisterEndpointsStartServer(
 	boundAddress *string,
 	port string,
 	internalSettings *gatesentry2storage.MapStore,
-	ruleManager gatesentryWebserverEndpoints.RuleManagerInterface,
 	basePath string,
 	devices *gatesentry2storage.MapStore,
 	dataDir string,
@@ -183,6 +175,14 @@ func RegisterEndpointsStartServer(
 	auth, err := NewAuthManager(internalSettings, os.Getenv("GATESENTRY_BOOTSTRAP_FILE"))
 	if err != nil {
 		return fmt.Errorf("initialize administrator authentication: %w", err)
+	}
+	// First-run setup accepts the first client that reaches the dashboard. Keep
+	// that window visible in the startup log so operators finish setup promptly
+	// or restrict access to the admin port.
+	if complete, statusErr := auth.Status(); statusErr != nil {
+		log.Printf("WARNING: unable to read first-run setup status: %v", statusErr)
+	} else if !complete {
+		log.Printf("WARNING: first-run setup is not complete. Anyone who can reach the dashboard on port %s can create the administrator account. Complete setup now, or restrict access to this port.", port)
 	}
 	authenticationMiddleware := authenticationMiddlewareFor(auth)
 	tokenCreationHandler := tokenCreationHandlerFor(auth)
@@ -488,42 +488,6 @@ func RegisterEndpointsStartServer(
 		w.Write(output)
 	}))
 
-	// Register rule endpoints with authentication
-	log.Println("Initializing rule manager...")
-	gatesentryWebserverEndpoints.InitRuleManager(ruleManager)
-	log.Println("Rule manager initialized")
-
-	log.Println("Registering GET /api/rules...")
-	internalServer.Get("/api/rules", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
-		gatesentryWebserverEndpoints.GSApiRulesGetAll(w, r)
-	})
-
-	log.Println("Registering POST /api/rules...")
-	internalServer.Post("/api/rules", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
-		gatesentryWebserverEndpoints.GSApiRuleCreate(w, r)
-	})
-
-	log.Println("Registering GET /api/rules/{id}...")
-	internalServer.Get("/api/rules/{id}", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
-		gatesentryWebserverEndpoints.GSApiRuleGet(w, r)
-	})
-
-	log.Println("Registering PUT /api/rules/{id}...")
-	internalServer.Put("/api/rules/{id}", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
-		gatesentryWebserverEndpoints.GSApiRuleUpdate(w, r)
-	})
-
-	log.Println("Registering DELETE /api/rules/{id}...")
-	internalServer.Delete("/api/rules/{id}", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
-		gatesentryWebserverEndpoints.GSApiRuleDelete(w, r)
-	})
-
-	log.Println("Registering POST /api/rules/test...")
-	internalServer.Post("/api/rules/test", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
-		gatesentryWebserverEndpoints.GSApiRuleTest(w, r)
-	})
-	log.Println("All rule endpoints registered successfully")
-
 	// Device inventory endpoints
 	log.Println("Registering device API endpoints...")
 	internalServer.Get("/api/devices", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
@@ -556,6 +520,12 @@ func RegisterEndpointsStartServer(
 	})
 	internalServer.Post("/api/policy/templates/{id}/apply", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
 		gatesentryWebserverEndpoints.GSApiPolicyTemplateApply(w, r)
+	})
+	internalServer.Get("/api/policy/categories", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiPolicyCategoriesGet(w, r)
+	})
+	internalServer.Put("/api/policy/categories", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiPolicyCategoriesPut(w, r)
 	})
 	internalServer.Get("/api/policy/groups", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
 		gatesentryWebserverEndpoints.GSApiPolicyGroupsGet(w, r)

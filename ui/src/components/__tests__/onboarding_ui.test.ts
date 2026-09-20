@@ -1,8 +1,16 @@
 import { expect, test } from "vitest";
 import homeSource from "../../routes/home/home.svelte?raw";
 
-test("home page guides DNS-first onboarding and distinguishes protection", () => {
+test("home page says what GateSentry is and renders readiness with Carbon components", () => {
   expect(homeSource).toContain("/onboarding/status");
+  expect(homeSource).toContain("self-hosted internet safety gateway");
+  expect(homeSource).toContain("ProgressIndicator");
+  expect(homeSource).toContain("ProgressStep");
+  expect(homeSource).toContain("StructuredList");
+  expect(homeSource).not.toContain("simple-border");
+});
+
+test("home page distinguishes a running server from verified protection", () => {
   expect(homeSource).toContain("/onboarding/protection-check");
   expect(homeSource).toContain("Run protection check");
   expect(homeSource).toContain("Startup is not protection");
@@ -13,9 +21,9 @@ test("home page guides DNS-first onboarding and distinguishes protection", () =>
 });
 
 test("home page keeps DNS and HTTPS inspection coverage distinct", () => {
-  expect(homeSource).toContain("Optional: HTTPS inspection");
-  expect(homeSource).toContain("advanced and opt-in");
-  expect(homeSource).toContain("It is not required for the steps above");
+  expect(homeSource).toContain("HTTPS inspection");
+  expect(homeSource).toContain("advanced");
+  expect(homeSource).toContain("not required");
   expect(homeSource).toContain("remain outside HTTPS inspection");
   expect(homeSource).toContain("cannot inspect or explain URL, MIME, keyword, or image-content decisions");
   expect(homeSource).toContain("Devices that use GateSentry for DNS are the only devices covered");
@@ -23,9 +31,8 @@ test("home page keeps DNS and HTTPS inspection coverage distinct", () => {
 });
 
 test("onboarding renders actionable failures", () => {
-  expect(homeSource).toContain("status.bind.action");
-  expect(homeSource).toContain("status.resolver.action");
-  expect(homeSource).toContain("status.blocklist.action");
-  expect(homeSource).toContain("Needs attention");
+  expect(homeSource).toContain(".bind.action");
+  expect(homeSource).toContain(".resolver.action");
+  expect(homeSource).toContain(".blocklist.action");
+  expect(homeSource).toContain("InlineNotification");
 });
-

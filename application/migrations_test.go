@@ -41,35 +41,26 @@ func TestMigrateSettingsFreshSetupStampsVersion(t *testing.T) {
 	}
 }
 
-func TestMigrateSettingsLegacyRulesArray(t *testing.T) {
-	store, _ := settingsStore(t)
-	legacy := `[{"id":"rule-1","name":"legacy","action":"block"}]`
-	if err := store.Update("rules", legacy); err != nil {
-		t.Fatal(err)
-	}
-	if err := MigrateSettings(store); err != nil {
-		t.Fatal(err)
-	}
-	got := mustSetting(t, store, "rules")
-	if !strings.Contains(got, `"rules":[`) || !strings.Contains(got, `"id":"rule-1"`) {
-		t.Fatalf("migrated rules = %s", got)
-	}
-}
-
-func TestMigrateSettingsRulesListIsIdempotent(t *testing.T) {
-	store, _ := settingsStore(t)
-	encoded := `{"rules":[{"id":"rule-1","name":"modern","enabled":true,"priority":1,"domain":"example.com","action":"block","mitm_action":"default","block_type":"none","blocked_content_types":[],"url_regex_patterns":[],"description":"","created_at":"","updated_at":""}]}`
-	if err := store.Update("rules", encoded); err != nil {
-		t.Fatal(err)
-	}
-	if err := MigrateSettings(store); err != nil {
-		t.Fatal(err)
-	}
-	if err := MigrateSettings(store); err != nil {
-		t.Fatal(err)
-	}
-	if got := mustSetting(t, store, "rules"); got != encoded {
-		t.Fatalf("rules changed on idempotent migration: %s", got)
+// The retired standalone rule store is read by the policy import, not by a
+// settings migration, so a schema migration must leave it byte-identical: the
+// import accepts both shapes the key held and owns the conversion.
+func TestMigrateSettingsLeavesRetiredRuleStoreUntouched(t *testing.T) {
+	for name, legacy := range map[string]string{
+		"bare array":  `[{"id":"rule-1","name":"legacy","action":"block"}]`,
+		"rules list": `{"rules":[{"id":"rule-1","name":"modern","enabled":true,"priority":1,"domain":"example.com","action":"block"}]}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			store, _ := settingsStore(t)
+			if err := store.Update("rules", legacy); err != nil {
+				t.Fatal(err)
+			}
+			if err := MigrateSettings(store); err != nil {
+				t.Fatal(err)
+			}
+			if got := mustSetting(t, store, "rules"); got != legacy {
+				t.Fatalf("retired rule store changed: %s", got)
+			}
+		})
 	}
 }
 
@@ -109,33 +100,11 @@ func TestMigrateSettingsInvalidVersionFailsClosed(t *testing.T) {
 	}
 }
 
-func TestMigrateSettingsCorruptedRulesFailClosed(t *testing.T) {
-	store, path := settingsStore(t)
-	if err := store.Update("rules", `[{"id":`); err != nil {
-		t.Fatal(err)
-	}
-	before, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := MigrateSettings(store); err == nil {
-		t.Fatal("expected malformed rules migration error")
-	}
-	after, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(before) != string(after) {
-		t.Fatal("failed migration must leave the settings file byte-identical")
-	}
-}
-
 func TestMigrateSettingsPreservesCredentialsAndDisabledFeatures(t *testing.T) {
 	store, _ := settingsStore(t)
 	users := `[{"user":"admin","password":"secret","Base64String":"c2VjcmV0"}]`
 	if err := store.UpdateValues(map[string]string{
 		"authusers":                 users,
-		"rules":                     `[{"id":"rule-1","name":"legacy","action":"block"}]`,
 		"enable_https_filtering":    "false",
 		"enable_ai_image_filtering": "false",
 		"enable_dns_server":         "true",

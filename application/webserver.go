@@ -69,7 +69,6 @@ func GSwebserverStart(port int) {
 		R.BoundAddress,
 		strconv.Itoa(GSWebServerPort),
 		R.GSSettings,
-		NewRuleManager(R.GSSettings),
 		basePath,
 		R.GSDevices,
 		GSBASEDIR,

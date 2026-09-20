@@ -121,7 +121,7 @@ service gatesentry stop
 
 ### First-run setup
 
-Fresh installations have no default credentials. Open `http://127.0.0.1:10786` (or `http://[::1]:10786`) on the GateSentry host and create the administrator on the one-time setup screen. Setting up from another machine requires a one-time bootstrap file; see [Secure first-run administration](docs/secure-first-run.md). Docker deployments follow the same flow, including unattended startup with the bootstrap file described in [Docker installation, upgrade, and rollback](docs/docker.md).
+Fresh installations have no default credentials. Open the dashboard on the GateSentry host and create the administrator on the one-time setup screen. Setup is not authenticated, so anyone who can reach the dashboard before setup completes can claim the administrator account; complete setup before exposing the port or restrict it to a trusted network. See [Secure first-run administration](docs/secure-first-run.md). Docker deployments follow the same flow, including unattended startup with the credentials file described in [Docker installation, upgrade, and rollback](docs/docker.md).
 
 Restrict these listeners to trusted clients with the host firewall. Do not
 expose the admin UI directly to the Internet. The supplied Docker Compose file
@@ -202,4 +202,3 @@ GateSentry builds with Go 1.24.10, Node.js 24.x, and Yarn 4.10.3. Enable the exa
 Use `make verify-go` when the frontend assets have already been freshly synced and only Go checks are needed. `make docker-smoke` separately builds the checked-out revision into an image and exercises the dashboard and explicit proxy; it requires Docker and network access. The slower privileged integration suite remains available through `make test`.
 
 `make release-artifacts` writes cross-platform binaries, checksums, and the exact source commit to `dist/`. Ordinary branch builds only produce reviewable artifacts. Release publication requires an existing tag that resolves to the checked-out commit, and Docker publication uses the same tagged source rather than downloading another release.
-

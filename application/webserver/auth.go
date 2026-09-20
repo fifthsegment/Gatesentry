@@ -10,8 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
-	"net/http"
 	"runtime"
 	"strings"
 	"time"
@@ -26,7 +24,6 @@ const authStateKey = "admin_auth"
 
 var (
 	errSetupComplete = errors.New("setup is already complete")
-	errSetupAuth     = errors.New("setup is not authorized")
 	errInvalidLogin  = errors.New("invalid credentials")
 	passwordHash     = func(password []byte) ([]byte, error) { return bcrypt.GenerateFromPassword(password, 12) }
 )
@@ -45,19 +42,20 @@ func passwordHashInput(password string) []byte {
 }
 
 type authState struct {
-	Version              int    `json:"version"`
-	BootstrapComplete    bool   `json:"bootstrap_complete"`
-	Username             string `json:"username,omitempty"`
-	PasswordHash         string `json:"password_hash,omitempty"`
-	BootstrapTokenDigest string `json:"bootstrap_token_digest,omitempty"`
-	SessionGeneration    uint64 `json:"session_generation"`
-	JWTSecret            string `json:"jwt_secret"`
+	Version           int    `json:"version"`
+	BootstrapComplete bool   `json:"bootstrap_complete"`
+	Username          string `json:"username,omitempty"`
+	PasswordHash      string `json:"password_hash,omitempty"`
+	SessionGeneration uint64 `json:"session_generation"`
+	JWTSecret         string `json:"jwt_secret"`
 }
 
+// bootstrapFile describes the optional unattended first-run input. Interactive
+// setup needs no shared secret, so the file carries only a username and
+// password that are applied during startup.
 type bootstrapFile struct {
-	Authorization string `json:"authorization,omitempty"`
-	Username      string `json:"username,omitempty"`
-	Password      string `json:"password,omitempty"`
+	Username string `json:"username,omitempty"`
+	Password string `json:"password,omitempty"`
 }
 
 type authStateStore interface {
@@ -80,11 +78,6 @@ func randomSecret() (string, error) {
 		return "", fmt.Errorf("generate authentication state: %w", err)
 	}
 	return base64.RawURLEncoding.EncodeToString(b), nil
-}
-
-func digest(value string) string {
-	sum := sha256.Sum256([]byte(value))
-	return base64.RawURLEncoding.EncodeToString(sum[:])
 }
 
 func validateCredentials(username, password string) error {
@@ -113,25 +106,6 @@ func validatePassword(password string) error {
 	return nil
 }
 
-func validateBootstrapAuthorization(value string) error {
-	decoded, err := base64.RawURLEncoding.DecodeString(value)
-	if err != nil || len(decoded) != 32 {
-		return errors.New("bootstrap authorization must be 32 random bytes encoded as unpadded base64url")
-	}
-	// Length and encoding alone accept obvious low-entropy inputs such as 32
-	// repeated bytes. Require enough byte diversity to reject accidental or
-	// hand-authored weak values while retaining a negligible false-rejection
-	// probability for a token generated from crypto/rand.
-	distinct := make(map[byte]struct{}, len(decoded))
-	for _, b := range decoded {
-		distinct[b] = struct{}{}
-	}
-	if len(distinct) < 16 {
-		return errors.New("bootstrap authorization must be generated from a cryptographically secure random source")
-	}
-	return nil
-}
-
 func validateAuthState(state authState) error {
 	if state.Version != 1 || state.JWTSecret == "" || state.SessionGeneration == 0 {
 		return errors.New("unsupported authentication state")
@@ -140,7 +114,7 @@ func validateAuthState(state authState) error {
 		// Legacy GateSentry accepted an empty administrator username. Preserve it
 		// during migration so upgrading cannot silently lock out that owner. New
 		// setup and credential changes still require a non-empty username.
-		if state.PasswordHash == "" || state.BootstrapTokenDigest != "" {
+		if state.PasswordHash == "" {
 			return errors.New("authentication state is inconsistent")
 		}
 	} else if state.Username != "" || state.PasswordHash != "" {
@@ -170,22 +144,16 @@ func loadBootstrapFile(path string) (bootstrapFile, error) {
 	dec := json.NewDecoder(strings.NewReader(string(b)))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&cfg); err != nil {
-		return cfg, errors.New("bootstrap secret file is malformed")
+		return cfg, errors.New("bootstrap secret file is malformed or contains unsupported fields")
 	}
 	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
 		return cfg, errors.New("bootstrap secret file is malformed")
 	}
-	hasToken := cfg.Authorization != ""
-	hasCredentials := cfg.Username != "" || cfg.Password != ""
-	if hasToken == hasCredentials {
-		return cfg, errors.New("bootstrap secret file must contain either authorization or username and password")
+	if cfg.Username == "" || cfg.Password == "" {
+		return cfg, errors.New("bootstrap secret file must contain a username and password")
 	}
-	if hasCredentials {
-		if err := validateCredentials(cfg.Username, cfg.Password); err != nil {
-			return cfg, errors.New("bootstrap secret file contains invalid credentials")
-		}
-	} else if err := validateBootstrapAuthorization(cfg.Authorization); err != nil {
-		return cfg, errors.New("bootstrap secret file contains invalid authorization")
+	if err := validateCredentials(cfg.Username, cfg.Password); err != nil {
+		return cfg, errors.New("bootstrap secret file contains invalid credentials")
 	}
 	return cfg, nil
 }
@@ -283,7 +251,6 @@ func NewAuthManager(store *gatesentry2storage.MapStore, bootstrapPath string) (*
 				return fmt.Errorf("hash legacy administrator password: %w", err)
 			}
 			state.BootstrapComplete, state.Username, state.PasswordHash = true, general.AdminUser, string(hash)
-			state.BootstrapTokenDigest = ""
 			state.SessionGeneration++
 			delete(legacyFields, "admin_username")
 			delete(legacyFields, "admin_password")
@@ -293,20 +260,9 @@ func NewAuthManager(store *gatesentry2storage.MapStore, bootstrapPath string) (*
 			}
 			values["general_settings"] = string(clean)
 		}
-		if !state.BootstrapComplete && cfg.Authorization != "" {
-			wanted := digest(cfg.Authorization)
-			if state.BootstrapTokenDigest != "" && subtle.ConstantTimeCompare([]byte(wanted), []byte(state.BootstrapTokenDigest)) != 1 {
-				return errors.New("bootstrap authorization conflicts with persisted state")
-			}
-			state.BootstrapTokenDigest = wanted
-		}
 		if !state.BootstrapComplete && cfg.Username != "" {
-			if state.BootstrapTokenDigest != "" {
-				return errors.New("unattended bootstrap conflicts with persisted authorization state")
-			}
 			state.BootstrapComplete = true
 			state.Username, state.PasswordHash = cfg.Username, string(unattendedHash)
-			state.BootstrapTokenDigest = ""
 			state.SessionGeneration++
 		}
 		encoded, err := json.Marshal(state)
@@ -337,31 +293,27 @@ func (a *AuthManager) read() (authState, error) {
 	return state, nil
 }
 
-func (a *AuthManager) Status() (bool, bool, error) {
+// Status reports whether first-run setup has been completed.
+func (a *AuthManager) Status() (bool, error) {
 	s, err := a.read()
-	return s.BootstrapComplete, s.BootstrapTokenDigest != "", err
+	return s.BootstrapComplete, err
 }
 
-func (a *AuthManager) Bootstrap(username, password, authorization string, trustedLocal bool) error {
+// Bootstrap completes first-run setup by creating the administrator account.
+// Any client that can reach the dashboard may complete setup until it succeeds
+// once; bind the admin listener to a trusted network or finish setup right
+// after installation.
+func (a *AuthManager) Bootstrap(username, password string) error {
 	if err := validateCredentials(username, password); err != nil {
 		return err
 	}
-	// Reject unauthorized remote work before paying bcrypt's cost. The state
-	// and authorization are checked again in the atomic update below.
+	// Reject an already completed installation before paying bcrypt's cost.
 	state, err := a.read()
 	if err != nil {
 		return err
 	}
 	if state.BootstrapComplete {
 		return errSetupComplete
-	}
-	if state.BootstrapTokenDigest != "" {
-		actual := digest(authorization)
-		if subtle.ConstantTimeCompare([]byte(actual), []byte(state.BootstrapTokenDigest)) != 1 {
-			return errSetupAuth
-		}
-	} else if !trustedLocal {
-		return errSetupAuth
 	}
 	hash, err := passwordHash([]byte(password))
 	if err != nil {
@@ -378,17 +330,8 @@ func (a *AuthManager) Bootstrap(username, password, authorization string, truste
 		if state.BootstrapComplete {
 			return "", errSetupComplete
 		}
-		authorized := trustedLocal
-		if state.BootstrapTokenDigest != "" {
-			actual := digest(authorization)
-			authorized = subtle.ConstantTimeCompare([]byte(actual), []byte(state.BootstrapTokenDigest)) == 1
-		}
-		if !authorized {
-			return "", errSetupAuth
-		}
 		state.BootstrapComplete = true
 		state.Username, state.PasswordHash = username, string(hash)
-		state.BootstrapTokenDigest = ""
 		state.SessionGeneration++
 		return marshalAuthState(state)
 	})
@@ -535,21 +478,4 @@ func (a *AuthManager) ChangeCredentialsAndGeneral(username, password string, gen
 		values[authStateKey], values["general_settings"] = string(authJSON), string(generalJSON)
 		return nil
 	})
-}
-
-func requestIsLoopback(r *http.Request) bool {
-	// The admin listener has no configured trusted-proxy list. A connection
-	// arriving through any forwarding-aware proxy must therefore use the
-	// one-time authorization, even when the immediate TCP peer is loopback.
-	for _, header := range []string{"Forwarded", "X-Forwarded-For", "X-Real-IP"} {
-		if strings.TrimSpace(r.Header.Get(header)) != "" {
-			return false
-		}
-	}
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return false
-	}
-	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback()
 }
