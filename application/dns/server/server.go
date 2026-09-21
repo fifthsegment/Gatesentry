@@ -61,19 +61,18 @@ var (
 	listenAddr       = "0.0.0.0"
 	listenPort       = "53"
 	// RWMutex allows concurrent reads while blocking writes.
-	// Use RLock() for reading blockedDomains/exceptionDomains/internalRecords
+	// Use RLock() for reading blockedDomains/internalRecords
 	// Use Lock() when updating these maps (in scheduler/filter initialization)
-	mutex            sync.RWMutex
-	blockedDomains   = make(map[string]bool)
-	exceptionDomains = make(map[string]bool)
-	internalRecords  = make(map[string]string)
-	localIp, _       = gatesentryDnsUtils.GetLocalIP()
-	queryLogs        = make(map[string][]QueryLog)
-	logMutex         sync.Mutex
-	logsFile         *os.File
-	fileMutex        sync.Mutex
-	logsPath         = "dns_logs.txt"
-	logger           *gatesentryLogger.Log
+	mutex           sync.RWMutex
+	blockedDomains  = make(map[string]bool)
+	internalRecords = make(map[string]string)
+	localIp, _      = gatesentryDnsUtils.GetLocalIP()
+	queryLogs       = make(map[string][]QueryLog)
+	logMutex        sync.Mutex
+	logsFile        *os.File
+	fileMutex       sync.Mutex
+	logsPath        = "dns_logs.txt"
+	logger          *gatesentryLogger.Log
 )
 
 func init() {
@@ -389,7 +388,6 @@ func StartDNSServer(basePath string, ilogger *gatesentryLogger.Log, blockedLists
 		&blockedDomains,
 		&blockedLists,
 		&internalRecords,
-		&exceptionDomains,
 		&mutex,
 		settings,
 		dnsinfo,
@@ -602,11 +600,10 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 			}
 		}
 
-		// --- 2. Legacy path: exception / internal / blocked ---
+		// --- 2. Legacy path: internal / blocked ---
 		// Use read lock — allows concurrent DNS queries while blocking filter updates
 		mutex.RLock()
 		internalRecordsLen := len(internalRecords)
-		isException := exceptionDomains[domain]
 		internalIP, isInternal := internalRecords[domain]
 		isBlocked := blockedDomains[domain]
 		mutex.RUnlock()
@@ -629,11 +626,7 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 
 		log.Println("[DNS] Domain requested:", domain, " Length of internal records = ", internalRecordsLen)
 
-		if isException {
-			log.Println("Domain is exception : ", domain)
-			logger.LogDecision(dnsDecision(gatesentryPolicy.ActionDecisionBypass,
-				domain, clientIP, "exception", "exception", "exception domain", dnsIdentity, policyRevision))
-		} else if isInternal {
+		if isInternal {
 			log.Println("Domain is internal : ", domain, " - ", internalIP)
 			response := new(dns.Msg)
 			response.SetRcode(r, dns.RcodeSuccess)

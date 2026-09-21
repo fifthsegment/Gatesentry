@@ -26,7 +26,7 @@
   import { register, init, _ } from "svelte-i18n";
   import Users from "./routes/users/users.svelte";
   import Globalheader from "./components/globalheader.svelte";
-  import Rules from "./routes/rules/rules.svelte";
+  import Rules from "./routes/policies/rules.svelte";
   import Devices from "./routes/devices/devices.svelte";
   export let url = "";
 
@@ -43,6 +43,13 @@
   }
 
   const setupResult = setup();
+
+  // Mounting this action replaces /rules with /policies so the old bookmark
+  // keeps working without a full page reload. The node argument is required by
+  // Svelte's action signature even though the redirect does not use it.
+  function redirectToPolicies(_node: HTMLElement) {
+    gsNavigate("/policies", { replace: true });
+  }
 
   let isSideNavOpen = false;
   let userProfilePanelOpen = false;
@@ -149,9 +156,6 @@
         <Route path="/blockedfiletypes">
           <Filter type="blockedfiletypes" />
         </Route>
-        <Route path="/excludeurls">
-          <Filter type="excludeurls" />
-        </Route>
         <Route path="/blockedurls">
           <Filter type="blockedurls" />
         </Route>
@@ -161,8 +165,14 @@
         <Route path="/services">
           <Services />
         </Route>
-        <Route path="/rules">
+        <Route path="/policies">
           <Rules />
+        </Route>
+        <!-- The policies surface used to live at /rules; old bookmarks and
+             links land here and are replaced into the new route without a
+             reload. -->
+        <Route path="/rules">
+          <div use:redirectToPolicies></div>
         </Route>
         <Route path="/devices">
           <Devices />

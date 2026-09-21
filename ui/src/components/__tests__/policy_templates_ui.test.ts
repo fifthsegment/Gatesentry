@@ -1,9 +1,9 @@
 import { expect, test } from "vitest";
-import rulesSource from "../../routes/rules/rules.svelte?raw";
-import groupsSource from "../../routes/rules/policygroups.svelte?raw";
-import formSource from "../../routes/rules/groupform.svelte?raw";
-import modelSource from "../../routes/rules/policymodel.ts?raw";
-import categorySource from "../../routes/rules/categoryselect.svelte?raw";
+import rulesSource from "../../routes/policies/rules.svelte?raw";
+import groupsSource from "../../routes/policies/policygroups.svelte?raw";
+import formSource from "../../routes/policies/groupform.svelte?raw";
+import modelSource from "../../routes/policies/policymodel.ts?raw";
+import categorySource from "../../routes/policies/categoryselect.svelte?raw";
 
 const rules = rulesSource.replace(/\s+/g, " ");
 const groups = groupsSource.replace(/\s+/g, " ");
@@ -102,19 +102,23 @@ test("policy groups report the assignment that makes them effective", () => {
   expect(groups).toContain("applies only to the devices you assign to it");
 });
 
-test("devices are assigned to a group from the policy page itself", () => {
+test("the policy page shows a group's devices read-only and defers editing to the Devices page", () => {
   expect(groups).toContain("/api/devices");
   expect(groups).toContain("deviceData.devices");
   // Svelte only re-renders an expression that names the state it reads, so the
   // assignments reach the template through a reactive map.
   expect(groups).toContain("$: assignedByGroup = assignmentsByGroup(assignments)");
   expect(groups).toContain("assignedByGroup[group.id]");
-  expect(groups).toContain("assignableDevices(assignedByGroup[group.id] || [])");
   expect(groups).toContain("deviceName(deviceID)");
-  // Each change is written through the transactional per-device endpoint rather
-  // than the replace-all assignments document.
-  expect(groups).toContain('DEVICES_API + "/" + deviceID + "/assignment"');
-  expect(groups).toContain('method: "PUT"');
-  expect(groups).toContain("JSON.stringify({ group_id: groupID })");
-  expect(groups).toContain('writeAssignment([deviceID], "")');
+  // Assignment has one home — the device detail modal on the Devices page — so
+  // this page only reports who a group applies to and links there to change it.
+  expect(groups).toContain("Manage device assignments on the");
+  expect(groups).toContain("Devices page");
+  expect(groups).toContain('getBasePath() + "/devices"');
+  expect(groups).not.toContain("writeAssignment");
+  expect(groups).not.toContain("assignDevice");
+  expect(groups).not.toContain("MultiSelect");
+  // The per-device write endpoint is gone (the GET /api/policy/assignments
+  // read endpoint stays).
+  expect(groups).not.toContain('/assignment"');
 });

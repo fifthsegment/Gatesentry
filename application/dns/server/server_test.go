@@ -50,7 +50,6 @@ func setupTestServer(t *testing.T) func() {
 	origDeviceStore := deviceStore
 	origLogger := logger
 	origBlocked := blockedDomains
-	origException := exceptionDomains
 	origInternal := internalRecords
 	origRunning := serverRunning.Load()
 	origDDNSEnabled := ddnsEnabled
@@ -59,7 +58,6 @@ func setupTestServer(t *testing.T) func() {
 	// Initialize test state
 	deviceStore = discovery.NewDeviceStore("local")
 	blockedDomains = make(map[string]bool)
-	exceptionDomains = make(map[string]bool)
 	internalRecords = make(map[string]string)
 	serverRunning.Store(true)
 	ddnsEnabled = true
@@ -73,7 +71,6 @@ func setupTestServer(t *testing.T) func() {
 		deviceStore = origDeviceStore
 		logger = origLogger
 		blockedDomains = origBlocked
-		exceptionDomains = origException
 		internalRecords = origInternal
 		serverRunning.Store(origRunning)
 		ddnsEnabled = origDDNSEnabled

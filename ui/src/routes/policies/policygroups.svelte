@@ -4,7 +4,6 @@
     Column,
     InlineLoading,
     InlineNotification,
-    MultiSelect,
     Row,
     Tag,
     Tile,
@@ -47,7 +46,6 @@
   let timezone = "UTC";
   let loading = true;
   let saving = false;
-  let assigning = false;
   let savingCategories = false;
   let error = "";
   let success = "";
@@ -164,62 +162,6 @@
     }
   }
 
-  // Assignment is written one device at a time through the transactional
-  // per-device endpoint, so two administrators editing different devices never
-  // overwrite each other's work the way a whole-document replace would.
-  async function assignDevice(deviceID: string, groupID: string) {
-    const response = await fetch(DEVICES_API + "/" + deviceID + "/assignment", {
-      method: "PUT",
-      headers: headers(true),
-      body: JSON.stringify({ group_id: groupID }),
-    });
-    if (!response.ok) throw new Error(await responseError(response));
-  }
-
-  // The optimistic update keeps the checkbox responsive; any failure reloads
-  // the stored assignments so the page never shows an assignment the gateway
-  // did not accept.
-  async function writeAssignment(deviceIDs: string[], groupID: string) {
-    const changed = deviceIDs.filter((deviceID) =>
-      groupID
-        ? assignments.find((assignment) => assignment.device_id === deviceID)?.group_id !== groupID
-        : assignments.some((assignment) => assignment.device_id === deviceID),
-    );
-    if (!changed.length) return;
-    assigning = true;
-    error = "";
-    success = "";
-    const previous = assignments;
-    const next = assignments.filter((assignment) => !changed.includes(assignment.device_id));
-    if (groupID) {
-      next.push(...changed.map((deviceID) => ({ device_id: deviceID, group_id: groupID })));
-    }
-    assignments = next;
-    try {
-      for (const deviceID of changed) {
-        await assignDevice(deviceID, groupID);
-      }
-      success = groupID ? describeAssignment(changed, groupID) : describeClear(changed);
-    } catch (err) {
-      assignments = previous;
-      error = err.message;
-    } finally {
-      assigning = false;
-    }
-  }
-
-  function describeAssignment(deviceIDs: string[], groupID: string): string {
-    const group = groups.find((candidate) => candidate.id === groupID);
-    const name = group ? group.name : groupID;
-    if (deviceIDs.length === 1) return deviceName(deviceIDs[0]) + " now uses " + name + ".";
-    return deviceIDs.length + " devices now use " + name + ".";
-  }
-
-  function describeClear(deviceIDs: string[]): string {
-    if (deviceIDs.length === 1) return deviceName(deviceIDs[0]) + " now uses the gateway default policy.";
-    return deviceIDs.length + " devices now use the gateway default policy.";
-  }
-
   function beginCreate() {
     editingGroupId = "new";
     draft = emptyGroup();
@@ -286,14 +228,6 @@
   function deviceName(deviceID: string): string {
     const device = devices.find((candidate) => candidate.id === deviceID);
     return device ? deviceLabel(device) : deviceID;
-  }
-
-  // Only unassigned devices are offered, so adding a device never needs a
-  // second control and a device cannot be silently moved between two groups.
-  function assignableDevices(assigned: string[]): { id: string; text: string }[] {
-    return devices
-      .filter((device) => !assigned.includes(device.id))
-      .map((device) => ({ id: device.id, text: deviceLabel(device) }));
   }
 
   async function saveGroup() {
@@ -583,27 +517,17 @@
                     {#if assignedByGroup[group.id]?.length}
                       <div class="tags">
                         {#each assignedByGroup[group.id] as deviceID (deviceID)}
-                          <Tag filter size="sm" on:close={() => writeAssignment([deviceID], "")}>
-                            {deviceName(deviceID)}
-                          </Tag>
+                          <Tag size="sm">{deviceName(deviceID)}</Tag>
                         {/each}
                       </div>
                     {/if}
-                    {#if assignableDevices(assignedByGroup[group.id] || []).length}
-                      <div class="device-add">
-                        <MultiSelect
-                          titleText="Add devices to this group"
-                          label="Choose a discovered device"
-                          items={assignableDevices(assignedByGroup[group.id] || [])}
-                          disabled={assigning}
-                          on:select={(event) => writeAssignment(event.detail.selectedIds, group.id)}
-                        />
-                      </div>
-                    {:else if devices.length}
-                      <p class="muted">Every discovered device is already assigned to a group.</p>
-                    {:else}
-                      <p class="muted">No devices discovered yet. A device appears here once it uses GateSentry for DNS.</p>
-                    {/if}
+                    <!-- Assignment has one home: the device detail on the
+                         Devices page. This page only reports who a group
+                         applies to, so the two surfaces never disagree. -->
+                    <p class="muted">
+                      Manage device assignments on the
+                      <a href={getBasePath() + "/devices"}>Devices page</a>.
+                    </p>
                   </div>
                 </div>
                 <div class="group-actions">
@@ -777,11 +701,6 @@
   }
   .group-assignment .muted {
     margin-bottom: 0.5rem;
-  }
-  /* The device names are short, so the picker does not need the full width of
-     the card. */
-  .device-add {
-    max-width: 22rem;
   }
   .group-actions {
     display: flex;
