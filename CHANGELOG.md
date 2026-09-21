@@ -1,5 +1,10 @@
 # CHANGELOG
 
+## v2.0.0-beta.21 (21 September 2026)
+
+- Stats: 7-day chart is hourly; 24h/1h rebucket the same compact series in the browser
+- Request stats no longer full-scan `log.db` on every page load (minute rollups)
+
 ## v2.0.0-beta.20 (10 September 2026)
 
 - DNS page: TSIG shared-secret copy works on HTTP admin (clipboard fallback)

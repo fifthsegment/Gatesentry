@@ -2,11 +2,9 @@ package gatesentryWebserverEndpoints
 
 import (
 	"net/http"
-	"sort"
 	"strconv"
 
 	gatesentryLogger "bitbucket.org/abdullah_irfan/gatesentryf/logger"
-	gatesentryproxy "bitbucket.org/abdullah_irfan/gatesentryproxy"
 )
 
 // ParseStatsQuery extracts seconds and group from the request query string.
@@ -24,23 +22,6 @@ func ParseStatsQuery(r *http.Request) (seconds int, group string) {
 		group = g
 	}
 	return
-}
-
-type URLGroup struct {
-	URL   string `json:"host"`
-	Count int    `json:"count"`
-}
-
-type HostGroupWithTotal struct {
-	Total int        `json:"total"`
-	Hosts []URLGroup `json:"hosts"`
-}
-
-type HostGroupSet map[string]HostGroupWithTotal
-
-type HostGroupResponse struct {
-	ItemsBlocked HostGroupSet `json:"blocked"`
-	All          HostGroupSet `json:"all"`
 }
 
 func ApiGetStats(fromTimeParam string, logger *gatesentryLogger.Log) interface{} {
@@ -89,92 +70,37 @@ func ApiGetStats(fromTimeParam string, logger *gatesentryLogger.Log) interface{}
 	// ctx.JSON(response)
 }
 
-func SliceEntries(logs map[string][]gatesentryLogger.LogEntry, responseType string) map[string]HostGroupWithTotal {
-	outputData := make(map[string]HostGroupWithTotal)
-	for currentDate, entries := range logs {
-		urlCounts := make(map[string]int)
-		for _, entry := range entries {
-			if (entry.Type == "dns" && responseType == "all") || (entry.Type == "proxy" && responseType == "all") {
-				urlCounts[entry.URL]++
-			} else if entry.Type == "dns" && entry.DNSResponseType == responseType {
-				urlCounts[entry.URL]++
-			} else if entry.Type == "proxy" && responseType == "blocked" {
-				if entry.ProxyResponseType == string(gatesentryproxy.ProxyActionBlockedTextContent) ||
-					entry.ProxyResponseType == string(gatesentryproxy.ProxyActionBlockedMediaContent) ||
-					entry.ProxyResponseType == string(gatesentryproxy.ProxyActionBlockedFileType) ||
-					entry.ProxyResponseType == string(gatesentryproxy.ProxyActionBlockedTime) ||
-					entry.ProxyResponseType == string(gatesentryproxy.ProxyActionBlockedInternetForUser) {
-					urlCounts[entry.URL]++
-				}
-			}
-		}
-		groupedURLs := make([]URLGroup, 0, len(urlCounts))
-		hostCount := 0
-		for url, count := range urlCounts {
-			groupedURLs = append(groupedURLs, URLGroup{URL: url, Count: count})
-			// sort groupedUIRLs by count
-			sort.Slice(groupedURLs, func(i, j int) bool {
-				return groupedURLs[i].Count > groupedURLs[j].Count
-			})
-			hostCount += count
-		}
-		outputData[currentDate] = HostGroupWithTotal{
-			Total: hostCount,
-			Hosts: groupedURLs,
-		}
-	}
-	return outputData
+// StatsSeriesResponse is the compact stats payload: per-minute totals plus
+// hourly top-N hosts. The UI rebuckets this in the browser (7d hourly, 24h,
+// 1h per-minute) without another server scan.
+type StatsSeriesResponse struct {
+	Minutes     []gatesentryLogger.MinutePoint          `json:"minutes"`
+	HourlyHosts map[string]gatesentryLogger.HourHostSet `json:"hourly_hosts"`
 }
 
-// ApiGetStatsByURL returns DNS/proxy stats grouped by time bucket.
+// ApiGetStatsByURL returns a 7-day (or `seconds`) compact series.
 //
 // Query parameters (all optional):
 //
 //	seconds  – time window in seconds (default 604800 = 7 days)
-//	group    – bucket granularity: "day" (default), "hour", or "minute"
-//
-// The bucket keys are LOCAL-time strings so the frontend can display
-// them without any UTC ↔ local conversion:
-//
-//	day    → "2006-01-02"        (matches the existing 7-day format)
-//	hour   → "2006-01-02T15"     (for 24-hour view)
-//	minute → "2006-01-02T15:04"  (for 1-hour view)
+//	group    – ignored; the client rebuckets the minute series
 func ApiGetStatsByURL(logger *gatesentryLogger.Log, seconds int, group string) interface{} {
-	// Map human-readable group names to Go time format strings.
-	var groupFormat string
-	switch group {
-	case "hour":
-		groupFormat = "2006-01-02T15"
-	case "minute":
-		groupFormat = "2006-01-02T15:04"
-	default: // "day" or anything else
-		groupFormat = "2006-01-02"
-	}
-
-	all, blocked, err := logger.GetHostStats(int64(seconds), groupFormat)
-	if err != nil {
-		return struct {
-			Error string `json:"error"`
-		}{Error: "Failed to retrieve logs"}
-	}
-
-	return HostGroupResponse{
-		ItemsBlocked: hostBucketsToSet(blocked),
-		All:          hostBucketsToSet(all),
-	}
-}
-
-func hostBucketsToSet(in map[string]gatesentryLogger.HostBucket) HostGroupSet {
-	out := make(HostGroupSet, len(in))
-	for key, b := range in {
-		grouped := make([]URLGroup, 0, len(b.Hosts))
-		for url, count := range b.Hosts {
-			grouped = append(grouped, URLGroup{URL: url, Count: count})
+	_ = group
+	if logger == nil {
+		return StatsSeriesResponse{
+			Minutes:     []gatesentryLogger.MinutePoint{},
+			HourlyHosts: map[string]gatesentryLogger.HourHostSet{},
 		}
-		sort.Slice(grouped, func(i, j int) bool {
-			return grouped[i].Count > grouped[j].Count
-		})
-		out[key] = HostGroupWithTotal{Total: b.Total, Hosts: grouped}
 	}
-	return out
+	series := logger.GetTrafficSeries(int64(seconds))
+	if series.Minutes == nil {
+		series.Minutes = []gatesentryLogger.MinutePoint{}
+	}
+	if series.HourlyHosts == nil {
+		series.HourlyHosts = map[string]gatesentryLogger.HourHostSet{}
+	}
+	return StatsSeriesResponse{
+		Minutes:     series.Minutes,
+		HourlyHosts: series.HourlyHosts,
+	}
 }

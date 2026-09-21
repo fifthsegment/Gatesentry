@@ -7,7 +7,7 @@ Important context for AI agents working on this project.
 - **Active development is `v2`** (this checkout tracks `myfork/v2`). Do not treat origin/master or v1.20.x / "1.2" as the working tree.
 - Upstream: `origin` = https://github.com/fifthsegment/Gatesentry.git
 - Fork: `myfork` = https://github.com/jbarwick/Gatesentry.git
-- Binary version is `GATESENTRY_VERSION` in `main.go` (current: `2.0.0-beta.12`). That string is the only release tag. Do not invent a different version for the image.
+- Binary version is `GATESENTRY_VERSION` in `main.go` (current: `2.0.0-beta.21`). That string is the only release tag. Do not invent a different version for the image.
 
 ## Which tree to use for deployments
 
@@ -322,5 +322,5 @@ We are implementing the **Domain List & Rules Enhancement Plan** (`DOMAIN_LIST_R
 
 - **DNS page UI load/save of assigned list IDs** (`dnslists.svelte` / `dns.svelte`) was still being debugged. DNS filtering itself works.
 - **Production hang when upstream DNS is down** — see Availability section. Highest priority before bringing monster-jj back.
-- **`log.db` growth** (134MB) — stats default to a 7-day full scan (`handler_stats.go`).
+- **`log.db` growth** (134MB) — raw logs still expire at 7 days; stats charts read minute rollups (2.0.0-beta.21).
 - Production image on monster-jj is `GATESENTRY_VERSION` in `main.go`. Ship with `./build.sh && ./release.sh && ./deploy.sh`.

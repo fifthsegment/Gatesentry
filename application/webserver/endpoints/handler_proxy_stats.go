@@ -76,12 +76,14 @@ type ProxyUserSummary struct {
 
 // ProxyStatsResponse is the full response for GET /api/stats/proxy.
 type ProxyStatsResponse struct {
-	Summary    ProxyStatsSummary      `json:"summary"`
-	TimeSeries map[string]ProxyBucket `json:"time_series"`
-	TopBlocked []ProxyTopSite         `json:"top_blocked"`
-	TopAllowed []ProxyTopSite         `json:"top_allowed"`
-	Actions    []ProxyActionBreakdown `json:"actions"`
-	Users      []ProxyUserSummary     `json:"users"`
+	Summary     ProxyStatsSummary                       `json:"summary"`
+	TimeSeries  map[string]ProxyBucket                  `json:"time_series"`
+	TopBlocked  []ProxyTopSite                          `json:"top_blocked"`
+	TopAllowed  []ProxyTopSite                          `json:"top_allowed"`
+	Actions     []ProxyActionBreakdown                  `json:"actions"`
+	Users       []ProxyUserSummary                      `json:"users"`
+	Minutes     []gatesentryLogger.MinutePoint          `json:"minutes"`
+	HourlyHosts map[string]gatesentryLogger.HourHostSet `json:"hourly_hosts"`
 }
 
 // actionLabel returns a human-friendly label for a proxy action string.
@@ -124,6 +126,11 @@ func actionLabel(action string) string {
 func ApiGetProxyStats(w http.ResponseWriter, r *http.Request, logger *gatesentryLogger.Log) {
 	seconds, group := ParseStatsQuery(r)
 	userFilter := strings.TrimSpace(r.URL.Query().Get("user"))
+
+	if userFilter == "" {
+		apiGetProxyStatsFromSeries(w, logger, seconds, group)
+		return
+	}
 
 	var groupFormat string
 	switch group {
@@ -272,4 +279,126 @@ func buildTopSites(counts map[string]int, n int) []ProxyTopSite {
 		sites = sites[:n]
 	}
 	return sites
+}
+
+func apiGetProxyStatsFromSeries(w http.ResponseWriter, logger *gatesentryLogger.Log, seconds int, group string) {
+	series := gatesentryLogger.TrafficSeries{}
+	if logger != nil {
+		series = logger.GetTrafficSeries(int64(seconds))
+	}
+	if series.Minutes == nil {
+		series.Minutes = []gatesentryLogger.MinutePoint{}
+	}
+	if series.HourlyHosts == nil {
+		series.HourlyHosts = map[string]gatesentryLogger.HourHostSet{}
+	}
+
+	var summary ProxyStatsSummary
+	timeSeries := make(map[string]ProxyBucket)
+	actionCounts := make(map[string]int)
+	blockedCounts := make(map[string]int)
+	allowedCounts := make(map[string]int)
+	userStats := make(map[string]*ProxyUserSummary)
+
+	for _, p := range series.Minutes {
+		summary.Allowed += p.ProxyAllowed
+		summary.Blocked += p.ProxyBlocked
+		summary.SSLBumped += p.ProxySSLBump
+		summary.SSLDirect += p.ProxySSLDirect
+		summary.TotalRequests += p.ProxyAllowed + p.ProxyBlocked
+		for action, n := range p.ProxyActions {
+			actionCounts[action] += n
+		}
+		key := proxyBucketKey(p.T, group)
+		b := timeSeries[key]
+		b.Allowed += p.ProxyAllowed
+		b.Blocked += p.ProxyBlocked
+		timeSeries[key] = b
+	}
+
+	fromHour := ""
+	if len(series.Minutes) > 0 {
+		fromHour = series.Minutes[0].T
+		if len(fromHour) > 13 {
+			fromHour = fromHour[:13]
+		}
+	}
+	for hour, hosts := range series.HourlyHosts {
+		if fromHour != "" && hour < fromHour {
+			continue
+		}
+		for _, h := range hosts.ProxyBlocked {
+			blockedCounts[h.Host] += h.Count
+		}
+		for _, h := range hosts.ProxyAllowed {
+			allowedCounts[h.Host] += h.Count
+		}
+		for _, u := range hosts.Users {
+			us := userStats[u.User]
+			if us == nil {
+				us = &ProxyUserSummary{User: u.User}
+				userStats[u.User] = us
+			}
+			us.Total += u.Total
+			us.Allowed += u.Allowed
+			us.Blocked += u.Blocked
+		}
+	}
+
+	actions := make([]ProxyActionBreakdown, 0, len(actionCounts))
+	for action, count := range actionCounts {
+		actions = append(actions, ProxyActionBreakdown{
+			Action: action,
+			Label:  actionLabel(action),
+			Count:  count,
+		})
+	}
+	sort.Slice(actions, func(i, j int) bool {
+		return actions[i].Count > actions[j].Count
+	})
+
+	users := make([]ProxyUserSummary, 0, len(userStats))
+	for _, us := range userStats {
+		users = append(users, *us)
+	}
+	sort.Slice(users, func(i, j int) bool {
+		return users[i].Total > users[j].Total
+	})
+
+	// Drop empty time buckets so the chart stays sparse.
+	for k, b := range timeSeries {
+		if b.Allowed == 0 && b.Blocked == 0 {
+			delete(timeSeries, k)
+		}
+	}
+
+	resp := ProxyStatsResponse{
+		Summary:     summary,
+		TimeSeries:  timeSeries,
+		TopBlocked:  buildTopSites(blockedCounts, 10),
+		TopAllowed:  buildTopSites(allowedCounts, 10),
+		Actions:     actions,
+		Users:       users,
+		Minutes:     series.Minutes,
+		HourlyHosts: series.HourlyHosts,
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+}
+
+func proxyBucketKey(minuteKey, group string) string {
+	if len(minuteKey) < 10 {
+		return minuteKey
+	}
+	switch group {
+	case "minute":
+		return minuteKey
+	case "hour":
+		if len(minuteKey) >= 13 {
+			return minuteKey[:13]
+		}
+		return minuteKey
+	default:
+		return minuteKey[:10]
+	}
 }

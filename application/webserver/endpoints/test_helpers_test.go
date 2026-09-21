@@ -13,7 +13,9 @@ import (
 // setupTestLogger creates a fresh BuntDB-backed logger in a temp directory.
 func setupTestLogger(tmpDir string) *gatesentryLogger.Log {
 	logPath := filepath.Join(tmpDir, "test_log.db")
-	return gatesentryLogger.NewLogger(logPath)
+	logger := gatesentryLogger.NewLogger(logPath)
+	logger.WaitRollupsForTest()
+	return logger
 }
 
 // insertProxyLogEntry directly inserts a proxy log entry into the logger's BuntDB.
@@ -35,4 +37,11 @@ func insertProxyLogEntry(t *testing.T, logger *gatesentryLogger.Log, url, user, 
 	if err != nil {
 		t.Fatalf("failed to insert test log entry: %v", err)
 	}
+	logger.Observe(gatesentryLogger.LogEntry{
+		Time:              secs,
+		IP:                user,
+		URL:               url,
+		Type:              "proxy",
+		ProxyResponseType: action,
+	})
 }

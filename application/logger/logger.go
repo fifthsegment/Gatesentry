@@ -6,6 +6,7 @@ import (
 	"log"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	gatesentry2utils "bitbucket.org/abdullah_irfan/gatesentryf/utils"
@@ -38,6 +39,14 @@ type Log struct {
 
 	writeCh chan logWrite
 	stopCh  chan struct{}
+
+	rollupMu     sync.Mutex
+	minutes      map[string]*minuteSnap
+	hours        map[string]*hourSnap
+	dirtyMinutes map[string]struct{}
+	dirtyHours   map[string]struct{}
+	rollupOnce   sync.Once
+	rollupsReady atomic.Bool
 }
 
 // Subscribe returns a channel that receives new log entries in real-time.
@@ -130,6 +139,7 @@ func NewLogger(LogLocation string) *Log {
 	l.stopCh = make(chan struct{})
 
 	go l.writerLoop()
+	l.initRollups()
 
 	go func() {
 		log.Println("[Logger] Running startup database shrink...")
@@ -189,6 +199,7 @@ func (L *Log) Close() {
 	default:
 		close(L.stopCh)
 	}
+	L.persistDirty()
 	if L.Database != nil {
 		_ = L.Database.Close()
 		L.Database = nil
@@ -208,6 +219,9 @@ func (L *Log) enqueue(entry LogEntry) {
 		key:   gatesentry2utils.RandomString(25) + timestring,
 		value: string(payload),
 		entry: entry,
+	}
+	if L.rollupsReady.Load() {
+		L.applyRollup(entry)
 	}
 	select {
 	case L.writeCh <- w:
@@ -384,68 +398,6 @@ func (L *Log) GetLastXSecondsDNSLogs(fromSeconds int64, groupByFormat string) (i
 		logSlice = []LogEntry{}
 	}
 	return logSlice, nil
-}
-
-// HostBucket is per-URL counts for one time bucket (used by /stats).
-type HostBucket struct {
-	Total int
-	Hosts map[string]int
-}
-
-func (L *Log) addHostCount(dst map[string]HostBucket, bucket, host string) {
-	b := dst[bucket]
-	if b.Hosts == nil {
-		b.Hosts = make(map[string]int)
-	}
-	b.Total++
-	b.Hosts[host]++
-	dst[bucket] = b
-}
-
-// GetHostStats scans the requested window and counts dns/proxy hits per
-// time bucket and host. Used by the stats charts so a 7-day view does not
-// load every log line into memory.
-func (L *Log) GetHostStats(fromSeconds int64, groupByFormat string) (all, blocked map[string]HostBucket, err error) {
-	all = make(map[string]HostBucket)
-	blocked = make(map[string]HostBucket)
-	if L == nil || L.Database == nil {
-		return all, blocked, nil
-	}
-	if groupByFormat == "" {
-		groupByFormat = "2006-01-02"
-	}
-
-	now := time.Now()
-	totime := now.Unix()
-	fromtime := totime - fromSeconds
-	from := gatesentry2utils.Int64toString(fromtime)
-	to := gatesentry2utils.Int64toString(totime)
-
-	err = L.Database.View(func(tx *buntdb.Tx) error {
-		return tx.DescendRange("entries", `{"time":`+to+`}`, `{"time":`+from+`}`, func(key, value string) bool {
-			var logEntry LogEntry
-			if json.Unmarshal([]byte(value), &logEntry) != nil {
-				return true
-			}
-			if logEntry.Type != "dns" && logEntry.Type != "proxy" {
-				return true
-			}
-			host := logEntry.URL
-			if logEntry.Type == "proxy" {
-				host = strings.Replace(host, "http://", "", -1)
-				host = strings.Replace(host, ":443", "", -1)
-			}
-			bucket := time.Unix(logEntry.Time, 0).Local().Format(groupByFormat)
-			L.addHostCount(all, bucket, host)
-			if logEntry.Type == "dns" && logEntry.DNSResponseType == "blocked" {
-				L.addHostCount(blocked, bucket, host)
-			} else if logEntry.Type == "proxy" && isProxyBlocked(logEntry.ProxyResponseType) {
-				L.addHostCount(blocked, bucket, host)
-			}
-			return true
-		})
-	})
-	return all, blocked, err
 }
 
 func isProxyBlocked(action string) bool {

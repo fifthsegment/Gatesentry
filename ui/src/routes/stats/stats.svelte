@@ -14,13 +14,15 @@
   import { store } from "../../store/apistore";
   import { _ } from "svelte-i18n";
   import { GraphicalDataFlow } from "carbon-icons-svelte";
+  import {
+    dnsChartFromSeries,
+    proxyChartFromSeries,
+    proxyWindowFromSeries,
+    type ScaleId,
+    type StatsSeries,
+  } from "../../lib/statsBuckets";
 
   // ---------- Types ----------
-
-  type HostData = { host: string; count: number };
-  type BucketData = { total: number; hosts: HostData[] };
-  type Keys = "blocked" | "all";
-  type ResponseData = { [key in Keys]: { [date: string]: BucketData } };
 
   interface RawEvent {
     ts: number;
@@ -36,13 +38,14 @@
     { id: "24h", text: "Past 24 hours" },
     { id: "1h", text: "Past hour" },
   ];
-  let selectedScale = "7d";
+  let selectedScale: ScaleId = "7d";
 
   let chart: any = null;
   let chartHolder: HTMLElement;
 
-  /** Historical data from /stats/byUrl (fetched once on mount). */
-  let historicalData: ResponseData | null = null;
+  /** Compact 7-day series from /stats/byUrl (fetched once on mount). */
+  let historicalData: StatsSeries | null = null;
+  let seriesFetchedAt = 0;
 
   /**
    * Raw SSE request events, stored so we can re-bucket dynamically
@@ -58,20 +61,12 @@
 
   // ---------- Helpers ----------
 
-  /** Map UI scale id → API query parameters */
-  function scaleToApiParams(scale: string): { seconds: number; group: string } {
-    if (scale === "1h") return { seconds: 3600, group: "minute" };
-    if (scale === "24h") return { seconds: 86400, group: "hour" };
-    return { seconds: 604800, group: "day" }; // 7d
-  }
-
-  /** Fetch historical data from BuntDB for the given scale. */
-  async function fetchHistory(scale: string): Promise<ResponseData | null> {
+  /** Fetch the 7-day compact series once; the UI rebuckets for 24h/1h. */
+  async function fetchHistory(): Promise<StatsSeries | null> {
     try {
-      const { seconds, group } = scaleToApiParams(scale);
       const json = (await $store.api.doCall(
-        `/stats/byUrl?seconds=${seconds}&group=${group}`,
-      )) as ResponseData;
+        `/stats/byUrl?seconds=604800`,
+      )) as StatsSeries;
       return json || null;
     } catch (err) {
       console.error("Error fetching historical stats:", err);
@@ -80,131 +75,29 @@
   }
 
   /**
-   * Return a LOCAL-time bucket key for a given timestamp + scale.
-   * Using local date components avoids UTC ↔ local mismatches that
-   * cause events to land in the wrong bucket for users not in UTC.
-   * Keys are ISO-like strings that sort chronologically.
-   */
-  function bucketKey(ts: number, scale: string): string {
-    const d = new Date(ts);
-    const Y = d.getFullYear();
-    const M = String(d.getMonth() + 1).padStart(2, "0");
-    const D = String(d.getDate()).padStart(2, "0");
-    const h = String(d.getHours()).padStart(2, "0");
-    const m = String(d.getMinutes()).padStart(2, "0");
-
-    if (scale === "1h") return `${Y}-${M}-${D}T${h}:${m}`; // per-minute
-    if (scale === "24h") return `${Y}-${M}-${D}T${h}`; // per-hour
-    return `${Y}-${M}-${D}`; // per-day
-  }
-
-  /**
-   * Parse a bucket key back into a Date for the chart axis.
-   * All keys are LOCAL-time strings (no "Z" suffix), so the Date
-   * constructor interprets them in the browser's local timezone.
-   */
-  function bucketToDate(key: string, scale: string): Date {
-    if (scale === "1h") return new Date(key + ":00"); // "YYYY-MM-DDTHH:MM" → :00
-    if (scale === "24h") return new Date(key + ":00:00"); // "YYYY-MM-DDTHH"   → :00:00
-    return new Date(key + "T12:00:00"); // noon local (avoids DST edge)
-  }
-
-  /**
-   * Merge historical + real-time data and produce chart data + top-5 tables.
-   * Real-time events are filtered to the selected time window and bucketed
-   * on the fly, so changing the scale instantly re-groups the data.
+   * Merge the compact 7-day series with live SSE events and rebucket for
+   * the selected window. 7d is hourly; 1h is per-minute.
    */
   function buildView(
-    hist: ResponseData | null,
+    hist: StatsSeries | null,
     events: RawEvent[],
-    scale: string,
+    scale: ScaleId,
   ) {
-    const seriesAll = new Map<string, number>();
-    const seriesBlocked = new Map<string, number>();
-    const allCounts = new Map<string, number>();
-    const blockedCounts = new Map<string, number>();
-
-    // 1. Historical data from BuntDB (used for ALL scales — the API
-    //    returns bucket keys that match our local-time bucket format).
-    if (hist) {
-      if (hist.all) {
-        for (const [dateKey, bucket] of Object.entries(hist.all)) {
-          seriesAll.set(dateKey, (seriesAll.get(dateKey) || 0) + bucket.total);
-          for (const h of bucket.hosts)
-            allCounts.set(h.host, (allCounts.get(h.host) || 0) + h.count);
-        }
-      }
-      if (hist.blocked) {
-        for (const [dateKey, bucket] of Object.entries(hist.blocked)) {
-          seriesBlocked.set(
-            dateKey,
-            (seriesBlocked.get(dateKey) || 0) + bucket.total,
-          );
-          for (const h of bucket.hosts)
-            blockedCounts.set(
-              h.host,
-              (blockedCounts.get(h.host) || 0) + h.count,
-            );
-        }
-      }
-    }
-
-    // 2. Real-time SSE events — filter to the selected time window, then bucket
-    const now = Date.now();
-    const cutoff =
-      scale === "7d"
-        ? now - 7 * 86_400_000
-        : scale === "24h"
-        ? now - 86_400_000
-        : now - 3_600_000;
-
-    for (const evt of events) {
-      if (evt.ts < cutoff) continue;
-
-      const key = bucketKey(evt.ts, scale);
-
-      seriesAll.set(key, (seriesAll.get(key) || 0) + 1);
-      allCounts.set(evt.domain, (allCounts.get(evt.domain) || 0) + 1);
-
-      if (evt.blocked) {
-        seriesBlocked.set(key, (seriesBlocked.get(key) || 0) + 1);
-        blockedCounts.set(evt.domain, (blockedCounts.get(evt.domain) || 0) + 1);
-      }
-    }
-
-    // 3. Build chart array, sorted by bucket key (ISO-like keys sort correctly)
-    const allBuckets = new Set([...seriesAll.keys(), ...seriesBlocked.keys()]);
-    const sorted = [...allBuckets].sort();
-    const chartData: { group: string; date: Date; value: number }[] = [];
-
-    for (const b of sorted) {
-      const d = bucketToDate(b, scale);
-      if (seriesAll.has(b))
-        chartData.push({
-          group: "All Requests",
-          date: d,
-          value: seriesAll.get(b)!,
-        });
-      if (seriesBlocked.has(b))
-        chartData.push({
-          group: "Blocked Requests",
-          date: d,
-          value: seriesBlocked.get(b)!,
-        });
-    }
-
-    // 4. Top 5 tables
-    const topAll = [...allCounts.entries()]
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 5)
-      .map(([host, count], i) => ({ id: `all-${i}`, host, count }));
-
-    const topBlocked = [...blockedCounts.entries()]
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 5)
-      .map(([host, count], i) => ({ id: `blocked-${i}`, host, count }));
-
-    return { chartData, topAll, topBlocked };
+    const live = events.filter((e) => e.ts >= seriesFetchedAt);
+    const result = dnsChartFromSeries(hist, scale, live);
+    return {
+      chartData: result.chartData,
+      topAll: result.topAll.map((h, i) => ({
+        id: `all-${i}`,
+        host: h.host,
+        count: h.count,
+      })),
+      topBlocked: result.topBlocked.map((h, i) => ({
+        id: `blocked-${i}`,
+        host: h.host,
+        count: h.count,
+      })),
+    };
   }
 
   // ========== PROXY TRAFFIC TAB STATE ==========
@@ -248,6 +141,8 @@
     top_allowed: ProxyTopSite[];
     actions: ProxyActionBreakdown[];
     users: ProxyUserSummary[];
+    minutes?: StatsSeries["minutes"];
+    hourly_hosts?: StatsSeries["hourly_hosts"];
   }
 
   const proxyScaleOptions = [
@@ -255,23 +150,22 @@
     { id: "24h", text: "Past 24 hours" },
     { id: "1h", text: "Past hour" },
   ];
-  let proxySelectedScale = "7d";
+  let proxySelectedScale: ScaleId = "7d";
   let proxySelectedUser = "";
 
   let proxyData: ProxyStatsResponse | null = null;
+  let proxySeries: StatsSeries | null = null;
   let proxyChart: any = null;
   let proxyChartHolder: HTMLElement;
   let proxyLoading = false;
 
-  /** Fetch proxy stats from the API */
+  /** Fetch 7-day proxy series once; user filter still hits the server. */
   async function fetchProxyStats(
-    scale: string,
     user: string,
   ): Promise<ProxyStatsResponse | null> {
     try {
       proxyLoading = true;
-      const { seconds, group } = scaleToApiParams(scale);
-      let url = `/stats/proxy?seconds=${seconds}&group=${group}`;
+      let url = `/stats/proxy?seconds=604800`;
       if (user) url += `&user=${encodeURIComponent(user)}`;
       const json = (await $store.api.doCall(url)) as ProxyStatsResponse;
       return json || null;
@@ -286,24 +180,18 @@
   /** Build chart data from proxy time_series */
   function buildProxyChartData(
     data: ProxyStatsResponse | null,
-    scale: string,
+    scale: ScaleId,
   ): { group: string; date: Date; value: number }[] {
-    if (!data || !data.time_series) return [];
-
-    const chartData: { group: string; date: Date; value: number }[] = [];
-    const keys = Object.keys(data.time_series).sort();
-
-    for (const key of keys) {
-      const d = bucketToDate(key, scale);
-      const bucket = data.time_series[key];
-      chartData.push({ group: "Allowed", date: d, value: bucket.allowed });
-      chartData.push({ group: "Blocked", date: d, value: bucket.blocked });
-    }
-
-    return chartData;
+    const series: StatsSeries | null = data
+      ? {
+          minutes: data.minutes || proxySeries?.minutes || [],
+          hourly_hosts: data.hourly_hosts || proxySeries?.hourly_hosts || {},
+        }
+      : proxySeries;
+    return proxyChartFromSeries(series, scale);
   }
 
-  function makeProxyChartOptions(scale: string) {
+  function makeProxyChartOptions(scale: ScaleId) {
     const locale = navigator.language || "en-US";
     const now = new Date();
     let domain: [Date, Date];
@@ -331,16 +219,17 @@
           ticks: {
             formatter: (d: Date) => {
               if (!(d instanceof Date) || isNaN(d.getTime())) return "";
-              if (scale === "1h" || scale === "24h") {
+              if (scale === "1h") {
                 return d.toLocaleTimeString(locale, {
                   hour: "2-digit",
                   minute: "2-digit",
                 });
               }
-              return d.toLocaleDateString(locale, {
+              return d.toLocaleString(locale, {
                 weekday: "short",
                 month: "short",
                 day: "numeric",
+                hour: "2-digit",
               });
             },
           },
@@ -365,19 +254,28 @@
     };
   }
 
-  async function refreshProxyTab() {
-    proxyData = await fetchProxyStats(proxySelectedScale, proxySelectedUser);
-    if (proxyChart && proxyData) {
-      proxyChart.model.setOptions(makeProxyChartOptions(proxySelectedScale));
-      proxyChart.model.setData(
-        buildProxyChartData(proxyData, proxySelectedScale),
-      );
-    }
+  function applyProxyWindow() {
+    if (!proxyChart) return;
+    proxyChart.model.setOptions(makeProxyChartOptions(proxySelectedScale));
+    proxyChart.model.setData(
+      buildProxyChartData(proxyData, proxySelectedScale),
+    );
   }
 
-  async function onProxyScaleChange(e: CustomEvent) {
-    proxySelectedScale = e.detail.selectedId;
-    await refreshProxyTab();
+  async function refreshProxyTab() {
+    proxyData = await fetchProxyStats(proxySelectedUser);
+    if (proxyData) {
+      proxySeries = {
+        minutes: proxyData.minutes || [],
+        hourly_hosts: proxyData.hourly_hosts || {},
+      };
+    }
+    applyProxyWindow();
+  }
+
+  function onProxyScaleChange(e: CustomEvent) {
+    proxySelectedScale = e.detail.selectedId as ScaleId;
+    applyProxyWindow();
   }
 
   async function onProxyUserChange(e: CustomEvent) {
@@ -386,12 +284,40 @@
   }
 
   // Proxy data rows for DataTables (reactive)
-  $: proxyTopBlockedRows = (proxyData?.top_blocked || []).map((s, i) => ({
+  $: proxyWindowRaw = proxyWindowFromSeries(
+    proxySeries ||
+      (proxyData
+        ? {
+            minutes: proxyData.minutes || [],
+            hourly_hosts: proxyData.hourly_hosts || {},
+          }
+        : null),
+    proxySelectedScale,
+  );
+  $: proxyWindow =
+    proxySelectedUser && proxyData?.summary
+      ? {
+          total: proxyData.summary.total_requests,
+          allowed: proxyData.summary.allowed,
+          blocked: proxyData.summary.blocked,
+          ssl_bumped: proxyData.summary.ssl_bumped,
+          ssl_direct: proxyData.summary.ssl_direct,
+          topAllowed: (proxyData.top_allowed || []).map((s) => ({
+            host: s.host,
+            count: s.count,
+          })),
+          topBlocked: (proxyData.top_blocked || []).map((s) => ({
+            host: s.host,
+            count: s.count,
+          })),
+        }
+      : proxyWindowRaw;
+  $: proxyTopBlockedRows = proxyWindow.topBlocked.map((s, i) => ({
     id: `pb-${i}`,
     host: s.host,
     count: s.count,
   }));
-  $: proxyTopAllowedRows = (proxyData?.top_allowed || []).map((s, i) => ({
+  $: proxyTopAllowedRows = proxyWindow.topAllowed.map((s, i) => ({
     id: `pa-${i}`,
     host: s.host,
     count: s.count,
@@ -853,7 +779,7 @@
 
   // ---------- Chart options (locale-aware) ----------
 
-  function makeChartOptions(scale: string) {
+  function makeChartOptions(scale: ScaleId) {
     const locale = navigator.language || "en-US";
     const now = new Date();
 
@@ -890,16 +816,11 @@
                   minute: "2-digit",
                 });
               }
-              if (scale === "24h") {
-                return d.toLocaleTimeString(locale, {
-                  hour: "2-digit",
-                  minute: "2-digit",
-                });
-              }
-              return d.toLocaleDateString(locale, {
+              return d.toLocaleString(locale, {
                 weekday: "short",
                 month: "short",
                 day: "numeric",
+                hour: "2-digit",
               });
             },
           },
@@ -925,15 +846,11 @@
   }
 
   // When the scale dropdown changes, fetch matching history & update chart
-  async function onScaleChange(e: CustomEvent) {
-    selectedScale = e.detail.selectedId;
-
+  function onScaleChange(e: CustomEvent) {
+    selectedScale = e.detail.selectedId as ScaleId;
     if (chart) {
       chart.model.setOptions(makeChartOptions(selectedScale));
     }
-
-    // Fetch historical data at the right granularity for this scale
-    historicalData = await fetchHistory(selectedScale);
     refresh();
   }
 
@@ -954,8 +871,9 @@
       options: makeChartOptions(selectedScale),
     });
 
-    // 1. Fetch historical data for the default scale (7 days)
-    historicalData = await fetchHistory(selectedScale);
+    // 1. Fetch 7-day compact series once; scale dropdown only rebuckets.
+    historicalData = await fetchHistory();
+    seriesFetchedAt = Date.now();
     refresh();
 
     // 2. Fetch initial cache stats snapshot + historical deltas
@@ -1152,7 +1070,7 @@
           <Tile class="cache-tile">
             <div class="tile-label">Total Requests</div>
             <div class="tile-value">
-              {proxyData.summary.total_requests.toLocaleString()}
+              {proxyWindow.total.toLocaleString()}
             </div>
             <div class="tile-sub">in the selected time window</div>
           </Tile>
@@ -1160,15 +1078,11 @@
           <Tile class="cache-tile">
             <div class="tile-label">Allowed</div>
             <div class="tile-value tile-green">
-              {proxyData.summary.allowed.toLocaleString()}
+              {proxyWindow.allowed.toLocaleString()}
             </div>
             <div class="tile-sub">
-              {#if proxyData.summary.total_requests > 0}
-                {(
-                  (proxyData.summary.allowed /
-                    proxyData.summary.total_requests) *
-                  100
-                ).toFixed(1)}% of traffic
+              {#if proxyWindow.total > 0}
+                {((proxyWindow.allowed / proxyWindow.total) * 100).toFixed(1)}% of traffic
               {:else}
                 —
               {/if}
@@ -1178,15 +1092,11 @@
           <Tile class="cache-tile">
             <div class="tile-label">Blocked</div>
             <div class="tile-value tile-red">
-              {proxyData.summary.blocked.toLocaleString()}
+              {proxyWindow.blocked.toLocaleString()}
             </div>
             <div class="tile-sub">
-              {#if proxyData.summary.total_requests > 0}
-                {(
-                  (proxyData.summary.blocked /
-                    proxyData.summary.total_requests) *
-                  100
-                ).toFixed(1)}% of traffic
+              {#if proxyWindow.total > 0}
+                {((proxyWindow.blocked / proxyWindow.total) * 100).toFixed(1)}% of traffic
               {:else}
                 —
               {/if}
@@ -1196,11 +1106,11 @@
           <Tile class="cache-tile">
             <div class="tile-label">SSL Inspection</div>
             <div class="tile-value">
-              {proxyData.summary.ssl_bumped.toLocaleString()}
+              {proxyWindow.ssl_bumped.toLocaleString()}
               <span class="tile-max">MITM</span>
             </div>
             <div class="tile-sub">
-              {proxyData.summary.ssl_direct.toLocaleString()} direct (pass-through)
+              {proxyWindow.ssl_direct.toLocaleString()} direct (pass-through)
             </div>
           </Tile>
         </div>
