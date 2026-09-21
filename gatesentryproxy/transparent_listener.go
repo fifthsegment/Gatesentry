@@ -59,6 +59,16 @@ func (l *TransparentProxyListener) Accept() (net.Conn, error) {
 func (l *TransparentProxyListener) handleConnection(conn net.Conn) {
 	defer conn.Close()
 
+	// Routed traffic (routers, VPN exit nodes) arrives from addresses the
+	// DNS path may never observe, so the connection itself is evidence the
+	// address is active. Notify the inventory asynchronously; failures are
+	// not the connection's problem.
+	if IProxy != nil && IProxy.DeviceObservationHandler != nil {
+		if clientIP, _, err := net.SplitHostPort(conn.RemoteAddr().String()); err == nil && clientIP != "" {
+			go IProxy.DeviceObservationHandler(clientIP)
+		}
+	}
+
 	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
 
 	buf := make([]byte, 3)

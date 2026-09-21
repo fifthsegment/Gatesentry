@@ -528,6 +528,17 @@ func runGateSentry(startup chan<- error) (returnErr error) {
 		return policyProxyDecision(clientIP, user, domain)
 	}
 
+	// Transparent/routed connections are evidence an address is active even
+	// when no DNS query ever arrives (DoH upstreams, cached resolvers), so the
+	// proxy feeds the device inventory the addresses it sees. The store
+	// deduplicates by IP and refreshes LastSeen, keeping per-device policy
+	// bound to routed addresses; a nil store (tests) is simply ignored.
+	ngp.DeviceObservationHandler = func(clientIP string) {
+		if store := gatesentryDnsServer.GetDeviceStore(); store != nil {
+			store.ObservePassiveQuery(clientIP)
+		}
+	}
+
 	ngp.ProxyErrorHandler = func(gafd *gatesentryproxy.GSProxyErrorData) {
 		// clienterror := string(*bytesReceived)
 		msg := "Proxy Error. Unable to fulfill your request. <br/><strong>" + gafd.Error + "</strong>."

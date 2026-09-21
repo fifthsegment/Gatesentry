@@ -39,6 +39,12 @@ type GSProxy struct {
 	// ClientIP is the observed source address, used only as a device lookup
 	// key; it is never itself treated as the authenticated identity.
 	RuleMatchHandler func(domain string, user string, clientIP string) interface{}
+	// DeviceObservationHandler is called (asynchronously by the caller) with
+	// the observed source address of a proxied connection so the device
+	// inventory can record it. Routed/transparent traffic arrives from
+	// addresses the DNS path may never see (e.g. VPN or exit-node ranges),
+	// so the proxy is itself evidence the address is active.
+	DeviceObservationHandler func(clientIP string)
 	Handlers         map[string][]*GSHandler
 	UsersCache       map[string]GSUserCached
 }
