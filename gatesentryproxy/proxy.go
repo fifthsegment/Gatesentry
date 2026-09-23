@@ -10,8 +10,6 @@ import (
 	"log"
 	"net"
 	"net/http"
-	"reflect"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -59,7 +57,7 @@ func (p *GSProxy) RegisterHandler(id string, f func(*[]byte, *GSResponder, *GSPr
 	if p.Handlers == nil {
 		p.Handlers = map[string][]*GSHandler{}
 	}
-	log.Printf("Registering Handler for " + id)
+	log.Printf("Registering Handler for %s", id)
 	mm, ok := p.Handlers[id]
 	if !ok {
 		mm = ([]*GSHandler{})
@@ -102,6 +100,10 @@ type ProxyHandler struct {
 
 	// user is a user that has already been authenticated.
 	user string
+
+	// transparent marks a handler serving a connection that reached the
+	// gateway by routing rather than by proxy configuration, for logs.
+	transparent bool
 
 	// rt is the RoundTripper that will be used to fulfill the requests.
 	// If it is nil, a default Transport will be used.
@@ -280,14 +282,36 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	urlFilterData := GSUrlFilterData{Url: r.URL.String(), User: user}
+	requestHost, _, _ := net.SplitHostPort(r.URL.Host)
+	if requestHost == "" {
+		requestHost = r.URL.Host
+	}
+	layer := "explicit_proxy"
+	if h.transparent {
+		layer = "transparent_proxy"
+	}
 
-	// isBlockedUrl, _ := IProxy.RunHandler(FILTER_ACCESS_URL, "", &requestUrlBytes, passthru)
-	IProxy.UrlAccessHandler(&urlFilterData)
+	// The policy decides first. Inside an inspected connection this runs
+	// again for every decrypted request, which is what lets a rule see the
+	// URL path and not just the host.
+	policy := CheckProxyRules(requestHost, user, client)
+	passthru.Policy = policy
+	if policy != nil && (policy.Block || policy.BlocksURL(r.URL.String())) {
+		passthru.ProxyActionToLog = ProxyActionBlockedUrl
+		IProxy.LogHandler(GSLogData{Url: r.URL.String(), User: user, Action: ProxyActionBlockedUrl, ClientIP: client, Layer: layer, Reason: policy.Reason})
+		sendBlockMessageBytes(w, r, nil, policyBlockPage(policy.Reason), nil)
+		return
+	}
+	policyAllows := policy != nil && policy.Allow
+
+	urlFilterData := GSUrlFilterData{Url: r.URL.String(), User: user}
+	if !policyAllows {
+		IProxy.UrlAccessHandler(&urlFilterData)
+	}
 
 	if urlFilterData.FilterResponseAction == ProxyActionBlockedUrl {
 		passthru.ProxyActionToLog = ProxyActionBlockedUrl
-		IProxy.LogHandler(GSLogData{Url: r.URL.String(), User: user, Action: ProxyActionBlockedUrl, ClientIP: client, Layer: "explicit_proxy"})
+		IProxy.LogHandler(GSLogData{Url: r.URL.String(), User: user, Action: ProxyActionBlockedUrl, ClientIP: client, Layer: layer})
 		sendBlockMessageBytes(w, r, nil, urlFilterData.FilterResponse, nil)
 		return
 	}
@@ -295,7 +319,9 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	fileExt := getFileExtensionFromUrl(r.URL.String())
 	fileMime := getMimeByExtension(fileExt)
 	contentTypeScan := &GSContentTypeFilterData{Url: r.URL.String(), ContentType: fileMime}
-	IProxy.ContentTypeHandler(contentTypeScan)
+	if !policyAllows {
+		IProxy.ContentTypeHandler(contentTypeScan)
+	}
 
 	if DebugLogging {
 		log.Println("Url File extension = ", fileExt, " mime ", fileMime)
@@ -321,29 +347,10 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		action = ACTION_SSL_BUMP
 	}
 
-	requestHost, _, _ := net.SplitHostPort(r.URL.Host)
-	if requestHost == "" {
-		requestHost = r.URL.Host
-	}
-
-	shouldBlock, ruleMatch, ruleShouldMITM := CheckProxyRules(requestHost, user, client)
-	if shouldBlock {
-		if DebugLogging {
-			log.Printf("[Proxy] Blocking request to %s by rule", r.URL.String())
-		}
-		LogProxyAction(r.URL.String(), user, ProxyActionBlockedUrl, client, "explicit_proxy")
-		return
-	}
-
-	ruleMatched := ruleMatch != nil
-	if ruleMatch != nil {
-		passthru.UserData = ruleMatch
-	}
-
 	shouldMitm := IProxy.DoMitm(r.URL.Host)
-
-	if ruleMatched {
-		shouldMitm = ruleShouldMITM
+	if policy != nil && policy.Inspect {
+		// URL and response-type rules exist only inside the connection.
+		shouldMitm = true
 	}
 
 	if DebugLogging {
@@ -359,7 +366,7 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		action = ACTION_NONE
 	}
 
-	if !ruleMatched {
+	if policy == nil || !policy.Inspect {
 		isExceptionUrl := IProxy.IsExceptionUrl(r.URL.String())
 		if isExceptionUrl {
 			action = ACTION_NONE
@@ -375,7 +382,7 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// requestUrlBytes_log := []byte(r.URL.String())
 		passthru.ProxyActionToLog = ProxyActionSSLDirect
 		// IProxy.RunHandler("log", "", &requestUrlBytes_log, passthru)
-		IProxy.LogHandler(GSLogData{Url: r.URL.String(), User: user, Action: ProxyActionSSLDirect, ClientIP: client, Layer: "explicit_proxy"})
+		IProxy.LogHandler(GSLogData{Url: r.URL.String(), User: user, Action: ProxyActionSSLDirect, ClientIP: client, Layer: layer})
 		HandleSSLConnectDirect(r, w, user, passthru)
 		return
 	}
@@ -420,40 +427,6 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	defer resp.Body.Close()
 
-	if passthru.UserData != nil {
-		matchVal := reflect.ValueOf(passthru.UserData)
-		if matchVal.Kind() == reflect.Struct {
-			urlRegexField := matchVal.FieldByName("BlockURLRegexes")
-			actionField := matchVal.FieldByName("ShouldBlock")
-
-			if urlRegexField.IsValid() && urlRegexField.Kind() == reflect.Slice && urlRegexField.Len() > 0 {
-				requestURL := r.URL.String()
-				shouldBlock := false
-				blockAction := actionField.IsValid() && actionField.Kind() == reflect.Bool && actionField.Bool()
-				for i := 0; i < urlRegexField.Len(); i++ {
-					patternVal := urlRegexField.Index(i)
-					log.Println("Checking URL regex pattern ", patternVal.String(), " for ", requestURL)
-					if patternVal.Kind() == reflect.String {
-						pattern := patternVal.String()
-						matched, err := regexp.MatchString(pattern, requestURL)
-						log.Printf("Regex match result for pattern %s on URL %s: %v (err: %v)", pattern, requestURL, matched, err)
-						if err == nil && matched {
-							shouldBlock = blockAction
-							break
-						}
-					}
-				}
-
-				if shouldBlock {
-					passthru.ProxyActionToLog = ProxyActionBlockedUrl
-					IProxy.LogHandler(GSLogData{Url: requestURL, User: user, Action: ProxyActionBlockedUrl, ClientIP: client, Layer: "explicit_proxy"})
-					sendBlockMessageBytes(w, r, nil, []byte("URL blocked by rule"), nil)
-					return
-				}
-			}
-		}
-	}
-
 	contentType := strings.ToLower(resp.Header.Get("Content-Type"))
 	if strings.Contains(contentType, ";") {
 		t := strings.Split(contentType, ";")
@@ -467,14 +440,23 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// contentTypeBytes := []byte(contentType)
 
 	// contentTypeStatusBlocked, _ := IProxy.RunHandler("contenttypeblocked", "", &contentTypeBytes, passthru)
+	if policy.BlocksContentType(contentType) {
+		passthru.ProxyActionToLog = ProxyActionBlockedFileType
+		IProxy.LogHandler(GSLogData{Url: r.URL.String(), User: user, Action: ProxyActionBlockedFileType, ClientIP: client, Layer: layer, Reason: policy.Reason})
+		sendBlockMessageBytes(w, r, nil, policyBlockPage(policy.Reason), &contentType)
+		return
+	}
+
 	contentTypeData := GSContentTypeFilterData{Url: r.URL.String(), ContentType: contentType}
-	IProxy.ContentTypeHandler(&contentTypeData)
+	if !policyAllows {
+		IProxy.ContentTypeHandler(&contentTypeData)
+	}
 
 	if contentTypeData.FilterResponseAction == ProxyActionBlockedFileType {
 		// requestUrlBytes_log := []byte(r.URL.String())
 		passthru.ProxyActionToLog = ProxyActionBlockedFileType
 		// IProxy.RunHandler("log", "", &requestUrlBytes_log, passthru)
-		IProxy.LogHandler(GSLogData{Url: r.URL.String(), User: user, Action: ProxyActionBlockedFileType, ClientIP: client, Layer: "explicit_proxy"})
+		IProxy.LogHandler(GSLogData{Url: r.URL.String(), User: user, Action: ProxyActionBlockedFileType, ClientIP: client, Layer: layer})
 		sendBlockMessageBytes(w, r, nil, BLOCKED_CONTENT_TYPE, &contentType)
 		return
 	}
@@ -628,53 +610,32 @@ func sendBlockMessageBytes(w http.ResponseWriter, r *http.Request, resp *http.Re
 
 }
 
-// CheckProxyRules checks proxy rules for a given host and user.
-// Returns: shouldBlock (bool), ruleMatch (interface{}), shouldMITM (bool)
-func CheckProxyRules(host string, user string, clientIP string) (bool, interface{}, bool) {
+// CheckProxyRules asks the policy service for the decision on one request. A
+// nil result means no policy decides it.
+func CheckProxyRules(host string, user string, clientIP string) *PolicyDecision {
 	if IProxy == nil || IProxy.RuleMatchHandler == nil {
-		return false, nil, false
+		return nil
 	}
+	return IProxy.RuleMatchHandler(host, user, clientIP)
+}
 
-	ruleMatch := IProxy.RuleMatchHandler(host, user, clientIP)
-	if ruleMatch == nil {
-		return false, nil, false
+// policyBlockPage is the page shown when a policy denies a request, naming the
+// rule so the person in front of the device knows what to ask for.
+func policyBlockPage(reason string) []byte {
+	if IProxy != nil && IProxy.PolicyBlockPage != nil {
+		return IProxy.PolicyBlockPage(reason)
 	}
-
-	matchVal := reflect.ValueOf(ruleMatch)
-	if matchVal.Kind() != reflect.Struct {
-		return false, nil, false
-	}
-
-	matchedField := matchVal.FieldByName("Matched")
-	if !matchedField.IsValid() || matchedField.Kind() != reflect.Bool || !matchedField.Bool() {
-		return false, nil, false
-	}
-
-	shouldBlockField := matchVal.FieldByName("ShouldBlock")
-	urlRegexField := matchVal.FieldByName("BlockURLRegexes")
-	mitmField := matchVal.FieldByName("ShouldMITM")
-
-	shouldBlock := false
-	shouldMITM := false
-
-	if shouldBlockField.IsValid() && shouldBlockField.Kind() == reflect.Bool && shouldBlockField.Bool() {
-		// Only block if no URL regexes specified (domain-level block)
-		if !urlRegexField.IsValid() || urlRegexField.Len() == 0 {
-			shouldBlock = true
-		}
-	}
-
-	if mitmField.IsValid() && mitmField.Kind() == reflect.Bool {
-		shouldMITM = mitmField.Bool()
-	}
-
-	return shouldBlock, ruleMatch, shouldMITM
+	return []byte("Blocked by policy: " + reason)
 }
 
 // LogProxyAction logs a proxy action with the given URL, user, and action
 func LogProxyAction(url string, user string, action ProxyAction, clientIP string, layer string) {
+	logProxyActionWithReason(url, user, action, clientIP, layer, "")
+}
+
+func logProxyActionWithReason(url string, user string, action ProxyAction, clientIP string, layer string, reason string) {
 	if IProxy != nil && IProxy.LogHandler != nil {
-		IProxy.LogHandler(GSLogData{Url: url, User: user, Action: action, ClientIP: clientIP, Layer: layer})
+		IProxy.LogHandler(GSLogData{Url: url, User: user, Action: action, ClientIP: clientIP, Layer: layer, Reason: reason})
 	}
 }
 

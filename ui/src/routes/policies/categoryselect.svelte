@@ -8,6 +8,9 @@
   export let categories: CategoryStatus[] = [];
   export let selection: string[] = [];
   export let disabled = false;
+  // A rule picks categories inside an already busy form, so the compact
+  // layout drops the descriptions and packs the boxes tighter.
+  export let compact = false;
 
   const dispatch = createEventDispatcher<{ change: string[] }>();
 
@@ -24,7 +27,7 @@
   }
 </script>
 
-<div class="category-grid">
+<div class="category-grid" class:compact>
   {#each categories as category (category.id)}
     <div class="category-item">
       <div class="category-line">
@@ -36,7 +39,9 @@
         />
         <span class="category-count">{coverageLabel(category)}</span>
       </div>
-      <p class="category-note">{category.description}</p>
+      {#if !compact}
+        <p class="category-note">{category.description}</p>
+      {/if}
     </div>
   {/each}
 </div>
@@ -49,6 +54,10 @@
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
     column-gap: 2rem;
+  }
+  .category-grid.compact {
+    grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+    margin-bottom: 0.5rem;
   }
   .category-line {
     display: flex;

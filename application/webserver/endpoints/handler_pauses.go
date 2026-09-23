@@ -106,9 +106,9 @@ type schedulePresetApplyRequest struct {
 	GroupID  string `json:"group_id"`
 }
 
-// GSApiSchedulePresetApply applies a named schedule preset to a policy group,
-// setting the group's Schedule field. The timezone should be the
-// installation's IANA time zone.
+// GSApiSchedulePresetApply adds a rule that blocks all traffic during a named
+// schedule preset to a policy, which is what "Bedtime" or "School day" means
+// for a device. The timezone should be the installation's IANA time zone.
 // POST /api/policy/schedule-presets/apply
 func GSApiSchedulePresetApply(w http.ResponseWriter, r *http.Request) {
 	svc := policyServiceOrError(w)
@@ -140,9 +140,16 @@ func GSApiSchedulePresetApply(w http.ResponseWriter, r *http.Request) {
 		writePolicyJSONError(w, http.StatusNotFound, "Policy group not found")
 		return
 	}
-	group.Schedule = schedule
+	preset := gatesentryPolicy.PresetByID(in.PresetID)
+	group.Rules = append(group.Rules, gatesentryPolicy.GroupRule{
+		Name:     preset.Name,
+		Enabled:  true,
+		Action:   gatesentryPolicy.ActionBlock,
+		Target:   gatesentryPolicy.RuleTarget{AllTraffic: true},
+		Schedule: schedule,
+	})
 	if err := svc.UpdateGroup(in.GroupID, group); err != nil {
-		writePolicyJSONError(w, http.StatusInternalServerError, "Unable to update policy group schedule")
+		writePolicyJSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if !reloadPolicyOrError(w, svc) {

@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"strings"
 	"testing"
 
 	gatesentryDnsServer "bitbucket.org/abdullah_irfan/gatesentryf/dns/server"
@@ -56,134 +57,109 @@ func saveDecisionGroups(t *testing.T, svc *gatesentryPolicy.Service, groups ...g
 func TestPolicyProxyDecisionBlocksAssignedDevice(t *testing.T) {
 	svc := newDecisionTestService(t)
 	saveDecisionGroups(t, svc, gatesentryPolicy.PolicyGroup{
-		ID: "kids", Action: gatesentryPolicy.ActionBlock, Domains: []string{"*.games.example"},
+		ID: "kids", Name: "Kids", BlockedDomains: []string{"games.example"},
 	})
 
-	match := policyProxyDecision("192.0.2.10", "", "chess.games.example")
-	proxy, ok := match.(gatesentryPolicy.ProxyMatch)
-	if !ok {
-		t.Fatalf("match = %#v, want a policy.ProxyMatch", match)
+	decision := policyProxyDecision("192.0.2.10", "", "chess.games.example")
+	if decision == nil || !decision.Block {
+		t.Fatalf("decision = %+v, want a block", decision)
 	}
-	if !proxy.Matched || !proxy.ShouldBlock {
-		t.Fatalf("match = %+v, want a block", proxy)
-	}
-	if proxy.GroupID != "kids" || proxy.MatchedDomain != "*.games.example" {
-		t.Fatalf("match = %+v, want the kids group and the matched pattern", proxy)
+	if !strings.Contains(decision.Reason, "Kids") || !strings.Contains(decision.Reason, "games.example") {
+		t.Fatalf("reason = %q, want the policy and the matched domain named", decision.Reason)
 	}
 }
 
-// A request no group covers must return nil so the proxy keeps the gateway's
-// own settings; a group never changes inspection for traffic it does not own.
-func TestPolicyProxyDecisionWithoutAGroupIsUnhandled(t *testing.T) {
+// A request no policy covers returns nil so the proxy keeps the gateway's own
+// settings; a policy never changes inspection for traffic it does not own.
+func TestPolicyProxyDecisionWithoutAMatchIsUnhandled(t *testing.T) {
 	svc := newDecisionTestService(t)
 	saveDecisionGroups(t, svc, gatesentryPolicy.PolicyGroup{
-		ID: "other", Action: gatesentryPolicy.ActionBlock, Domains: []string{"other.example"},
+		ID: "other", Name: "Other", BlockedDomains: []string{"other.example"},
 	})
 
-	if match := policyProxyDecision("192.0.2.10", "dana", "uncovered.example"); match != nil {
-		t.Fatalf("match = %#v, want nil for an uncovered domain", match)
+	if decision := policyProxyDecision("192.0.2.10", "", "uncovered.example"); decision != nil {
+		t.Fatalf("decision = %+v, want nil for an uncovered domain", decision)
 	}
 }
 
-// An allow rule inside a block group is an exception: the proxy forwards the
-// request and the gateway defaults apply.
+// An allow rule ahead of the blocked list is an exception: the proxy forwards
+// the request and also skips the gateway-wide URL blocklist.
 func TestPolicyProxyDecisionAllowRuleIsAnException(t *testing.T) {
 	svc := newDecisionTestService(t)
 	saveDecisionGroups(t, svc, gatesentryPolicy.PolicyGroup{
-		ID: "kids", Action: gatesentryPolicy.ActionBlock, Domains: []string{"*.games.example"},
+		ID: "kids", Name: "Kids", BlockedDomains: []string{"games.example"},
 		Rules: []gatesentryPolicy.GroupRule{{
 			ID: "allow-chess", Enabled: true, Action: gatesentryPolicy.ActionAllow,
+			Target: gatesentryPolicy.RuleTarget{Domains: []string{"chess.games.example"}},
 		}},
 	})
 
-	if match := policyProxyDecision("192.0.2.10", "", "chess.games.example"); match != nil {
-		t.Fatalf("match = %#v, want nil for a rule exception", match)
+	decision := policyProxyDecision("192.0.2.10", "", "chess.games.example")
+	if decision == nil || decision.Block || !decision.Allow {
+		t.Fatalf("decision = %+v, want an allow", decision)
 	}
-}
-
-// An allow group with no rules exempts the domain: the proxy forwards it.
-func TestPolicyProxyDecisionAllowGroupIsAnException(t *testing.T) {
-	svc := newDecisionTestService(t)
-	saveDecisionGroups(t, svc, gatesentryPolicy.PolicyGroup{
-		ID: "work", Action: gatesentryPolicy.ActionAllow, Domains: []string{"approved.example"},
-	})
-
-	if match := policyProxyDecision("192.0.2.10", "", "approved.example"); match != nil {
-		t.Fatalf("match = %#v, want nil for an allow group", match)
+	if blocked := policyProxyDecision("192.0.2.10", "", "poker.games.example"); blocked == nil || !blocked.Block {
+		t.Fatalf("decision = %+v, want the rest of the blocked domain blocked", blocked)
 	}
 }
 
 // The unauthenticated proxy passes the client address as the user fallback.
-// It must resolve to the device identity, never to a group keyed by that
-// address string.
+// It must resolve to the device identity.
 func TestPolicyProxyDecisionIPAddressUserFallbackUsesDeviceIdentity(t *testing.T) {
 	svc := newDecisionTestService(t)
 	saveDecisionGroups(t, svc,
-		gatesentryPolicy.PolicyGroup{ID: "kids", Action: gatesentryPolicy.ActionBlock, Domains: []string{"games.example"}},
-		gatesentryPolicy.PolicyGroup{ID: "user-group", Action: gatesentryPolicy.ActionBlock, Domains: []string{"games.example"}, Users: []string{"192.0.2.10"}},
+		gatesentryPolicy.PolicyGroup{ID: "kids", Name: "Kids", BlockedDomains: []string{"games.example"}},
 	)
 
-	match, ok := policyProxyDecision("192.0.2.10", "192.0.2.10", "games.example").(gatesentryPolicy.ProxyMatch)
-	if !ok || !match.Matched || !match.ShouldBlock || match.GroupID != "kids" {
-		t.Fatalf("match = %+v, ok = %v, want the device group", match, ok)
+	decision := policyProxyDecision("192.0.2.10", "192.0.2.10", "games.example")
+	if decision == nil || !decision.Block || !strings.Contains(decision.Reason, "Kids") {
+		t.Fatalf("decision = %+v, want the device's policy", decision)
 	}
 }
 
-// A rule that carries URL patterns narrows its group's block to a path: the
-// proxy receives the patterns and the inspection requirement instead of a
-// whole-host denial.
+// A rule that carries URL patterns narrows its block to a path: the proxy
+// receives the patterns and an inspection requirement instead of a whole-host
+// denial.
 func TestPolicyProxyDecisionRuleCarriesURLPatterns(t *testing.T) {
 	svc := newDecisionTestService(t)
 	saveDecisionGroups(t, svc, gatesentryPolicy.PolicyGroup{
-		ID: "kids", Action: gatesentryPolicy.ActionBlock, Domains: []string{"media.example"},
+		ID: "kids", Name: "Kids",
 		Rules: []gatesentryPolicy.GroupRule{{
 			ID: "no-ads", Name: "No ads", Enabled: true, Action: gatesentryPolicy.ActionBlock,
+			Target:     gatesentryPolicy.RuleTarget{Domains: []string{"media.example"}},
 			URLRegexes: []string{"/ads/.*"},
 		}},
 	})
 
-	match, ok := policyProxyDecision("192.0.2.10", "", "media.example").(gatesentryPolicy.ProxyMatch)
-	if !ok || !match.Matched || !match.ShouldBlock {
-		t.Fatalf("match = %+v, ok = %v, want a block", match, ok)
+	decision := policyProxyDecision("192.0.2.10", "", "media.example")
+	if decision == nil || decision.Block || !decision.Inspect {
+		t.Fatalf("decision = %+v, want inspection without a whole-host block", decision)
 	}
-	if !match.ShouldMITM {
-		t.Fatal("URL conditions exist only inside a decrypted request, so the match must require inspection")
+	if len(decision.BlockURLRegexes) != 1 || decision.BlockURLRegexes[0] != "/ads/.*" {
+		t.Fatalf("patterns = %v, want the rule's pattern", decision.BlockURLRegexes)
 	}
-	if len(match.BlockURLRegexes) != 1 || match.BlockURLRegexes[0] != "/ads/.*" {
-		t.Fatalf("patterns = %v, want the rule's pattern", match.BlockURLRegexes)
-	}
-	if match.RuleID != "no-ads" {
-		t.Fatalf("rule = %q, want no-ads", match.RuleID)
+	if !decision.BlocksURL("http://media.example/ads/banner") || decision.BlocksURL("http://media.example/article") {
+		t.Fatal("URL pattern did not narrow the block to the matching path")
 	}
 }
 
-// A rule scoped to one user must not decide another user's request; the group
-// action still applies to the domain. The group reaches both logins by
-// membership, so only the rule's own scope separates them.
-func TestPolicyProxyDecisionRuleUserScopeFallsBackToGroupAction(t *testing.T) {
+// A rule scoped to one user decides only that user's request.
+func TestPolicyProxyDecisionRuleUserScope(t *testing.T) {
 	svc := newDecisionTestService(t)
 	saveDecisionGroups(t, svc, gatesentryPolicy.PolicyGroup{
-		ID: "kids", Action: gatesentryPolicy.ActionBlock, Domains: []string{"media.example"},
+		ID: "kids", Name: "Kids",
 		Users: []string{"dana", "vivienne"},
 		Rules: []gatesentryPolicy.GroupRule{{
-			ID: "no-ads", Enabled: true, Action: gatesentryPolicy.ActionBlock,
-			URLRegexes: []string{"/ads/.*"}, Users: []string{"vivienne"},
+			ID: "no-media", Enabled: true, Action: gatesentryPolicy.ActionBlock,
+			Target: gatesentryPolicy.RuleTarget{Domains: []string{"media.example"}},
+			Users:  []string{"vivienne"},
 		}},
 	})
 
-	other, ok := policyProxyDecision("192.0.2.10", "dana", "media.example").(gatesentryPolicy.ProxyMatch)
-	if !ok || !other.Matched || !other.ShouldBlock {
-		t.Fatalf("match = %+v, ok = %v, want the group action", other, ok)
+	if other := policyProxyDecision("192.0.2.10", "dana", "media.example"); other != nil {
+		t.Fatalf("decision = %+v, want nil: the rule is scoped to another user", other)
 	}
-	if other.RuleID != "" || len(other.BlockURLRegexes) != 0 {
-		t.Fatalf("match = %+v, want no rule: the rule is scoped to another user", other)
-	}
-
-	scoped, ok := policyProxyDecision("192.0.2.10", "vivienne", "media.example").(gatesentryPolicy.ProxyMatch)
-	if !ok || !scoped.Matched || !scoped.ShouldBlock {
-		t.Fatalf("match = %+v, ok = %v, want the rule's block", scoped, ok)
-	}
-	if scoped.RuleID != "no-ads" || len(scoped.BlockURLRegexes) != 1 {
-		t.Fatalf("match = %+v, want the rule's own pattern", scoped)
+	if scoped := policyProxyDecision("192.0.2.10", "vivienne", "media.example"); scoped == nil || !scoped.Block {
+		t.Fatalf("decision = %+v, want the rule's block", scoped)
 	}
 }

@@ -20,7 +20,11 @@ const (
 	// adapters keep their pre-policy behavior.
 	StorageKey = "policy_groups"
 	// DocumentVersion is the persisted policy document format version.
-	DocumentVersion = 1
+	// Version 1 stored one action per group over shared domains and
+	// categories; version 2 stores blocked and allowed lists plus targeted
+	// rules. loadDocument upgrades a version 1 document in memory and the
+	// next write persists it as version 2.
+	DocumentVersion = 2
 )
 
 // DeviceResolver is the read-only view the policy service needs from the
@@ -114,23 +118,6 @@ func (s *Service) SetClockFunc(f func() time.Time) {
 	s.nowFunc = f
 }
 
-// scheduleActive reports whether a group's schedule is active at the
-// service's current time. A group with no schedule (nil) is always active,
-// preserving pre-PER-39 behavior.
-// scheduleActiveAt reports whether a group's schedule is active at an
-// arbitrary instant. It is the pure core the live path and preview share, so
-// schedule decisions cannot drift between enforcement and preview.
-func scheduleActiveAt(group PolicyGroup, now time.Time) bool {
-	if group.Schedule == nil {
-		return true
-	}
-	return group.Schedule.IsActive(now)
-}
-
-func (s *Service) scheduleActive(group PolicyGroup) bool {
-	return scheduleActiveAt(group, s.now())
-}
-
 // ErrNoPolicy is returned when no policy document exists. It is distinct
 // from a storage error: adapters treat it as "no groups configured".
 var ErrNoPolicy = errors.New("no policy document")
@@ -147,24 +134,66 @@ var ErrGroupExists = errors.New("policy group already exists")
 var ErrGroupNotFound = errors.New("policy group not found")
 
 func (s *Service) loadDocument() (PolicyDocument, error) {
-	var doc PolicyDocument
 	if s.storage == nil {
-		return doc, nil
+		return withDefaultGroup(PolicyDocument{Version: DocumentVersion}), nil
 	}
 	raw, err := s.storage.GetE(StorageKey)
 	if err != nil {
-		return doc, fmt.Errorf("read policy groups: %w", err)
+		return PolicyDocument{}, fmt.Errorf("read policy groups: %w", err)
 	}
-	if raw == "" {
-		return doc, nil
+	return decodeDocument(raw)
+}
+
+// decodeDocument parses a stored policy document, upgrading an older format
+// in memory, and guarantees the default policy exists. The persisted value is
+// only rewritten by the next policy write, so reading never changes storage.
+func decodeDocument(raw string) (PolicyDocument, error) {
+	doc := PolicyDocument{Version: DocumentVersion}
+	if strings.TrimSpace(raw) == "" {
+		return withDefaultGroup(doc), nil
 	}
-	if err := json.Unmarshal([]byte(raw), &doc); err != nil {
+	var probe struct {
+		Version int `json:"version"`
+	}
+	if err := json.Unmarshal([]byte(raw), &probe); err != nil {
 		return doc, fmt.Errorf("parse policy groups: %w", err)
 	}
-	if doc.Version != DocumentVersion {
-		return doc, fmt.Errorf("unsupported policy groups version %d", doc.Version)
+	switch probe.Version {
+	case 1:
+		upgraded, err := upgradeDocumentV1(raw)
+		if err != nil {
+			return doc, err
+		}
+		doc = upgraded
+	case DocumentVersion:
+		if err := json.Unmarshal([]byte(raw), &doc); err != nil {
+			return doc, fmt.Errorf("parse policy groups: %w", err)
+		}
+	default:
+		return doc, fmt.Errorf("unsupported policy groups version %d", probe.Version)
 	}
-	return doc, nil
+	return withDefaultGroup(doc), nil
+}
+
+// withDefaultGroup adds the default policy when a document has none, so every
+// request always resolves to a policy the administrator can see and edit.
+func withDefaultGroup(doc PolicyDocument) PolicyDocument {
+	for _, group := range doc.Groups {
+		if group.ID == DefaultGroupID {
+			return doc
+		}
+	}
+	doc.Groups = append(doc.Groups, DefaultGroup())
+	return doc
+}
+
+// DefaultGroup is the empty default policy created for a new installation.
+func DefaultGroup() PolicyGroup {
+	return PolicyGroup{
+		ID:          DefaultGroupID,
+		Name:        "Default",
+		Description: "Applies to every device and user that is not assigned to another policy.",
+	}
 }
 
 func snapshotFromDocument(doc PolicyDocument) PolicySnapshot {
@@ -233,7 +262,7 @@ func (s *Service) ReferencedCategories() []string {
 	seen := make(map[string]bool)
 	ids := make([]string, 0, len(snapshot.Groups))
 	for _, group := range snapshot.Groups {
-		for _, id := range group.Categories {
+		for _, id := range GroupCategories(group) {
 			if id == "" || seen[id] {
 				continue
 			}
@@ -242,6 +271,16 @@ func (s *Service) ReferencedCategories() []string {
 		}
 	}
 	sort.Strings(ids)
+	return ids
+}
+
+// GroupCategories lists every category a policy refers to: its blocked
+// categories and the categories its rules target.
+func GroupCategories(group PolicyGroup) []string {
+	ids := append([]string(nil), group.BlockedCategories...)
+	for _, rule := range group.Rules {
+		ids = append(ids, rule.Target.Categories...)
+	}
 	return ids
 }
 
@@ -269,12 +308,31 @@ func (s *Service) Reload() error {
 
 // SaveGroups replaces the group set atomically.
 func (s *Service) SaveGroups(groups []PolicyGroup) error {
-	return s.update(func(snap *PolicySnapshot) error {
-		next := make(map[string]PolicyGroup, len(groups))
-		for _, g := range groups {
-			next[g.ID] = g
+	next := make(map[string]PolicyGroup, len(groups))
+	for _, g := range groups {
+		if strings.TrimSpace(g.ID) == "" {
+			return errors.New("every policy group needs a stable id")
 		}
-		snap.Groups = next
+		if strings.TrimSpace(g.Name) == "" {
+			g.Name = g.ID
+		}
+		normalized, err := NormalizeGroup(g)
+		if err != nil {
+			return &ValidationError{fmt.Errorf("policy %q: %w", g.ID, err)}
+		}
+		next[g.ID] = normalized
+	}
+	if _, ok := next[DefaultGroupID]; !ok {
+		next[DefaultGroupID] = DefaultGroup()
+	}
+	return s.update(func(snap *PolicySnapshot) error {
+		snap.Groups = map[string]PolicyGroup{}
+		for _, g := range next {
+			if err := checkUserConflicts(snap, g); err != nil {
+				return err
+			}
+			snap.Groups[g.ID] = g
+		}
 		return nil
 	})
 }
@@ -286,8 +344,9 @@ func (s *Service) CreateGroup(group PolicyGroup) error {
 	if strings.TrimSpace(group.ID) == "" {
 		return errors.New("policy group needs an id")
 	}
-	if strings.TrimSpace(group.Name) == "" {
-		return errors.New("policy group needs a name")
+	group, err := NormalizeGroup(group)
+	if err != nil {
+		return &ValidationError{err}
 	}
 	now := time.Now().UTC()
 	if group.CreatedAt.IsZero() {
@@ -297,6 +356,9 @@ func (s *Service) CreateGroup(group PolicyGroup) error {
 	return s.update(func(snap *PolicySnapshot) error {
 		if _, exists := snap.Groups[group.ID]; exists {
 			return fmt.Errorf("%w: %s", ErrGroupExists, group.ID)
+		}
+		if err := checkUserConflicts(snap, group); err != nil {
+			return err
 		}
 		snap.Groups[group.ID] = group
 		return nil
@@ -309,8 +371,9 @@ func (s *Service) UpdateGroup(groupID string, group PolicyGroup) error {
 	if strings.TrimSpace(groupID) == "" {
 		return errors.New("policy group needs an id")
 	}
-	if strings.TrimSpace(group.Name) == "" {
-		return errors.New("policy group needs a name")
+	group, err := NormalizeGroup(group)
+	if err != nil {
+		return &ValidationError{err}
 	}
 	return s.update(func(snap *PolicySnapshot) error {
 		current, exists := snap.Groups[groupID]
@@ -320,15 +383,75 @@ func (s *Service) UpdateGroup(groupID string, group PolicyGroup) error {
 		group.ID = groupID
 		group.CreatedAt = current.CreatedAt
 		group.UpdatedAt = time.Now().UTC()
+		if groupID == DefaultGroupID && len(group.Users) > 0 {
+			return &ValidationError{errors.New("the default policy already applies to every user that has no policy; assign users to another policy")}
+		}
+		if err := checkUserConflicts(snap, group); err != nil {
+			return err
+		}
 		snap.Groups[groupID] = group
 		return nil
 	})
 }
 
+// ValidationError marks a policy the administrator has to correct, as
+// opposed to a storage failure. Its message is safe to show as written.
+type ValidationError struct{ Err error }
+
+func (e *ValidationError) Error() string { return e.Err.Error() }
+func (e *ValidationError) Unwrap() error { return e.Err }
+
+// OrderedGroups returns every policy in display order: the default policy
+// first, then by name, so the list does not reshuffle between loads.
+func (s *Service) OrderedGroups() []PolicyGroup {
+	snapshot := s.Snapshot()
+	groups := make([]PolicyGroup, 0, len(snapshot.Groups))
+	for _, group := range snapshot.Groups {
+		groups = append(groups, group)
+	}
+	sort.Slice(groups, func(i, j int) bool {
+		if (groups[i].ID == DefaultGroupID) != (groups[j].ID == DefaultGroupID) {
+			return groups[i].ID == DefaultGroupID
+		}
+		if groups[i].Name != groups[j].Name {
+			return strings.ToLower(groups[i].Name) < strings.ToLower(groups[j].Name)
+		}
+		return groups[i].ID < groups[j].ID
+	})
+	return groups
+}
+
+// ErrDefaultGroup is returned when an operation would remove the default
+// policy, which every unassigned request relies on.
+var ErrDefaultGroup = errors.New("the default policy cannot be deleted")
+
+// ErrUserConflict is returned when a proxy user is listed on two policies.
+// A user resolves to one policy, so a second listing would be ignored and the
+// administrator would be misled about which rules apply.
+var ErrUserConflict = errors.New("proxy user already belongs to another policy")
+
+func checkUserConflicts(snap *PolicySnapshot, group PolicyGroup) error {
+	for _, other := range snap.Groups {
+		if other.ID == group.ID {
+			continue
+		}
+		for _, user := range group.Users {
+			if containsString(other.Users, user) {
+				return fmt.Errorf("%w: %s is in %q", ErrUserConflict, user, other.Name)
+			}
+		}
+	}
+	return nil
+}
+
 // DeleteGroup removes one policy record and assignments that point to it.
+// Devices that were assigned to it fall back to the default policy.
 func (s *Service) DeleteGroup(groupID string) error {
 	if strings.TrimSpace(groupID) == "" {
 		return errors.New("policy group needs an id")
+	}
+	if groupID == DefaultGroupID {
+		return ErrDefaultGroup
 	}
 	return s.update(func(snap *PolicySnapshot) error {
 		if _, exists := snap.Groups[groupID]; !exists {
@@ -365,7 +488,9 @@ func (s *Service) SetDeviceAssignment(deviceID, groupID string) error {
 		return errors.New("policy assignment needs a device id")
 	}
 	return s.update(func(snap *PolicySnapshot) error {
-		if groupID == "" {
+		if groupID == "" || groupID == DefaultGroupID {
+			// The default policy is what an unassigned device gets, so an
+			// explicit assignment to it is stored as no assignment.
 			delete(snap.Assignments, deviceID)
 			return nil
 		}
@@ -389,6 +514,7 @@ func (s *Service) SaveMigration(groups []PolicyGroup, assignments []DeviceAssign
 		Groups:      make(map[string]PolicyGroup, len(groups)),
 		Assignments: make(map[string]string, len(assignments)),
 	}
+	snap.Groups[DefaultGroupID] = DefaultGroup()
 	for _, group := range groups {
 		snap.Groups[group.ID] = group
 	}
@@ -418,18 +544,16 @@ func (s *Service) update(transform func(*PolicySnapshot) error) error {
 		return errors.New("policy service has no storage")
 	}
 	return s.storage.UpdateValue(StorageKey, func(current string) (string, error) {
-		var doc PolicyDocument
-		if current != "" {
-			if err := json.Unmarshal([]byte(current), &doc); err != nil {
-				return "", fmt.Errorf("parse policy groups: %w", err)
-			}
-			if doc.Version != DocumentVersion {
-				return "", fmt.Errorf("unsupported policy groups version %d", doc.Version)
-			}
+		doc, err := decodeDocument(current)
+		if err != nil {
+			return "", err
 		}
 		snap := snapshotFromDocument(doc)
 		if err := transform(&snap); err != nil {
 			return "", err
+		}
+		if _, ok := snap.Groups[DefaultGroupID]; !ok {
+			return "", errors.New("the default policy cannot be removed")
 		}
 		nextDoc := documentFromSnapshot(snap, doc.MigratedFrom)
 		encoded, err := json.Marshal(nextDoc)
@@ -476,36 +600,36 @@ func (s *Service) resolveBaseIdentity(clientIP, authUser string, requestConfirms
 	}
 	identity := Identity{AuthUser: authUser, Source: SourceUnknown}
 	switch {
-	case authUser != "":
-		identity.Source = SourceAuthUser
-		identity.Explanation = "authenticated proxy user"
 	case clientIP == "" || s.devices == nil:
-		identity.Source = SourceUnknown
 		identity.Explanation = "no client address available"
 	default:
 		deviceID, ambiguous, stale := s.devices.ResolveDeviceByIP(clientIP)
 		switch {
 		case ambiguous:
 			identity.Source = SourceUnknownNAT
-			identity.Explanation = "multiple devices share this address; treating as unknown"
-		case stale:
-			if requestConfirmsAddress {
-				identity.DeviceID = deviceID
-				identity.Source = SourceDevice
-				identity.Explanation = "device attributed from observed address; live query confirms the address is active"
-			} else {
-				identity.DeviceID = deviceID
-				identity.Source = SourceStaleDevice
-				identity.Explanation = "device observation is stale; using default policy"
-			}
+			identity.Explanation = "multiple devices share this address; using the default policy"
+		case stale && !requestConfirmsAddress:
+			identity.DeviceID = deviceID
+			identity.Source = SourceStaleDevice
+			identity.Explanation = "device observation is stale; using the default policy"
 		case deviceID == "":
-			identity.Source = SourceUnknown
-			identity.Explanation = "no device observed for this address"
+			identity.Explanation = "no device observed for this address; using the default policy"
+		case stale:
+			identity.DeviceID = deviceID
+			identity.Source = SourceDevice
+			identity.Explanation = "device attributed from observed address; live query confirms the address is active"
 		default:
 			identity.DeviceID = deviceID
 			identity.Source = SourceDevice
 			identity.Explanation = "device resolved from observed address"
 		}
+	}
+	if authUser != "" {
+		// The login is the more specific identity, so its policy wins over
+		// the device's when one names it; the device stays recorded for the
+		// logs and for the device's own assignment.
+		identity.Source = SourceAuthUser
+		identity.Explanation = "authenticated proxy user"
 	}
 	return identity
 }
@@ -556,227 +680,171 @@ func (s *Service) groupForUser(snap PolicySnapshot, user string) string {
 	return groupForUserIn(snap, user)
 }
 
-// groupIDForSnapshot derives the policy group for a base identity (DeviceID,
-// AuthUser, Source already resolved) from a given snapshot. Only authenticated
-// users and confirmed devices resolve to a group; unknown, NAT-ambiguous, and
-// stale-proxy observations resolve to none. Used per-snapshot so a proposed
-// assignment is honored without re-resolving device identity.
+// groupIDForSnapshot derives the policy for a base identity (DeviceID,
+// AuthUser, Source already resolved) from a given snapshot. Precedence is the
+// authenticated proxy user's policy, then the confirmed device's assignment,
+// then the default policy. Unknown, NAT-ambiguous, and stale-proxy
+// observations resolve to the default policy: a request always has a policy,
+// and it is never someone else's. Used per snapshot so a proposed assignment
+// is honored without re-resolving device identity.
 func groupIDForSnapshot(identity Identity, snap PolicySnapshot) string {
-	switch identity.Source {
-	case SourceAuthUser:
-		return groupForUserIn(snap, identity.AuthUser)
-	case SourceDevice:
-		return snap.Assignments[identity.DeviceID]
-	default:
-		return ""
+	if identity.AuthUser != "" {
+		if id := groupForUserIn(snap, identity.AuthUser); id != "" {
+			return id
+		}
+	}
+	if identity.DeviceID != "" && (identity.Source == SourceDevice || identity.Source == SourceAuthUser) {
+		if id, ok := snap.Assignments[identity.DeviceID]; ok {
+			if _, exists := snap.Groups[id]; exists {
+				return id
+			}
+		}
+	}
+	return DefaultGroupID
+}
+
+// evalContext is the state one decision reads. The live path fills it from the
+// service; preview fills it from a proposed snapshot, so both run the same
+// evaluator.
+type evalContext struct {
+	snap              PolicySnapshot
+	exc               ExceptionSnapshot
+	pa                PauseSnapshot
+	now               time.Time
+	index             *CategoryIndex
+	gatewayCategories []string
+}
+
+func (s *Service) liveContext() evalContext {
+	s.mu.RLock()
+	index := s.categories
+	gateway := append([]string(nil), s.enabledCategories...)
+	s.mu.RUnlock()
+	return evalContext{
+		snap:              s.Snapshot(),
+		exc:               s.ExceptionSnapshot(),
+		pa:                s.PauseSnapshot(),
+		now:               s.now(),
+		index:             index,
+		gatewayCategories: gateway,
 	}
 }
 
-// EvaluateDNS applies group policy and exceptions to a DNS query. It only
-// reports DNS-applicable outcomes; URL, MIME, and TLS-inspection conditions
-// are surfaced as explicitly inapplicable rather than being silently treated
-// as enforced.
-//
-// Exception precedence: a scoped exception (device > group > installation)
-// that matches the domain exempts it from the group block. This lets an
-// administrator recover a false positive for one device without creating a
-// global bypass.
-// evaluateDNSAt is the pure, snapshot-parametrized core of EvaluateDNS. The
-// live path and preview both call it so DNS enforcement and preview cannot
-// diverge: there is one evaluator, not a parallel one.
-func (s *Service) evaluateDNSAt(identity Identity, domain string, snap PolicySnapshot, exc ExceptionSnapshot, pa PauseSnapshot, now time.Time) DNSDecision {
-	decision := DNSDecision{Action: ActionNone}
-
-	// Check scoped exceptions first. An active exception that matches the
-	// domain reports an allow so the caller can bypass the global blocklist,
-	// regardless of group policy.
-	if e, ok := evaluateExceptionIn(identity, domain, exc); ok {
-		decision.Action = ActionAllow
-		decision.Reason = "scoped exception: " + string(e.Scope)
-		// GroupID left empty for exception bypasses; Reason carries the scope
-		decision.InapplicableConditions = dnsInapplicableConditions()
-		return decision
-	}
-
-	group, ok := snap.Groups[identity.GroupID]
+// evaluate is the one decision path. Scoped exceptions come first because they
+// are how an administrator recovers one false positive without editing the
+// policy; then the resolved policy decides.
+func evaluate(identity Identity, domain string, layer DecisionLayer, ctx evalContext) (groupOutcome, PolicyGroup) {
+	domain = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(domain)), ".")
+	group, ok := ctx.snap.Groups[identity.GroupID]
 	if !ok {
-		decision.InapplicableConditions = dnsInapplicableConditions()
-		return decision
+		group = ctx.snap.Groups[DefaultGroupID]
 	}
-	decision.GroupID = group.ID
-	// If the group has a schedule and it is not currently active, the group
-	// expresses no opinion: the block action does not apply and enforcement
-	// falls through to the global blocklist. DNS cache and established
-	// connections may retain prior decisions; see schedule documentation.
-	if !scheduleActiveAt(group, now) {
-		decision.Reason = "group schedule inactive"
-		decision.InapplicableConditions = dnsInapplicableConditions()
-		return decision
+	if e, ok := evaluateExceptionIn(identity, domain, ctx.exc); ok {
+		return groupOutcome{
+			Action:  ActionAllow,
+			Matched: e.Domain,
+			Reason:  "exception (" + string(e.Scope) + ")",
+			Trace:   []TraceStep{{Stage: "exception", Applied: true, Action: ActionAllow, Detail: string(e.Scope) + " exception for " + e.Domain}},
+		}, group
 	}
-	// An active pause suppresses the group block action for the paused scope
-	// (device > group > installation). Pauses do not override allow actions:
-	// an allow group stays allow. DNS caches and established connections
-	// may retain prior decisions until they expire.
-	if p, ok := evaluatePauseIn(identity, pa); ok && group.Action == ActionBlock {
-		decision.Action = ActionNone
-		decision.Reason = "paused: " + string(p.Scope)
-		decision.InapplicableConditions = dnsInapplicableConditions()
-		return decision
+	pause, paused := evaluatePauseIn(identity, ctx.pa)
+	out := evaluateGroup(group, evalRequest{
+		domain:            domain,
+		user:              identity.AuthUser,
+		now:               ctx.now,
+		layer:             layer,
+		paused:            paused,
+		index:             ctx.index,
+		gatewayCategories: ctx.gatewayCategories,
+	})
+	if paused && out.Action != ActionBlock && out.Reason == "" {
+		// Name the pause when it is what left the request unblocked, so a
+		// log line explains why a normally blocked site loaded.
+		for _, step := range out.Trace {
+			if strings.HasSuffix(step.Detail, ": paused") {
+				out.Reason = "paused: " + string(pause.Scope)
+				break
+			}
+		}
 	}
-	if matched, categoryID := matchGroupRule(group, domain, s.categories); matched != "" {
-		outcome := evaluateGroupRulesAt(group, matched, categoryID, identity.AuthUser, now, LayerDNS)
-		decision.MatchedDomain = outcome.MatchedDomain
-		decision.Action = outcome.Action
-		decision.RuleID = outcome.RuleID
-		decision.Reason = outcome.Reason
-	}
-	decision.InapplicableConditions = dnsInapplicableConditions()
-	return decision
+	return out, group
 }
 
+// EvaluateDNS decides a DNS query. An allow exempts the domain from the global
+// blocklist; a block answers with a block response; ActionNone leaves the
+// global blocklist in charge. Conditions only the proxy can see are listed in
+// ProxyOnly and never decide a DNS answer.
 func (s *Service) EvaluateDNS(identity Identity, domain string) DNSDecision {
-	return s.evaluateDNSAt(identity, domain, s.Snapshot(), s.ExceptionSnapshot(), s.PauseSnapshot(), s.now())
+	return evaluateDNSIn(identity, domain, s.liveContext())
 }
 
-// EvaluateProxy is the policy decision for a proxy request: which group and
-// rule own the domain, whether the request is denied, whether TLS inspection
-// is needed to see the rule's URL and content conditions, and which patterns
-// and media types the proxy must test against the decrypted request and the
-// response. It is the same evaluator DNS uses, asked for the conditions the
-// proxy can actually see.
+func evaluateDNSIn(identity Identity, domain string, ctx evalContext) DNSDecision {
+	out, group := evaluate(identity, domain, LayerDNS, ctx)
+	return DNSDecision{
+		Action:        out.Action,
+		GroupID:       group.ID,
+		MatchedDomain: out.Matched,
+		RuleID:        out.RuleID,
+		ProxyOnly:     out.ProxyOnly,
+		SafeSearch:    group.SafeSearch,
+		Reason:        out.Reason,
+	}
+}
+
+// EvaluateProxy is the policy decision for a proxy request: whether the policy
+// blocks the domain, allows it explicitly, or blocks only the URLs and
+// response types its rules name, in which case the proxy has to inspect the
+// connection to see them.
 //
-// Matched false means no policy group decided this request: the proxy keeps
-// the gateway's own settings, so a group never silently changes inspection for
+// Matched false means no policy decided this request: the proxy keeps the
+// gateway's own settings, so a policy never silently changes inspection for
 // traffic it does not cover.
 func (s *Service) EvaluateProxy(identity Identity, domain string) ProxyMatch {
-	return s.evaluateProxyAt(identity, domain, s.Snapshot(), s.ExceptionSnapshot(), s.PauseSnapshot(), s.now())
+	return evaluateProxyIn(identity, domain, s.liveContext())
 }
 
-// evaluateProxyAt is the pure, snapshot-parametrized core of EvaluateProxy.
-func (s *Service) evaluateProxyAt(identity Identity, domain string, snap PolicySnapshot, exc ExceptionSnapshot, pa PauseSnapshot, now time.Time) ProxyMatch {
-	match := ProxyMatch{}
-	// A scoped exception exempts the domain entirely, and an allow rule is an
-	// exception inside the group. Both leave the gateway defaults in charge.
-	if _, ok := evaluateExceptionIn(identity, domain, exc); ok {
-		match.Reason = "scoped exception"
-		return match
+func evaluateProxyIn(identity Identity, domain string, ctx evalContext) ProxyMatch {
+	out, group := evaluate(identity, domain, LayerExplicitProxy, ctx)
+	match := ProxyMatch{GroupID: group.ID, RuleID: out.RuleID, MatchedDomain: out.Matched, Reason: out.Reason}
+	conditional := len(out.URLRegexes) > 0 || len(out.ContentTypes) > 0
+	switch {
+	case out.Action == ActionBlock:
+		match.Matched = true
+		match.ShouldBlock = true
+	case conditional:
+		match.Matched = true
+		match.ShouldMITM = true
+		match.BlockURLRegexes = out.URLRegexes
+		match.BlockContentTypes = out.ContentTypes
+		match.RuleID = out.ConditionRuleID
+		match.Reason = out.ConditionReason
+		match.Allowed = out.Action == ActionAllow
+	case out.Action == ActionAllow:
+		match.Matched = true
+		match.Allowed = true
 	}
-	group, ok := snap.Groups[identity.GroupID]
-	if !ok {
-		return match
-	}
-	if !scheduleActiveAt(group, now) {
-		match.Reason = "group schedule inactive"
-		return match
-	}
-	if _, ok := evaluatePauseIn(identity, pa); ok && group.Action == ActionBlock {
-		match.Reason = "paused"
-		return match
-	}
-	matched, categoryID := matchGroupRule(group, domain, s.categories)
-	if matched == "" {
-		return match
-	}
-	outcome := evaluateGroupRulesAt(group, matched, categoryID, identity.AuthUser, now, LayerExplicitProxy)
-	if outcome.Action != ActionBlock {
-		match.Reason = outcome.Reason
-		return match
-	}
-	match.Matched = true
-	match.GroupID = group.ID
-	match.RuleID = outcome.RuleID
-	match.MatchedDomain = outcome.MatchedDomain
-	match.Reason = outcome.Reason
-	match.ShouldBlock = true
-	match.ShouldMITM = outcome.ShouldMITM
-	match.BlockURLRegexes = outcome.BlockURLRegexes
-	match.BlockContentTypes = outcome.BlockContentTypes
 	return match
 }
 
-func dnsInapplicableConditions() []string {
-	return []string{"url_regex", "content_type", "mitm"}
-}
-
-// DNSInapplicableConditions exposes the conditions DNS enforcement cannot
-// evaluate. APIs and logs use it so the public limitation always matches the
-// policy engine rather than duplicating the list.
-func DNSInapplicableConditions() []string {
-	return dnsInapplicableConditions()
-}
-
-// EvaluateDomain reports the group action for a domain in any adapter.
-// A scoped exception (device > group > installation) overrides a group
-// block with an allow, so a false positive can be recovered for one entity
-// without a global bypass.
-// evaluateDomainAt is the pure, snapshot-parametrized core of EvaluateDomain,
-// sharing the evaluator with preview so the two cannot diverge.
-func (s *Service) evaluateDomainAt(identity Identity, domain string, snap PolicySnapshot, exc ExceptionSnapshot, pa PauseSnapshot, now time.Time) PolicyAction {
-	if _, ok := evaluateExceptionIn(identity, domain, exc); ok {
-		return ActionAllow
-	}
-	group, ok := snap.Groups[identity.GroupID]
-	if !ok {
-		return ActionNone
-	}
-	// A schedule that is not currently active means the group expresses no
-	// opinion about this domain right now. Enforcement falls through.
-	if !scheduleActiveAt(group, now) {
-		return ActionNone
-	}
-	// An active pause suppresses the group block action for the paused scope.
-	// Allow actions are not affected.
-	if _, ok := evaluatePauseIn(identity, pa); ok && group.Action == ActionBlock {
-		return ActionNone
-	}
-	if matched, categoryID := matchGroupRule(group, domain, s.categories); matched != "" {
-		outcome := evaluateGroupRulesAt(group, matched, categoryID, identity.AuthUser, now, LayerDNS)
-		return outcome.Action
-	}
-	return ActionNone
-}
-
-// matchGroupRule reports which rule in a group covers a domain. matched is the
-// explicit domain pattern or "category:<id>", and categoryID is non-empty when
-// the match came from a category. An empty matched value means the group
-// expresses no opinion about this domain. Live enforcement and preview share
-// this matcher so category coverage cannot drift between them.
-//
-// Explicit patterns are checked before categories so the log and the preview
-// name the operator's own entry when both match. The group action is the same
-// either way; the difference is which rule an administrator can trace back to
-// an edit they made rather than to a shared feed.
-func matchGroupRule(group PolicyGroup, domain string, index *CategoryIndex) (matched string, categoryID string) {
-	for _, pattern := range group.Domains {
-		if matchDomain(pattern, domain) {
-			return pattern, ""
-		}
-	}
-	for _, id := range group.Categories {
-		if index.Contains(id, domain) {
-			return "category:" + id, id
-		}
-	}
-	return "", ""
-}
-
+// EvaluateDomain reports the policy action for a domain on the DNS layer.
 func (s *Service) EvaluateDomain(identity Identity, domain string) PolicyAction {
-	return s.evaluateDomainAt(identity, domain, s.Snapshot(), s.ExceptionSnapshot(), s.PauseSnapshot(), s.now())
+	return s.EvaluateDNS(identity, domain).Action
 }
 
-// matchDomain mirrors the rules engine wildcard semantics: exact match or
-// "*." suffix match including the bare suffix.
+// matchDomain reports whether a pattern covers a domain. A plain domain covers
+// itself and its subdomains, because that is what an administrator who types
+// "tiktok.com" means; "*.example.com" covers only the subdomains, for the rare
+// case where the apex must stay reachable.
 func matchDomain(pattern, domain string) bool {
 	pattern = strings.ToLower(strings.TrimSpace(pattern))
-	domain = strings.ToLower(strings.TrimSpace(domain))
-	if pattern == domain {
-		return true
+	domain = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(domain)), ".")
+	if pattern == "" || domain == "" {
+		return false
 	}
 	if strings.HasPrefix(pattern, "*.") {
-		suffix := pattern[2:]
-		return domain == suffix || strings.HasSuffix(domain, "."+suffix)
+		return strings.HasSuffix(domain, pattern[1:])
 	}
-	return false
+	return domain == pattern || strings.HasSuffix(domain, "."+pattern)
 }
 
 func newGroupID() string {
@@ -789,4 +857,18 @@ func EnsureGroupID(group *PolicyGroup) {
 	if group != nil && group.ID == "" {
 		group.ID = newGroupID()
 	}
+}
+
+// Timezone returns the gateway's configured IANA time zone, used to anchor
+// schedules created on the gateway's behalf (templates, presets). It falls
+// back to UTC, which is also what a schedule without a zone is evaluated in.
+func (s *Service) Timezone() string {
+	if s == nil || s.storage == nil {
+		return "UTC"
+	}
+	value, err := s.storage.GetE("timezone")
+	if err != nil || strings.TrimSpace(value) == "" {
+		return "UTC"
+	}
+	return strings.TrimSpace(value)
 }

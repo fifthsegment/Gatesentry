@@ -230,15 +230,25 @@
     }
   }
 
-  function actionLabel(action: string): string {
-    switch (action) {
-      case "block":
-        return "Blocked domains";
-      case "allow":
-        return "Allowed (exempt) domains";
-      default:
-        return "Domain rules";
+  // The policy view lists what the effective policy blocks and allows; a
+  // category is named the way the policies page names it.
+  function policySummary(policy: any): string {
+    if (!policy) return "";
+    const parts: string[] = [];
+    if (policy.blocked_categories?.length) {
+      parts.push(policy.blocked_categories.length + " blocked categor" + (policy.blocked_categories.length === 1 ? "y" : "ies"));
     }
+    if (policy.blocked_domains?.length) {
+      parts.push(policy.blocked_domains.length + " blocked domain" + (policy.blocked_domains.length === 1 ? "" : "s"));
+    }
+    if (policy.allowed_domains?.length) {
+      parts.push(policy.allowed_domains.length + " allowed domain" + (policy.allowed_domains.length === 1 ? "" : "s"));
+    }
+    if (policy.rule_count) {
+      parts.push(policy.rule_count + " rule" + (policy.rule_count === 1 ? "" : "s"));
+    }
+    if (policy.safe_search) parts.push("safe search");
+    return parts.length ? parts.join(", ") : "blocks nothing of its own";
   }
 </script>
 
@@ -274,32 +284,27 @@
       />
     </FormGroup>
 
-    <h5 style="margin-top: 1.5rem; margin-bottom: 0.5rem;"
-      >Policy group assignment</h5
-    >
+    <h5 style="margin-top: 1.5rem; margin-bottom: 0.5rem;">Policy</h5>
     <p class="section-note"
-      >Only an explicit group assignment changes filtering for this
-      device.</p
+      >A device without a policy of its own uses the default policy. Owner
+      and category above never change filtering.</p
     >
     {#if assignmentError}
       <div class="error-message">{assignmentError}</div>
     {/if}
     {#if assignmentSaved}
-      <div class="success-message">Assignment saved.</div>
+      <div class="success-message">Policy saved.</div>
     {/if}
     <div class="assignment-row">
       <div class="assignment-select">
         <Select
-          labelText="Assigned group"
+          labelText="Policy"
           helperText="Applies to DNS immediately; proxy paths use it when identity resolves."
           bind:selected={selectedGroup}
           disabled={assignmentSaving}
         >
-          <SelectItem
-            value=""
-            text="No group (default policy)"
-          />
-          {#each groups as group (group.id)}
+          <SelectItem value="" text="Default policy" />
+          {#each groups.filter((group) => group.id !== "default") as group (group.id)}
             <SelectItem value={group.id} text={group.name || group.id} />
           {/each}
         </Select>
@@ -310,7 +315,7 @@
         disabled={assignmentSaving}
         on:click={saveAssignment}
       >
-        {assignmentSaving ? "Saving…" : "Save assignment"}
+        {assignmentSaving ? "Saving…" : "Save policy"}
       </Button>
     </div>
 
@@ -331,22 +336,15 @@
         </Tag>
         <span>{policyView.coverage?.summary}</span>
       </div>
-      {#if policyView.assignment}
+      {#if policyView.effective_policy}
         <div class="effective-rules">
-          <span class="rules-label"
-            >{actionLabel(policyView.assignment.action)}:</span
-          >
-          {#each policyView.assignment.domains || [] as domain}
-            <Tag size="sm" type="outline">{domain}</Tag>
-          {/each}
-          <div class="inapplicable-note">
-            Not enforceable by DNS policy:
-            {(policyView.assignment.inapplicable_conditions || []).join(", ")}
-          </div>
-        </div>
-      {:else}
-        <div class="effective-rules">
-          No group is assigned — the gateway default policy applies.
+          <span class="rules-label">{policyView.effective_policy.name}:</span>
+          {policySummary(policyView.effective_policy)}
+          {#if policyView.effective_policy.default}
+            <div class="inapplicable-note">
+              No policy of its own is assigned, so the default policy applies.
+            </div>
+          {/if}
         </div>
       {/if}
       <ul class="caveat-list">
