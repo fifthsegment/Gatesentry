@@ -45,16 +45,48 @@ type affectedDevice struct {
 // ClientIP tally enriched with device names from discovery; addresses with no
 // known device keep their IP and an empty name so the count is not lost.
 type decisionSummaryResponse struct {
-	Window             string                           `json:"window"`
-	From               int64                            `json:"from"`
-	To                 int64                            `json:"to"`
-	Total              int                              `json:"total"`
-	ByAction           map[string]int                   `json:"by_action"`
-	ByLayer            map[string]int                   `json:"by_layer"`
-	TopBlockedDomains  []gatesentryLogger.DecisionCount `json:"top_blocked_domains"`
-	TopReasons         []gatesentryLogger.DecisionCount `json:"top_reasons"`
-	AffectedDevices    []affectedDevice                 `json:"affected_devices"`
-	InspectionFailures int                              `json:"inspection_failures"`
+	Window             string                            `json:"window"`
+	From               int64                             `json:"from"`
+	To                 int64                             `json:"to"`
+	Total              int                               `json:"total"`
+	ByAction           map[string]int                    `json:"by_action"`
+	ByLayer            map[string]int                    `json:"by_layer"`
+	TopBlockedDomains  []gatesentryLogger.DecisionCount  `json:"top_blocked_domains"`
+	TopReasons         []gatesentryLogger.DecisionCount  `json:"top_reasons"`
+	AffectedDevices    []affectedDevice                  `json:"affected_devices"`
+	InspectionFailures int                               `json:"inspection_failures"`
+	UniqueClients      int                               `json:"unique_clients"`
+	UniqueDomains      int                               `json:"unique_domains"`
+	TopDomains         []gatesentryLogger.DecisionCount  `json:"top_domains"`
+	BlocksByPolicy     []policyCount                     `json:"blocks_by_policy"`
+	Timeline           []gatesentryLogger.TimelineBucket `json:"timeline"`
+}
+
+// policyCount is a block tally for one policy, labelled with its name.
+type policyCount struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Count int    `json:"count"`
+}
+
+// namePolicies labels per-group block counts with the policy's current name,
+// keeping the ID when the policy no longer exists.
+func namePolicies(counts []gatesentryLogger.DecisionCount) []policyCount {
+	names := map[string]string{}
+	if svc := gatesentryDnsServer.GetPolicyService(); svc != nil {
+		for id, g := range svc.Snapshot().Groups {
+			names[id] = g.Name
+		}
+	}
+	out := make([]policyCount, 0, len(counts))
+	for _, c := range counts {
+		name := names[c.Key]
+		if name == "" {
+			name = c.Key
+		}
+		out = append(out, policyCount{ID: c.Key, Name: name, Count: c.Count})
+	}
+	return out
 }
 
 // hasDecisionFilter reports whether any narrowing query parameter was set, so
@@ -176,6 +208,15 @@ func GSApiDecisionSummaryGET(w http.ResponseWriter, r *http.Request, logger *gat
 	if !hasDecisionFilter(r) {
 		f.From = time.Now().Unix() - 7*24*3600
 	}
+	// "days" picks a recent window without the caller doing the arithmetic.
+	if raw := r.URL.Query().Get("days"); raw != "" {
+		days, err := strconv.Atoi(raw)
+		if err != nil || days < 1 || days > 30 {
+			http.Error(w, "{\"error\":\"days must be between 1 and 30\"}", http.StatusBadRequest)
+			return
+		}
+		f.From = time.Now().Unix() - int64(days)*24*3600
+	}
 	summary, err := logger.DecisionSummary(f)
 	if err != nil {
 		http.Error(w, "{\"error\":\"Unable to read decision summary\"}", http.StatusInternalServerError)
@@ -191,6 +232,11 @@ func GSApiDecisionSummaryGET(w http.ResponseWriter, r *http.Request, logger *gat
 		TopBlockedDomains:  summary.TopBlockedDomains,
 		TopReasons:         summary.TopReasons,
 		InspectionFailures: summary.InspectionFailures,
+		UniqueClients:      summary.UniqueClients,
+		UniqueDomains:      summary.UniqueDomains,
+		TopDomains:         summary.TopDomains,
+		BlocksByPolicy:     namePolicies(summary.BlocksByGroup),
+		Timeline:           summary.Timeline,
 	}
 	resp.AffectedDevices = enrichAffectedDevices(summary.AffectedAddresses)
 	w.Header().Set("Content-Type", "application/json")
@@ -213,21 +259,17 @@ func enrichAffectedDevices(addresses []gatesentryLogger.DecisionCount) []affecte
 	return out
 }
 
-// deviceNameForIPFromStore looks up the friendly device name for a client
-// address via the discovery store. It returns "" when no device is known or
-// the store is unavailable (e.g. DNS server not running in tests); the
-// caller keeps the IP so the count remains visible.
+// deviceNameForIPFromStore looks up the stable label for a client address.
+// Device labels prefer a MAC address, then a DNS hostname, then IPv4. If the
+// discovery store has no match, the observed address remains the fallback.
 func deviceNameForIPFromStore(ip string) string {
 	ds := gatesentryDnsServer.GetDeviceStore()
-	if ds == nil {
-		return ""
-	}
-	for _, d := range ds.GetAllDevices() {
-		if d.IPv4 == ip || d.IPv6 == ip {
+	if ds != nil {
+		if d := ds.FindDeviceByIP(ip); d != nil {
 			return d.GetDisplayName()
 		}
 	}
-	return ""
+	return ip
 }
 
 // parseUnixParam parses an optional unix-seconds query parameter. It returns

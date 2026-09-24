@@ -19,18 +19,14 @@ func (ds *DeviceStore) ObservePassiveQuery(clientIP string) {
 		return
 	}
 
-	existing := ds.FindDeviceByIP(clientIP)
-	if existing != nil {
-		ds.TouchDevice(existing.ID)
-		return
-	}
-
 	mac := LookupARPEntry(clientIP)
 
+	// Associate observations by the most stable identity available: MAC first,
+	// then an already-known address. Hostname-aware sources add the hostname
+	// fallback before reaching the address fallback.
 	if mac != "" {
 		existingByMAC := ds.FindDeviceByMAC(mac)
 		if existingByMAC != nil {
-			// Known device, new IP — update the address
 			if net.ParseIP(clientIP).To4() != nil {
 				ds.UpdateDeviceIP(existingByMAC.ID, clientIP, "")
 			} else {
@@ -40,6 +36,12 @@ func (ds *DeviceStore) ObservePassiveQuery(clientIP string) {
 				existingByMAC.GetDisplayName(), existingByMAC.IPv4, clientIP)
 			return
 		}
+	}
+
+	existing := ds.FindDeviceByIP(clientIP)
+	if existing != nil {
+		ds.TouchDevice(existing.ID)
+		return
 	}
 
 	// New device, unknown MAC — create a passive entry

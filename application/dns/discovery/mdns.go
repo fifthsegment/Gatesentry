@@ -260,19 +260,27 @@ func (b *MDNSBrowser) processEntry(entry *bonjour.ServiceEntry) {
 		return
 	}
 
-	// Try to find an existing device to enrich
-	var existing *Device
+	// Associate the observation using the most stable available identity:
+	// MAC address, then hostname, then the current IP address.
+	mac := ""
 	if ipv4 != "" {
-		existing = b.store.FindDeviceByIP(ipv4)
+		mac = LookupARPEntry(ipv4)
 	}
-	if existing == nil && ipv6 != "" {
-		existing = b.store.FindDeviceByIP(ipv6)
+	var existing *Device
+	if mac != "" {
+		existing = b.store.FindDeviceByMAC(mac)
 	}
 	if existing == nil && hostname != "" {
 		existing = b.store.FindDeviceByHostname(hostname)
 	}
 	if existing == nil && instanceName != "" {
 		existing = b.store.FindDeviceByHostname(instanceName)
+	}
+	if existing == nil && ipv4 != "" {
+		existing = b.store.FindDeviceByIP(ipv4)
+	}
+	if existing == nil && ipv6 != "" {
+		existing = b.store.FindDeviceByIP(ipv6)
 	}
 
 	// Build the device struct for upsert
@@ -310,12 +318,8 @@ func (b *MDNSBrowser) processEntry(entry *bonjour.ServiceEntry) {
 		}
 	}
 
-	// Attempt MAC lookup from ARP cache if we have an IPv4 address
-	if device.IPv4 != "" {
-		mac := LookupARPEntry(device.IPv4)
-		if mac != "" {
-			device.MACs = []string{mac}
-		}
+	if mac != "" {
+		device.MACs = []string{mac}
 	}
 
 	deviceID := b.store.UpsertDevice(device)

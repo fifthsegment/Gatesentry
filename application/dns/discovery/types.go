@@ -95,29 +95,30 @@ type Device struct {
 	Persistent bool `json:"persistent"`
 }
 
-// GetDisplayName returns the best available name for this device.
-// Priority: ManualName > first Hostname > first MDNSName > "Unknown (<MAC>)" > "Unknown (<IPv4>)"
+// GetDisplayName returns the most stable available label for this device.
+// A user-assigned name always wins. Automatic labels prefer MAC identity,
+// followed by a DNS hostname and finally the current IP address.
 func (d *Device) GetDisplayName() string {
 	if d.ManualName != "" {
 		return d.ManualName
 	}
-	if d.DisplayName != "" {
-		return d.DisplayName
+	if len(d.MACs) > 0 {
+		return d.MACs[0]
 	}
 	if len(d.Hostnames) > 0 {
 		return d.Hostnames[0]
 	}
+	if d.DNSName != "" {
+		return d.DNSName
+	}
 	if len(d.MDNSNames) > 0 {
 		return d.MDNSNames[0]
 	}
-	if len(d.MACs) > 0 {
-		return "Unknown (" + d.MACs[0] + ")"
-	}
 	if d.IPv4 != "" {
-		return "Unknown (" + d.IPv4 + ")"
+		return d.IPv4
 	}
 	if d.IPv6 != "" {
-		return "Unknown (" + d.IPv6 + ")"
+		return d.IPv6
 	}
 	return "Unknown"
 }

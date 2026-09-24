@@ -1,5 +1,19 @@
 # CHANGELOG
 
+## v2.2.1 (25 September 2026)
+
+### Home
+
+- Redesigned overview: status tiles for protection, devices, blocklist size and HTTPS inspection, a last-24-hours activity panel, setup progress and device connection details
+- Device identity uses MAC address first, then DNS hostname, then IPv4 when no stronger identity is available
+- Removed outdated explanatory text and unused instruction components
+
+### Stats
+
+- Stats now come from the decision log, with a 24 hour / 7 day window selector
+- New figures: block rate, active clients, distinct domains, inspection errors, requests over time, most requested domains, blocks by policy, and traffic by layer and outcome
+- `/decisions/summary` accepts `?days=N` and reports unique clients and domains, top domains, blocks by policy and an hourly/daily timeline
+
 ## v2.2.0 (24 September 2026)
 
 ### HTTPS inspection

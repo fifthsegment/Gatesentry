@@ -197,9 +197,9 @@ func TestDecisionSummaryGETReturnsCounts(t *testing.T) {
 	if body.AffectedDevices[0].IP != "192.0.2.10" || body.AffectedDevices[0].Count != 3 {
 		t.Fatalf("top affected = %+v, want 192.0.2.10 (3)", body.AffectedDevices[0])
 	}
-	// No device store is running in this test, so names are empty.
-	if body.AffectedDevices[0].Device != "" {
-		t.Fatalf("expected empty device name (no store), got %q", body.AffectedDevices[0].Device)
+	// Without a discovery match, the observed IPv4 address is the label.
+	if body.AffectedDevices[0].Device != "192.0.2.10" {
+		t.Fatalf("device name = %q, want IPv4 fallback", body.AffectedDevices[0].Device)
 	}
 }
 

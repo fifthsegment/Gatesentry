@@ -96,43 +96,40 @@ func TestReverseIPv6Invalid(t *testing.T) {
 // --- Device.GetDisplayName tests ---
 
 func TestDeviceGetDisplayName(t *testing.T) {
-	// ManualName takes priority
-	d := &Device{ManualName: "My Device", Hostnames: []string{"host1"}}
+	// A manual name is the only label that overrides stable identity.
+	d := &Device{ManualName: "My Device", MACs: []string{"aa:bb:cc:dd:ee:ff"}, Hostnames: []string{"host1"}}
 	if d.GetDisplayName() != "My Device" {
 		t.Errorf("Expected ManualName, got %q", d.GetDisplayName())
 	}
 
-	// DisplayName next
-	d = &Device{DisplayName: "Display", Hostnames: []string{"host1"}}
-	if d.GetDisplayName() != "Display" {
-		t.Errorf("Expected DisplayName, got %q", d.GetDisplayName())
+	// MAC address is the preferred automatic label.
+	d = &Device{DisplayName: "stale name", MACs: []string{"aa:bb:cc:dd:ee:ff"}, Hostnames: []string{"host1"}}
+	if d.GetDisplayName() != "aa:bb:cc:dd:ee:ff" {
+		t.Errorf("Expected MAC label, got %q", d.GetDisplayName())
 	}
 
-	// Hostname next
-	d = &Device{Hostnames: []string{"host1"}}
+	// A hostname is used when no MAC is known.
+	d = &Device{Hostnames: []string{"host1"}, IPv4: "192.168.1.1"}
 	if d.GetDisplayName() != "host1" {
 		t.Errorf("Expected hostname, got %q", d.GetDisplayName())
 	}
 
-	// mDNS name next
-	d = &Device{MDNSNames: []string{"printer._http._tcp"}}
+	// DNSName and mDNS names are hostname fallbacks.
+	d = &Device{DNSName: "printer", IPv4: "192.168.1.1"}
+	if d.GetDisplayName() != "printer" {
+		t.Errorf("Expected DNS name, got %q", d.GetDisplayName())
+	}
+	d = &Device{MDNSNames: []string{"printer._http._tcp"}, IPv4: "192.168.1.1"}
 	if d.GetDisplayName() != "printer._http._tcp" {
 		t.Errorf("Expected mDNS name, got %q", d.GetDisplayName())
 	}
 
-	// MAC fallback
-	d = &Device{MACs: []string{"aa:bb:cc:dd:ee:ff"}}
-	if d.GetDisplayName() != "Unknown (aa:bb:cc:dd:ee:ff)" {
-		t.Errorf("Expected MAC fallback, got %q", d.GetDisplayName())
-	}
-
-	// IPv4 fallback
+	// IPv4 is the final automatic fallback.
 	d = &Device{IPv4: "192.168.1.1"}
-	if d.GetDisplayName() != "Unknown (192.168.1.1)" {
+	if d.GetDisplayName() != "192.168.1.1" {
 		t.Errorf("Expected IPv4 fallback, got %q", d.GetDisplayName())
 	}
 
-	// Ultimate fallback
 	d = &Device{}
 	if d.GetDisplayName() != "Unknown" {
 		t.Errorf("Expected Unknown, got %q", d.GetDisplayName())
