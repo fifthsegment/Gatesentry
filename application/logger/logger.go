@@ -1,9 +1,14 @@
 package gatesentry2logger
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"log"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	gatesentryPolicy "bitbucket.org/abdullah_irfan/gatesentryf/policy"
@@ -11,14 +16,77 @@ import (
 	"github.com/tidwall/buntdb"
 )
 
-var Log_Entry_Expires = time.Second * 3600 * 24 * 7
-var Commit_Interval = time.Second * 60
+var Log_Entry_Expires = 7 * 24 * time.Hour
+
+const (
+	defaultQueueCapacity = 4096
+	defaultBatchSize     = 128
+	defaultFlushInterval = 100 * time.Millisecond
+	defaultEnqueueWait   = 10 * time.Millisecond
+	initialRetryDelay    = 10 * time.Millisecond
+	maximumRetryDelay    = time.Second
+)
+
+var ErrLoggerClosed = errors.New("logger is closed")
+
+// LoggerOptions controls the bounded asynchronous writer. Zero values use
+// defaults chosen for low-resource gateways.
+type LoggerOptions struct {
+	QueueCapacity int
+	BatchSize     int
+	FlushInterval time.Duration
+	EnqueueWait   time.Duration
+}
+
+// LoggerStats is a point-in-time health snapshot. It deliberately contains no
+// decision data. QueueDepth counts accepted decision entries still buffered in
+// the channel; it excludes control barriers and entries already in-flight.
+type LoggerStats struct {
+	Accepted    uint64 `json:"accepted"`
+	Persisted   uint64 `json:"persisted"`
+	Dropped     uint64 `json:"dropped"`
+	WriteErrors uint64 `json:"write_errors"`
+	QueueDepth  int64  `json:"queue_depth"`
+	LastError   string `json:"last_error,omitempty"`
+}
+
+type queuedEntry struct {
+	key   string
+	value string
+}
+
+type queueItem struct {
+	entry   *queuedEntry
+	barrier chan error
+}
 
 type Log struct {
-	Database *buntdb.DB
-	// DataCache
-	LastCommitTime time.Time
-	LogLocation    string
+	Database    *buntdb.DB
+	LogLocation string
+
+	queue         chan queueItem
+	batchSize     int
+	flushInterval time.Duration
+	enqueueWait   time.Duration
+	update        func(func(*buntdb.Tx) error) error
+
+	stateMu    sync.Mutex
+	producers  sync.WaitGroup
+	closed     bool
+	closeOnce  sync.Once
+	closeReady chan struct{}
+	done       chan struct{}
+	closeErr   error
+
+	queueDepth atomic.Int64
+
+	accepted     atomic.Uint64
+	persisted    atomic.Uint64
+	dropped      atomic.Uint64
+	writeErrors  atomic.Uint64
+	lastError    atomic.Value
+	lastWarn     atomic.Int64
+	lastDropWarn atomic.Int64
 }
 
 type LogEntry struct {
@@ -40,110 +108,366 @@ type LogEntry struct {
 	PolicyRevision int    `json:"policy_revision,omitempty"`
 }
 
-func (L *Log) Commit(tx *buntdb.Tx) {
-	dur := time.Since(L.LastCommitTime)
-	if dur > Commit_Interval {
-		log.Println("Performing a commit")
-		// tx.Commit();
-		L.LastCommitTime = time.Now()
-	}
-}
-
-func NewLogger(LogLocation string) *Log {
-	log.Println("Creating a new log file = " + LogLocation)
-	db, err := buntdb.Open(LogLocation)
+// NewLogger preserves the historical constructor. New code that needs to
+// handle initialization failure should use OpenLogger.
+func NewLogger(logLocation string) *Log {
+	l, err := OpenLogger(logLocation)
 	if err != nil {
-		log.Println("Gatesentry logger error" + err.Error())
-		log.Fatal(err)
+		log.Printf("Gatesentry logger initialization error: %v", err)
 		return nil
 	}
-	var config buntdb.Config
-	if err := db.ReadConfig(&config); err != nil {
-		log.Println("Gatesentry logger error" + err.Error())
-		log.Fatal(err)
-		return nil
-	}
-	config.SyncPolicy = buntdb.Never
-	if err := db.SetConfig(config); err != nil {
-		log.Println("Gatesentry logger error" + err.Error())
-		log.Fatal(err)
-		return nil
-	}
-	if err := db.ReadConfig(&config); err != nil {
-		log.Println("Gatesentry logger error" + err.Error())
-		log.Fatal(err)
-		return nil
-	}
-	// fmt.Println( config );
-	// if err != nil {
-	// 	log.Println("GS-LOGGER ERROR" + err.Error())
-	// }
-	db.CreateIndex("entries", "*", buntdb.IndexJSON("time"))
-	// defer db.Close()
-
-	l := &Log{}
-	l.Database = db
-	l.LogLocation = LogLocation
-	l.LastCommitTime = time.Now()
 	return l
 }
 
-func (L *Log) LogDNS(domain string, user string, responseType string) {
-	ip := user
-	// url:=url;
-	go func() {
-		now := time.Now()
-		secs := now.Unix()
-		_ = secs
+// OpenLogger creates a logger and reports initialization errors to its caller.
+func OpenLogger(logLocation string) (*Log, error) {
+	return OpenLoggerWithOptions(logLocation, LoggerOptions{})
+}
 
-		timestring := gatesentry2utils.Int64toString(secs)
-		logJson := `{"time": ` + timestring + `, "ip":"` + ip + `","url":"` + domain + `","type":"dns", "dnsResponseType":"` + responseType + `"}`
-		key := gatesentry2utils.RandomString(25) + timestring
+// OpenLoggerWithOptions creates a logger with bounded writer settings.
+func OpenLoggerWithOptions(logLocation string, options LoggerOptions) (*Log, error) {
+	if options.QueueCapacity <= 0 {
+		options.QueueCapacity = defaultQueueCapacity
+	}
+	if options.BatchSize <= 0 {
+		options.BatchSize = defaultBatchSize
+	}
+	if options.FlushInterval <= 0 {
+		options.FlushInterval = defaultFlushInterval
+	}
+	if options.EnqueueWait <= 0 {
+		options.EnqueueWait = defaultEnqueueWait
+	}
 
-		err := L.Database.Update(func(tx *buntdb.Tx) error {
-			_, _, err := tx.Set(key, logJson, &buntdb.SetOptions{Expires: true, TTL: Log_Entry_Expires})
-			L.Commit(tx)
+	db, err := buntdb.Open(logLocation)
+	if err != nil {
+		return nil, fmt.Errorf("open logger database: %w", err)
+	}
+	fail := func(err error) (*Log, error) {
+		_ = db.Close()
+		return nil, err
+	}
+	var config buntdb.Config
+	if err := db.ReadConfig(&config); err != nil {
+		return fail(fmt.Errorf("read logger database config: %w", err))
+	}
+	config.SyncPolicy = buntdb.EverySecond
+	if err := db.SetConfig(config); err != nil {
+		return fail(fmt.Errorf("set logger database config: %w", err))
+	}
+	if err := db.CreateIndex("entries", "*", buntdb.IndexJSON("time")); err != nil && !errors.Is(err, buntdb.ErrIndexExists) {
+		return fail(fmt.Errorf("create logger entries index: %w", err))
+	}
+
+	l := &Log{
+		Database:      db,
+		LogLocation:   logLocation,
+		queue:         make(chan queueItem, options.QueueCapacity),
+		batchSize:     options.BatchSize,
+		flushInterval: options.FlushInterval,
+		enqueueWait:   options.EnqueueWait,
+		update:        db.Update,
+		closeReady:    make(chan struct{}),
+		done:          make(chan struct{}),
+	}
+	go l.runWriter()
+	return l, nil
+}
+
+func (L *Log) runWriter() {
+	ticker := time.NewTicker(L.flushInterval)
+	defer ticker.Stop()
+	batch := make([]queuedEntry, 0, L.batchSize)
+
+	flush := func() error {
+		if len(batch) == 0 {
+			return nil
+		}
+		delay := initialRetryDelay
+		for {
+			err := L.update(func(tx *buntdb.Tx) error {
+				for i := range batch {
+					if _, _, err := tx.Set(batch[i].key, batch[i].value, &buntdb.SetOptions{Expires: true, TTL: Log_Entry_Expires}); err != nil {
+						return err
+					}
+				}
+				return nil
+			})
+			if err == nil {
+				L.persisted.Add(uint64(len(batch)))
+				batch = batch[:0]
+				return nil
+			}
+			L.recordWriteError(err)
+
+			time.Sleep(delay)
+			if delay < maximumRetryDelay {
+				delay *= 2
+				if delay > maximumRetryDelay {
+					delay = maximumRetryDelay
+				}
+			}
+		}
+	}
+
+	finish := func(writeErr error) {
+		if writeErr != nil {
+			// A terminal failure is only requested by Close. Wait until every
+			// producer admitted before Close has finished enqueueing before the
+			// final drain, so no accepted entry can land after the drain.
+			<-L.closeReady
+		}
+		// Unblock any Flush calls left behind a terminal write failure.
+		for {
+			select {
+			case item := <-L.queue:
+				if item.entry != nil {
+					L.decrementQueueDepth()
+				}
+				if item.barrier != nil {
+					item.barrier <- writeErr
+					close(item.barrier)
+				}
+			default:
+				closeErr := L.Database.Close()
+				if errors.Is(closeErr, buntdb.ErrDatabaseClosed) {
+					closeErr = nil
+				}
+				L.closeErr = errors.Join(writeErr, closeErr)
+				close(L.done)
+				return
+			}
+		}
+	}
+
+	process := func(item queueItem) error {
+		if item.entry != nil {
+			L.decrementQueueDepth()
+			batch = append(batch, *item.entry)
+			if len(batch) >= L.batchSize {
+				if err := flush(); err != nil {
+					return err
+				}
+			}
+		}
+		if item.barrier != nil {
+			err := flush()
+			item.barrier <- err
+			close(item.barrier)
 			return err
-		})
-		// fmt.Println( err );
-		_ = err
-	}()
+		}
+		return nil
+	}
+
+	for {
+		select {
+		case item := <-L.queue:
+			if err := process(item); err != nil {
+				finish(err)
+				return
+			}
+		case <-ticker.C:
+			if err := flush(); err != nil {
+				finish(err)
+				return
+			}
+		case <-L.closeReady:
+			// No producer can enqueue after closeReady. Drain in FIFO order before
+			// persisting the final partial batch and closing the database.
+			for {
+				select {
+				case item := <-L.queue:
+					if err := process(item); err != nil {
+						finish(err)
+						return
+					}
+				default:
+					finish(flush())
+					return
+				}
+			}
+		}
+	}
+}
+
+func (L *Log) decrementQueueDepth() {
+	L.queueDepth.Add(-1)
+}
+
+func (L *Log) recordWriteError(err error) {
+	L.writeErrors.Add(1)
+	L.lastError.Store(err.Error())
+	now := time.Now().Unix()
+	last := L.lastWarn.Load()
+	if now > last && L.lastWarn.CompareAndSwap(last, now) {
+		log.Printf("Gatesentry logger write failed; retrying (errors=%d): %v", L.writeErrors.Load(), err)
+	}
+}
+
+func (L *Log) recordDrop(reason string) {
+	dropped := L.dropped.Add(1)
+	now := time.Now().Unix()
+	last := L.lastDropWarn.Load()
+	if now > last && L.lastDropWarn.CompareAndSwap(last, now) {
+		log.Printf("Gatesentry logger dropped an entry (%s; total dropped=%d)", reason, dropped)
+	}
+}
+
+func (L *Log) enqueue(entry LogEntry) bool {
+	if L == nil || L.Database == nil {
+		return false
+	}
+	encoded, err := json.Marshal(entry)
+	if err != nil {
+		L.recordDrop("encoding failed")
+		L.lastError.Store(err.Error())
+		return false
+	}
+	item := queueItem{entry: &queuedEntry{
+		key:   gatesentry2utils.RandomString(25) + gatesentry2utils.Int64toString(entry.Time),
+		value: string(encoded),
+	}}
+
+	L.stateMu.Lock()
+	if L.closed {
+		L.stateMu.Unlock()
+		L.recordDrop("logger closed")
+		return false
+	}
+	L.producers.Add(1)
+	L.stateMu.Unlock()
+	defer L.producers.Done()
+
+	select {
+	case L.queue <- item:
+		L.queueDepth.Add(1)
+		L.accepted.Add(1)
+		return true
+	default:
+	}
+
+	timer := time.NewTimer(L.enqueueWait)
+	defer timer.Stop()
+	select {
+	case L.queue <- item:
+		L.queueDepth.Add(1)
+		L.accepted.Add(1)
+		return true
+	case <-timer.C:
+		L.recordDrop("queue full")
+		return false
+	}
+}
+
+// Stats returns counters for queue health and durable writes.
+func (L *Log) Stats() LoggerStats {
+	if L == nil {
+		return LoggerStats{}
+	}
+	queueDepth := L.queueDepth.Load()
+	if queueDepth < 0 {
+		queueDepth = 0
+	}
+	stats := LoggerStats{
+		Accepted:    L.accepted.Load(),
+		Persisted:   L.persisted.Load(),
+		Dropped:     L.dropped.Load(),
+		WriteErrors: L.writeErrors.Load(),
+		QueueDepth:  queueDepth,
+	}
+	if value := L.lastError.Load(); value != nil {
+		stats.LastError, _ = value.(string)
+	}
+	return stats
+}
+
+// Flush waits until every entry accepted before this call is durably handed to
+// BuntDB. Entries accepted after the barrier may remain queued.
+func (L *Log) Flush(ctx context.Context) error {
+	if L == nil || L.Database == nil {
+		return nil
+	}
+	barrier := make(chan error, 1)
+	L.stateMu.Lock()
+	if L.closed {
+		L.stateMu.Unlock()
+		select {
+		case <-L.done:
+			return L.closeErr
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	select {
+	case L.queue <- queueItem{barrier: barrier}:
+		L.stateMu.Unlock()
+	case <-ctx.Done():
+		L.stateMu.Unlock()
+		return ctx.Err()
+	}
+	select {
+	case err := <-barrier:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// Close stops admission, drains accepted entries, closes BuntDB, and is safe
+// to call repeatedly. If ctx expires, draining continues in the background and
+// a later Close can wait for the same shutdown.
+func (L *Log) Close(ctx context.Context) error {
+	if L == nil || L.Database == nil {
+		return nil
+	}
+	L.closeOnce.Do(func() {
+		L.stateMu.Lock()
+		L.closed = true
+		L.stateMu.Unlock()
+		go func() {
+			L.producers.Wait()
+			close(L.closeReady)
+		}()
+	})
+	select {
+	case <-L.done:
+		return L.closeErr
+	case <-ctx.Done():
+		// The caller stops waiting, but the writer keeps every accepted entry
+		// and continues draining in the background. A later Close can wait for
+		// the same shutdown without turning a timeout into data loss.
+		return ctx.Err()
+	}
+}
+
+func (L *Log) LogDNS(domain string, user string, responseType string) {
+	if L == nil {
+		return
+	}
+	L.enqueue(LogEntry{
+		Time:            time.Now().Unix(),
+		IP:              user,
+		URL:             domain,
+		Type:            "dns",
+		DNSResponseType: responseType,
+	})
 }
 
 func (L *Log) LogProxy(url string, user string, actionType string) {
-	ip := user
-	// url:=url;
-	go func() {
-		now := time.Now()
-		secs := now.Unix()
-		_ = secs
-		// logitem := "[GS-Logger] " + ctx.Req.RemoteAddr + " - " + ctx.Req.URL.String();
-
-		timestring := gatesentry2utils.Int64toString(secs)
-		logJson := `{"time": ` + timestring + `, "ip":"` + ip + `","url":"` + url + `", "type":"proxy", "proxyResponseType":"` + actionType + `"}`
-		key := gatesentry2utils.RandomString(25) + timestring
-		// fmt.Println( logJson );
-
-		err := L.Database.Update(func(tx *buntdb.Tx) error {
-			_, _, err := tx.Set(key, logJson, &buntdb.SetOptions{Expires: true, TTL: Log_Entry_Expires})
-			L.Commit(tx)
-			return err
-		})
-		// fmt.Println( err );
-		_ = err
-	}()
-
+	if L == nil {
+		return
+	}
+	L.enqueue(LogEntry{
+		Time:              time.Now().Unix(),
+		IP:                user,
+		URL:               url,
+		Type:              "proxy",
+		ProxyResponseType: actionType,
+	})
 }
 
-// LogDecision records a structured filtering decision. It is the canonical
-// PER-36 path: every DNS, proxy, and content enforcement point builds a
-// policy.Decision and hands it here. The decision is flattened into a
-// LogEntry so the existing log, stats, and device-activity queries keep
-// reading it, and stored asynchronously like LogDNS/LogProxy.
-//
-// Legacy compatibility: ResponseType is written to DNSResponseType (DNS) or
-// ProxyResponseType (proxy/content) so viewers that filter on the native
-// outcome label are unaffected. New viewers read Action/Layer/MatchedRule.
+// LogDecision records a structured filtering decision. It preserves the
+// existing JSON schema and native DNS/proxy response fields.
 func (L *Log) LogDecision(d gatesentryPolicy.Decision) {
 	if L == nil || L.Database == nil {
 		return
@@ -169,27 +493,11 @@ func (L *Log) LogDecision(d gatesentryPolicy.Decision) {
 	case gatesentryPolicy.LayerDNS:
 		entry.Type = "dns"
 		entry.DNSResponseType = d.ResponseType
-	case gatesentryPolicy.LayerExplicitProxy, gatesentryPolicy.LayerTransparentProxy, gatesentryPolicy.LayerContent:
-		entry.Type = "proxy"
-		entry.ProxyResponseType = d.ResponseType
 	default:
 		entry.Type = "proxy"
 		entry.ProxyResponseType = d.ResponseType
 	}
-	go func() {
-		logJson, err := json.Marshal(entry)
-		if err != nil {
-			log.Println("Gatesentry logger LogDecision marshal error: " + err.Error())
-			return
-		}
-		key := gatesentry2utils.RandomString(25) + gatesentry2utils.Int64toString(entry.Time)
-		err = L.Database.Update(func(tx *buntdb.Tx) error {
-			_, _, err := tx.Set(key, string(logJson), &buntdb.SetOptions{Expires: true, TTL: Log_Entry_Expires})
-			L.Commit(tx)
-			return err
-		})
-		_ = err
-	}()
+	L.enqueue(entry)
 }
 
 func (L *Log) GetLog() string {

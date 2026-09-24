@@ -132,6 +132,7 @@ func GetExternalResolver() string {
 var server *dns.Server        // UDP server
 var tcpServer *dns.Server     // TCP server for large queries (>512 bytes)
 var serverRunning atomic.Bool // Thread-safe flag for server state
+var serverLifecycleMu sync.Mutex
 var restartDnsSchedulerChan chan bool
 
 // deviceStore is the central device inventory and DNS record store.
@@ -477,12 +478,26 @@ func localZones(setting string) []string {
 }
 
 func StartDNSServer(basePath string, ilogger *gatesentryLogger.Log, blockedLists []string, settings *gatesentry2storage.MapStore, devices *gatesentry2storage.MapStore, dnsinfo *gatesentryTypes.DnsServerInfo) {
+	StartDNSServerWithReady(basePath, ilogger, blockedLists, settings, devices, dnsinfo, nil)
+}
 
+// StartDNSServerWithReady closes ready after the listener handles are published,
+// allowing a controller to stop and join this blocking server safely.
+func StartDNSServerWithReady(basePath string, ilogger *gatesentryLogger.Log, blockedLists []string, settings *gatesentry2storage.MapStore, devices *gatesentry2storage.MapStore, dnsinfo *gatesentryTypes.DnsServerInfo, ready chan<- struct{}) {
+	serverLifecycleMu.Lock()
 	if server != nil || serverRunning.Load() {
+		serverLifecycleMu.Unlock()
+		if ready != nil {
+			close(ready)
+		}
 		fmt.Println("DNS server is already running")
-		restartDnsSchedulerChan <- true
+		RequestBlocklistRefresh()
 		return
 	}
+	// Publish startup before doing any listener setup. StopDNSServer takes the
+	// same lock, so shutdown cannot observe a stopped server and then race past
+	// listener creation.
+	serverRunning.Store(true)
 	StartPolicyEnforcement(basePath, blockedLists, settings, devices, dnsinfo)
 	logger = ilogger
 	logsPath = basePath + logsPath
@@ -550,7 +565,6 @@ func StartDNSServer(basePath string, ilogger *gatesentryLogger.Log, blockedLists
 		log.Println("[DDNS] Dynamic DNS updates disabled")
 	}
 
-	serverRunning.Store(true)
 	// go PrintQueryLogsPeriodically()
 	// Listen for incoming DNS requests on configured address:port (default: 0.0.0.0:53)
 	// Use net.JoinHostPort to properly handle IPv6 addresses (adds brackets)
@@ -560,40 +574,55 @@ func StartDNSServer(basePath string, ilogger *gatesentryLogger.Log, blockedLists
 	// TCP is required for DNSSEC, large TXT records, zone transfers, etc.
 	// MsgAcceptFunc is overridden to accept UPDATE opcode (default rejects it).
 	// TsigSecret enables server-level TSIG verification for DDNS.
-	tcpServer = &dns.Server{
+	tcp := &dns.Server{
 		Addr:          bindAddr,
 		Net:           "tcp",
 		MsgAcceptFunc: ddnsMsgAcceptFunc,
 		TsigSecret:    tsigSecrets,
 	}
-	tcpServer.Handler = dns.HandlerFunc(handleDNSRequest)
+	tcp.Handler = dns.HandlerFunc(handleDNSRequest)
+	tcpServer = tcp
 	go func() {
 		fmt.Printf("DNS forwarder listening on %s (TCP). Handles large queries >512 bytes.\n", bindAddr)
-		if err := tcpServer.ListenAndServe(); err != nil {
+		if err := tcp.ListenAndServe(); err != nil {
 			log.Printf("[DNS] TCP server error: %v", err)
 		}
 	}()
 
 	// Start UDP server (blocks)
-	server = &dns.Server{
+	udp := &dns.Server{
 		Addr:          bindAddr,
 		Net:           "udp",
 		MsgAcceptFunc: ddnsMsgAcceptFunc,
 		TsigSecret:    tsigSecrets,
 	}
-	server.Handler = dns.HandlerFunc(handleDNSRequest)
-
-	fmt.Printf("DNS forwarder listening on %s (UDP). Local IP: %s. External resolver: %s\n", bindAddr, localIp, externalResolver)
-	err := server.ListenAndServe()
-	if err != nil {
-		fmt.Println(err)
-		// os.Exit(1)
-		return
+	udp.Handler = dns.HandlerFunc(handleDNSRequest)
+	server = udp
+	serverLifecycleMu.Unlock()
+	if ready != nil {
+		close(ready)
 	}
 
+	fmt.Printf("DNS forwarder listening on %s (UDP). Local IP: %s. External resolver: %s\n", bindAddr, localIp, externalResolver)
+	err := udp.ListenAndServe()
+	serverLifecycleMu.Lock()
+	if server == udp {
+		server = nil
+		serverRunning.Store(false)
+		if tcpServer == tcp {
+			_ = tcp.Shutdown()
+			tcpServer = nil
+		}
+	}
+	serverLifecycleMu.Unlock()
+	if err != nil {
+		fmt.Println(err)
+	}
 }
 
 func StopDNSServer() {
+	serverLifecycleMu.Lock()
+	defer serverLifecycleMu.Unlock()
 	if server == nil || !serverRunning.Load() {
 		fmt.Println("DNS server is already stopped")
 		return

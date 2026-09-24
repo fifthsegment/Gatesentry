@@ -1,6 +1,7 @@
 package gatesentryWebserverEndpoints
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -15,7 +16,7 @@ import (
 func newDecisionsTestLogger(t *testing.T) *gatesentryLogger.Log {
 	t.Helper()
 	l := gatesentryLogger.NewLogger(t.TempDir() + "/decisions.db")
-	t.Cleanup(func() { _ = l.Database.Close() })
+	t.Cleanup(func() { _ = l.Close(context.Background()) })
 	return l
 }
 

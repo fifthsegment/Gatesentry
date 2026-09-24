@@ -1,6 +1,7 @@
 package gatesentry2logger
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -33,13 +34,16 @@ func newTestLogDecision(t *testing.T) *Log {
 	seed(gatesentryPolicy.ActionDecisionBypass, gatesentryPolicy.LayerDNS, "exc.example", "192.0.2.10", "kids", "exception", "exception domain", now-2)
 	// An inspection failure (error) to exercise InspectionFailures.
 	seed(gatesentryPolicy.ActionDecisionError, gatesentryPolicy.LayerContent, "broken.example", "192.0.2.20", "", "filter", "filter error", now-1)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := l.Flush(ctx); err != nil {
+		t.Fatalf("flush seeded decisions: %v", err)
+	}
 	return l
 }
 
 func TestQueryDecisionsFiltersByAction(t *testing.T) {
 	l := newTestLogDecision(t)
-	// LogDecision writes asynchronously; wait briefly for records.
-	time.Sleep(150 * time.Millisecond)
 	entries, err := l.QueryDecisions(DecisionFilter{Action: string(gatesentryPolicy.ActionDecisionBlock)})
 	if err != nil {
 		t.Fatalf("query: %v", err)
@@ -56,7 +60,6 @@ func TestQueryDecisionsFiltersByAction(t *testing.T) {
 
 func TestQueryDecisionsFiltersByLayerAndGroup(t *testing.T) {
 	l := newTestLogDecision(t)
-	time.Sleep(150 * time.Millisecond)
 	entries, err := l.QueryDecisions(DecisionFilter{Layer: string(gatesentryPolicy.LayerDNS), GroupID: "kids"})
 	if err != nil {
 		t.Fatalf("query: %v", err)
@@ -69,7 +72,6 @@ func TestQueryDecisionsFiltersByLayerAndGroup(t *testing.T) {
 
 func TestQueryDecisionsFiltersByDomainAndReason(t *testing.T) {
 	l := newTestLogDecision(t)
-	time.Sleep(150 * time.Millisecond)
 	entries, err := l.QueryDecisions(DecisionFilter{Domain: "ads.example", Reason: "blocklist"})
 	if err != nil {
 		t.Fatalf("query: %v", err)
@@ -81,7 +83,6 @@ func TestQueryDecisionsFiltersByDomainAndReason(t *testing.T) {
 
 func TestQueryDecisionsRespectsLimitAndOffset(t *testing.T) {
 	l := newTestLogDecision(t)
-	time.Sleep(150 * time.Millisecond)
 	all, err := l.QueryDecisions(DecisionFilter{})
 	if err != nil {
 		t.Fatalf("query: %v", err)
@@ -105,7 +106,6 @@ func TestQueryDecisionsRespectsLimitAndOffset(t *testing.T) {
 
 func TestQueryDecisionsEnforcesMaxLimit(t *testing.T) {
 	l := newTestLogDecision(t)
-	time.Sleep(150 * time.Millisecond)
 	page, err := l.QueryDecisions(DecisionFilter{Limit: 99999})
 	if err != nil {
 		t.Fatalf("query: %v", err)
@@ -117,7 +117,6 @@ func TestQueryDecisionsEnforcesMaxLimit(t *testing.T) {
 
 func TestDecisionSummaryAggregatesCounts(t *testing.T) {
 	l := newTestLogDecision(t)
-	time.Sleep(150 * time.Millisecond)
 	s, err := l.DecisionSummary(DecisionFilter{})
 	if err != nil {
 		t.Fatalf("summary: %v", err)
@@ -144,7 +143,6 @@ func TestDecisionSummaryAggregatesCounts(t *testing.T) {
 
 func TestDecisionSummaryAffectedAddresses(t *testing.T) {
 	l := newTestLogDecision(t)
-	time.Sleep(150 * time.Millisecond)
 	s, err := l.DecisionSummary(DecisionFilter{})
 	if err != nil {
 		t.Fatalf("summary: %v", err)
@@ -182,7 +180,6 @@ func TestDecisionSummaryNilLogger(t *testing.T) {
 
 func TestDecisionSummaryReportsReachAndTimeline(t *testing.T) {
 	l := newTestLogDecision(t)
-	time.Sleep(150 * time.Millisecond)
 	now := time.Now().Unix()
 	s, err := l.DecisionSummary(DecisionFilter{From: now - 86400})
 	if err != nil {

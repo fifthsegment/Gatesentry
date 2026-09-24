@@ -1,8 +1,10 @@
 package gatesentryf
 
 import (
+	"context"
 	"fmt"
 	"log"
+	"time"
 
 	"github.com/kardianos/service"
 )
@@ -83,14 +85,22 @@ func (p *program) run() error {
 		case <-p.exit:
 			// fmt.Println("Stop signal received")
 			// log.Println("Stopping GateSentry")
-			Stop()
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			if err := Stop(ctx); err != nil {
+				log.Printf("GateSentry shutdown error: %v", err)
+			}
 			return nil
 		}
 	}
 }
 func (p *program) Stop(s service.Service) error {
 	fmt.Println("Stopping GateSentry")
-	Stop()
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := Stop(ctx); err != nil {
+		return err
+	}
 	close(p.exit)
 	return nil
 }

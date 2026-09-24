@@ -2,6 +2,7 @@ package gatesentryWebserverEndpoints
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -36,7 +37,7 @@ func devicePolicyTestSetup(t *testing.T) (func(), *gatesentryLogger.Log) {
 
 	log := gatesentryLogger.NewLogger(t.TempDir() + "/device-activity.db")
 	return func() {
-		_ = log.Database.Close()
+		_ = log.Close(context.Background())
 		gatesentryDnsServer.SetDeviceStoreForTests(originalDevices)
 		cleanupPolicy()
 	}, log
@@ -366,7 +367,9 @@ func TestDevicePolicyEndpointsUnavailableWithoutDependencies(t *testing.T) {
 		t.Fatalf("policy without device store status = %d", recorder.Code)
 	}
 	req, recorder = deviceRequest(http.MethodGet, "/api/devices/device-1/activity", "device-1", "", "")
-	GSApiDeviceActivityGet(recorder, req, gatesentryLogger.NewLogger(t.TempDir()+"/activity-503.db"))
+	activityLogger := gatesentryLogger.NewLogger(t.TempDir() + "/activity-503.db")
+	t.Cleanup(func() { _ = activityLogger.Close(context.Background()) })
+	GSApiDeviceActivityGet(recorder, req, activityLogger)
 	if recorder.Code != http.StatusServiceUnavailable {
 		t.Fatalf("activity without device store status = %d", recorder.Code)
 	}

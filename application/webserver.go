@@ -2,36 +2,17 @@ package gatesentryf
 
 import (
 	"fmt"
-	"net"
+	"net/http"
 	"strconv"
-	"time"
 
 	gatesentry2storage "bitbucket.org/abdullah_irfan/gatesentryf/storage"
 	gatesentryWebserver "bitbucket.org/abdullah_irfan/gatesentryf/webserver"
 	gatesentryWebserverTypes "bitbucket.org/abdullah_irfan/gatesentryf/webserver/types"
 )
 
-func GSwebserverStart(port int) {
-
+func webServerHandler(port int) (http.Handler, error) {
 	GSWebServerPort := port
 	ggport := strconv.Itoa(GSWebServerPort)
-	t := time.NewTicker(time.Second * 10)
-	portavailable := false
-	for {
-		fmt.Println("Checking if port is available")
-		ln, err := net.Listen("tcp", ":"+ggport)
-		if err != nil {
-			fmt.Println("Port is not open for webserver")
-		} else {
-			portavailable = true
-			err = ln.Close()
-		}
-
-		if portavailable {
-			break
-		}
-		<-t.C
-	}
 
 	basePath := GetBasePath()
 	fmt.Println("Webserver is listening on : " + ggport + " (base path: " + basePath + ")")
@@ -39,8 +20,7 @@ func GSwebserverStart(port int) {
 	var err error
 	R.GSWebSettings, err = gatesentry2storage.OpenMapStore("GSWebSettings", true)
 	if err != nil {
-		fmt.Printf("Unable to open web settings: %v\n", err)
-		return
+		return nil, fmt.Errorf("open web settings: %w", err)
 	}
 
 	runtimeArgs := gatesentryWebserverTypes.InputArgs{
@@ -60,9 +40,7 @@ func GSwebserverStart(port int) {
 	}
 	runtime := gatesentryWebserverTypes.NewTemporaryRuntime(runtimeArgs)
 
-	// gatesentryWebserver.RegisterEndpoints(app, settings, &R.Filters, R.Logger, runtime, R.BoundAddress)
-
-	if err := gatesentryWebserver.RegisterEndpointsStartServer(
+	return gatesentryWebserver.RegisterEndpointsHandler(
 		&R.Filters,
 		runtime,
 		R.Logger,
@@ -73,9 +51,5 @@ func GSwebserverStart(port int) {
 		basePath,
 		R.GSDevices,
 		GSBASEDIR,
-	); err != nil {
-		fmt.Printf("Webserver stopped: %v\n", err)
-	}
-
-	// app.Listen(":" + strconv.Itoa(GSWebServerPort))
+	)
 }

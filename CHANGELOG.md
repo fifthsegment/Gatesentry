@@ -1,5 +1,19 @@
 # CHANGELOG
 
+## v2.2.2 (24 September 2026)
+
+### Performance
+
+- Proxy forwarding now counts transferred bytes without retaining complete downloads in memory, including direct HTTPS tunnels
+- Responses use one bounded inspection buffer; known oversized and non-inspectable responses stream directly, while oversized unknown-length responses preserve prefix and remainder order
+- Decision logging now uses a bounded queue and batched database transactions with brief backpressure, observable drop and persistence counters, and substantially fewer allocations
+
+### Reliability
+
+- Graceful shutdown drains accepted decision logs and coordinates the web, DNS, transparent proxy, policy, and Bonjour lifecycles
+- Response forwarding now preserves bodyless and range semantics, avoids scanning encoded payloads, strips stale representation and hop-by-hop headers, and handles upstream read failures before committing a response
+- Added response-boundary, streaming, logger batching, saturation, retry, flush, close, and lifecycle regression coverage
+
 ## v2.2.1 (25 September 2026)
 
 ### Home

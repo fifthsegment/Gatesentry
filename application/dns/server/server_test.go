@@ -1,6 +1,7 @@
 package gatesentryDnsServer
 
 import (
+	"context"
 	"net"
 	"testing"
 	"time"
@@ -70,6 +71,7 @@ func setupTestServer(t *testing.T) func() {
 
 	// Return cleanup function
 	return func() {
+		_ = logger.Close(context.Background())
 		deviceStore = origDeviceStore
 		logger = origLogger
 		blockedDomains = origBlocked

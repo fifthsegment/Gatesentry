@@ -1,6 +1,7 @@
 package gatesentry2logger
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 	"time"
@@ -8,26 +9,24 @@ import (
 	gatesentryPolicy "bitbucket.org/abdullah_irfan/gatesentryf/policy"
 )
 
-// pollLogDecision waits briefly for the async LogDecision goroutine to
-// persist a decision record, then returns the matching LogEntry.
-func pollLogDecision(t *testing.T, l *Log, url string) LogEntry {
+func persistedLogDecision(t *testing.T, l *Log, url string) LogEntry {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		entries, err := l.GetDeviceActivity([]string{"192.0.2.50"}, 60, 50)
-		if err != nil {
-			t.Fatalf("read activity: %v", err)
-		}
-		for _, e := range entries {
-			if e.URL == url {
-				return e
-			}
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("LogDecision record for %s never appeared", url)
-		}
-		time.Sleep(10 * time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := l.Flush(ctx); err != nil {
+		t.Fatalf("flush decision: %v", err)
 	}
+	entries, err := l.GetDeviceActivity([]string{"192.0.2.50"}, 60, 50)
+	if err != nil {
+		t.Fatalf("read activity: %v", err)
+	}
+	for _, entry := range entries {
+		if entry.URL == url {
+			return entry
+		}
+	}
+	t.Fatalf("LogDecision record for %s never appeared", url)
+	return LogEntry{}
 }
 
 func TestLogDecisionStoresFullProvenance(t *testing.T) {
@@ -45,7 +44,7 @@ func TestLogDecisionStoresFullProvenance(t *testing.T) {
 	d.Reason = "global blocklist"
 
 	l.LogDecision(d)
-	entry := pollLogDecision(t, l, "blocked.example")
+	entry := persistedLogDecision(t, l, "blocked.example")
 
 	if entry.Type != "dns" {
 		t.Fatalf("type = %s, want dns", entry.Type)
@@ -92,7 +91,7 @@ func TestLogDecisionProxyLayerWritesProxyType(t *testing.T) {
 	d.ResponseType = "blocked_url"
 
 	l.LogDecision(d)
-	entry := pollLogDecision(t, l, "http://ads.example/banner")
+	entry := persistedLogDecision(t, l, "http://ads.example/banner")
 
 	if entry.Type != "proxy" {
 		t.Fatalf("type = %s, want proxy", entry.Type)
@@ -119,7 +118,7 @@ func TestLogDecisionNilGuard(t *testing.T) {
 func TestLegacyLogDNSStillParses(t *testing.T) {
 	l := newActivityTestLogger(t)
 	l.LogDNS("forward.example", "192.0.2.50", "forward")
-	entry := pollLogDecision(t, l, "forward.example")
+	entry := persistedLogDecision(t, l, "forward.example")
 
 	if entry.Type != "dns" {
 		t.Fatalf("type = %s, want dns", entry.Type)
@@ -146,7 +145,7 @@ func TestLogDecisionStoresValidJSON(t *testing.T) {
 	d.ResponseType = "ssldirect"
 
 	l.LogDecision(d)
-	entry := pollLogDecision(t, l, "https://cdn.example/resource")
+	entry := persistedLogDecision(t, l, "https://cdn.example/resource")
 
 	// Re-marshal the entry to confirm it round-trips cleanly.
 	raw, err := json.Marshal(entry)

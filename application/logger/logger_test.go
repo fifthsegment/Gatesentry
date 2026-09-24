@@ -1,6 +1,7 @@
 package gatesentry2logger
 
 import (
+	"context"
 	"fmt"
 	"testing"
 	"time"
@@ -10,8 +11,17 @@ import (
 
 func newActivityTestLogger(t *testing.T) *Log {
 	t.Helper()
-	l := NewLogger(t.TempDir() + "/activity.db")
-	t.Cleanup(func() { _ = l.Database.Close() })
+	l, err := OpenLogger(t.TempDir() + "/activity.db")
+	if err != nil {
+		t.Fatalf("open logger: %v", err)
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		if err := l.Close(ctx); err != nil {
+			t.Errorf("close logger: %v", err)
+		}
+	})
 	return l
 }
 

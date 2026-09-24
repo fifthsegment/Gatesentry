@@ -186,7 +186,7 @@ func registerTailscaleRoutes(server *GsWeb, authenticationMiddleware mux.Middlew
 	})
 }
 
-func RegisterEndpointsStartServer(
+func RegisterEndpointsHandler(
 	Filters *[]gatesentryFilters.GSFilter,
 	runtime *gatesentryWebserverTypes.TemporaryRuntime,
 	logger *gatesentry2logger.Log,
@@ -197,10 +197,10 @@ func RegisterEndpointsStartServer(
 	basePath string,
 	devices *gatesentry2storage.MapStore,
 	dataDir string,
-) error {
+) (http.Handler, error) {
 	auth, err := NewAuthManager(internalSettings, os.Getenv("GATESENTRY_BOOTSTRAP_FILE"))
 	if err != nil {
-		return fmt.Errorf("initialize administrator authentication: %w", err)
+		return nil, fmt.Errorf("initialize administrator authentication: %w", err)
 	}
 	// First-run setup accepts the first client that reaches the dashboard. Keep
 	// that window visible in the startup log so operators finish setup promptly
@@ -711,6 +711,24 @@ func RegisterEndpointsStartServer(
 	internalServer.Get("/devices", baseIndexHandler)
 	internalServer.Get("/ai", baseIndexHandler)
 
-	return internalServer.ListenAndServe(":" + port)
+	return internalServer.Handler(), nil
+}
 
+func RegisterEndpointsStartServer(
+	Filters *[]gatesentryFilters.GSFilter,
+	runtime *gatesentryWebserverTypes.TemporaryRuntime,
+	logger *gatesentry2logger.Log,
+	dnsServerInfo *gatesentryTypes.DnsServerInfo,
+	boundAddress *string,
+	port string,
+	internalSettings *gatesentry2storage.MapStore,
+	basePath string,
+	devices *gatesentry2storage.MapStore,
+	dataDir string,
+) error {
+	handler, err := RegisterEndpointsHandler(Filters, runtime, logger, dnsServerInfo, boundAddress, port, internalSettings, basePath, devices, dataDir)
+	if err != nil {
+		return err
+	}
+	return http.ListenAndServe(":"+port, handler)
 }

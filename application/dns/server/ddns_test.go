@@ -1,6 +1,7 @@
 package gatesentryDnsServer
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"testing"
@@ -64,6 +65,7 @@ func setupDDNSTestServer(t *testing.T) func() {
 	logger = gatesentryLogger.NewLogger(t.TempDir() + "/test.db")
 
 	return func() {
+		_ = logger.Close(context.Background())
 		deviceStore = origDeviceStore
 		logger = origLogger
 		blockedDomains = origBlocked
