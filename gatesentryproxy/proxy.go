@@ -296,7 +296,10 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// URL path and not just the host.
 	policy := CheckProxyRules(requestHost, user, client)
 	passthru.Policy = policy
-	if policy != nil && (policy.Block || policy.BlocksURL(r.URL.String())) {
+	// A CONNECT names only host:port, so URL patterns wait for the decrypted
+	// requests inside the tunnel instead of matching the tunnel itself.
+	urlBlocked := r.Method != "CONNECT" && policy.BlocksURL(r.URL.String())
+	if policy != nil && (policy.Block || urlBlocked) {
 		passthru.ProxyActionToLog = ProxyActionBlockedUrl
 		IProxy.LogHandler(GSLogData{Url: r.URL.String(), User: user, Action: ProxyActionBlockedUrl, ClientIP: client, Layer: layer, Reason: policy.Reason})
 		sendBlockMessageBytes(w, r, nil, policyBlockPage(policy.Reason), nil)

@@ -223,3 +223,31 @@ func TestProxyPolicyAllowSkipsTheGatewayURLBlocklist(t *testing.T) {
 		t.Fatalf("upstream hits = %d, want the policy allow to skip the URL blocklist", rt.hits)
 	}
 }
+
+// TestProxyURLPatternDoesNotMatchTheTunnel verifies that a CONNECT is never
+// denied by a URL pattern: the tunnel carries only host:port, and the pattern
+// is tested against each decrypted request inside the tunnel instead.
+func TestProxyURLPatternDoesNotMatchTheTunnel(t *testing.T) {
+	blocked := false
+	p := newSmokeProxy(func(domain, user, clientIP string) *PolicyDecision {
+		return &PolicyDecision{Inspect: true, BlockURLRegexes: []string{"youtube"}}
+	})
+	p.LogHandler = func(d GSLogData) {
+		if d.Action == ProxyActionBlockedUrl {
+			blocked = true
+		}
+	}
+	h := ProxyHandler{rt: &smokeRoundTripper{}, Iproxy: p}
+	r := httptest.NewRequest(http.MethodConnect, "http://www.youtube.com:443", nil)
+	r.URL.Host = "www.youtube.com:443"
+	r.RemoteAddr = "192.0.2.20:1234"
+	func() {
+		// The handler goes on to bump the tunnel, which a recorder cannot
+		// hijack; only the decision before that matters here.
+		defer func() { _ = recover() }()
+		h.ServeHTTP(httptest.NewRecorder(), r)
+	}()
+	if blocked {
+		t.Fatal("a URL pattern blocked the CONNECT tunnel itself")
+	}
+}
