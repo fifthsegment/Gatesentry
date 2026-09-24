@@ -25,7 +25,7 @@ type sockaddrIn struct {
 }
 
 func GetOriginalDestination(conn net.Conn) (string, error) {
-	tcpConn, ok := conn.(*net.TCPConn)
+	tcpConn, ok := UnwrapTrafficConn(conn).(*net.TCPConn)
 	if !ok {
 		return "", errors.New("not a TCP connection")
 	}

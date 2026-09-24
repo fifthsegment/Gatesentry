@@ -179,3 +179,42 @@ func TestDecisionSummaryNilLogger(t *testing.T) {
 		t.Fatalf("nil logger summary total = %d, want 0", s.Total)
 	}
 }
+
+func TestDecisionSummaryReportsReachAndTimeline(t *testing.T) {
+	l := newTestLogDecision(t)
+	time.Sleep(150 * time.Millisecond)
+	now := time.Now().Unix()
+	s, err := l.DecisionSummary(DecisionFilter{From: now - 86400})
+	if err != nil {
+		t.Fatalf("summary: %v", err)
+	}
+	if s.UniqueClients != 2 || s.UniqueDomains != 5 {
+		t.Fatalf("clients=%d domains=%d, want 2 and 5", s.UniqueClients, s.UniqueDomains)
+	}
+	if len(s.TopDomains) == 0 || s.TopDomains[0].Key != "ads.example" {
+		t.Fatalf("top domains = %+v, want ads.example first", s.TopDomains)
+	}
+	if len(s.BlocksByGroup) != 2 || s.BlocksByGroup[0].Key != "kids" || s.BlocksByGroup[0].Count != 2 {
+		t.Fatalf("blocks by group = %+v, want kids=2 first", s.BlocksByGroup)
+	}
+	total, blocked := 0, 0
+	for _, b := range s.Timeline {
+		total += b.Total
+		blocked += b.Blocked
+	}
+	if len(s.Timeline) < 24 || total != 6 || blocked != 3 {
+		t.Fatalf("timeline buckets=%d total=%d blocked=%d, want >=24, 6, 3", len(s.Timeline), total, blocked)
+	}
+}
+
+func TestDecisionHostStripsSchemeAndPath(t *testing.T) {
+	for in, want := range map[string]string{
+		"https://www.Example.com:443/a?b": "www.example.com",
+		"http://site.example/path":        "site.example",
+		"dns.example.":                    "dns.example",
+	} {
+		if got := decisionHost(in); got != want {
+			t.Fatalf("decisionHost(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

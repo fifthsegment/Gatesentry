@@ -3,6 +3,7 @@ package gatesentry2logger
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"sort"
 	"strings"
 	"time"
@@ -152,6 +153,48 @@ type DecisionSummary struct {
 	TopReasons         []DecisionCount `json:"top_reasons"`
 	AffectedAddresses  []DecisionCount `json:"affected_addresses"`
 	InspectionFailures int             `json:"inspection_failures"`
+	// UniqueClients and UniqueDomains count distinct client addresses and
+	// hosts seen in the window.
+	UniqueClients int `json:"unique_clients"`
+	UniqueDomains int `json:"unique_domains"`
+	// TopDomains ranks every requested host, blocked or not.
+	TopDomains []DecisionCount `json:"top_domains"`
+	// BlocksByGroup counts blocks per policy group ID; the handler names them.
+	BlocksByGroup []DecisionCount `json:"blocks_by_group"`
+	// Timeline buckets the window by hour (up to two days) or by day.
+	Timeline []TimelineBucket `json:"timeline"`
+}
+
+// TimelineBucket is one slice of the summary window.
+type TimelineBucket struct {
+	Start   int64 `json:"start"`
+	Total   int   `json:"total"`
+	Blocked int   `json:"blocked"`
+}
+
+// decisionHost reduces a logged URL to its host so proxy URLs and DNS names
+// count toward the same domain.
+func decisionHost(raw string) string {
+	host := raw
+	if i := strings.Index(host, "://"); i >= 0 {
+		host = host[i+3:]
+	}
+	if i := strings.IndexAny(host, "/?#"); i >= 0 {
+		host = host[:i]
+	}
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	return strings.TrimSuffix(strings.ToLower(host), ".")
+}
+
+// timelineStep picks the bucket size for a window: hourly for up to two
+// days so a daily view has shape, daily beyond that.
+func timelineStep(from, to int64) int64 {
+	if to-from <= 2*86400 {
+		return 3600
+	}
+	return 86400
 }
 
 // DecisionSummary aggregates decisions in the filter window into counts by
@@ -171,6 +214,14 @@ func (L *Log) DecisionSummary(f DecisionFilter) (DecisionSummary, error) {
 	blockedDomains := map[string]int{}
 	reasons := map[string]int{}
 	addresses := map[string]int{}
+	domains := map[string]int{}
+	groups := map[string]int{}
+	step := timelineStep(from, to)
+	start := from - from%step
+	buckets := make([]TimelineBucket, 0, (to-start)/step+1)
+	for t := start; t <= to; t += step {
+		buckets = append(buckets, TimelineBucket{Start: t})
+	}
 	err := L.Database.View(func(tx *buntdb.Tx) error {
 		return tx.DescendRange("entries",
 			"{\"time\":"+gatesentry2utils.Int64toString(to)+"}",
@@ -184,14 +235,27 @@ func (L *Log) DecisionSummary(f DecisionFilter) (DecisionSummary, error) {
 					return true
 				}
 				s.Total++
+				blocked := e.Action == string(gatesentryPolicy.ActionDecisionBlock)
+				if host := decisionHost(e.URL); host != "" {
+					domains[host]++
+				}
+				if blocked && e.GroupID != "" {
+					groups[e.GroupID]++
+				}
+				if i := (e.Time - start) / step; e.Time >= start && int(i) < len(buckets) {
+					buckets[i].Total++
+					if blocked {
+						buckets[i].Blocked++
+					}
+				}
 				if e.Action != "" {
 					s.ByAction[e.Action]++
 				}
 				if e.Layer != "" {
 					s.ByLayer[e.Layer]++
 				}
-				if e.Action == string(gatesentryPolicy.ActionDecisionBlock) && e.URL != "" {
-					blockedDomains[e.URL]++
+				if blocked && e.URL != "" {
+					blockedDomains[decisionHost(e.URL)]++
 				}
 				if e.Reason != "" {
 					reasons[e.Reason]++
@@ -211,6 +275,11 @@ func (L *Log) DecisionSummary(f DecisionFilter) (DecisionSummary, error) {
 	s.TopBlockedDomains = topN(blockedDomains, 10)
 	s.TopReasons = topN(reasons, 10)
 	s.AffectedAddresses = topN(addresses, 10)
+	s.UniqueClients = len(addresses)
+	s.UniqueDomains = len(domains)
+	s.TopDomains = topN(domains, 10)
+	s.BlocksByGroup = topN(groups, 10)
+	s.Timeline = buckets
 	return s, nil
 }
 

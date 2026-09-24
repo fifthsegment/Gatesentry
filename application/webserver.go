@@ -51,6 +51,7 @@ func GSwebserverStart(port int) {
 		GetInstallationId:       R.GetInstallationId,
 		GetTotalConsumptionData: R.GetTotalConsumptionData,
 		GetApplicationVersion:   R.GetApplicationVersion,
+		GetProxyTraffic:         proxyTrafficSnapshot,
 		Reload: func() {
 			if err := R.Init(); err != nil {
 				fmt.Printf("Unable to reload GateSentry: %v\n", err)

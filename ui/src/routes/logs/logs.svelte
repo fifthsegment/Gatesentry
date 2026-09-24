@@ -10,17 +10,28 @@
     SelectItem,
     Tag,
   } from "carbon-components-svelte";
-
   import { format } from "timeago.js";
   import { store } from "../../store/apistore";
+  import {
+    buildDeviceNameMap,
+    formatDeviceAddress,
+  } from "../../lib/devicenames";
   import _ from "lodash";
   import { onDestroy, onMount } from "svelte";
 
   let search = "";
   let actionFilter = "";
   let layerFilter = "";
-  let interval: ReturnType<typeof setInterval> | null = null;
-  let logsToRender: any[] = [];
+  let decisions: any[] = [];
+  let deviceNames = new Map<string, string>();
+  let decisionTimer: ReturnType<typeof setTimeout> | null = null;
+  let deviceTimer: ReturnType<typeof setTimeout> | null = null;
+  let decisionsLoading = false;
+  let decisionRefreshPending = false;
+  let devicesLoading = false;
+  let mounted = false;
+  let destroyed = false;
+  let activeFilter = "";
 
   const buildQuery = () => {
     const params: string[] = [];
@@ -30,45 +41,85 @@
     return params.length > 0 ? "?" + params.join("&") : "";
   };
 
-  const loadDecisions = () => {
-    $store.api.doCall("/decisions" + buildQuery()).then((json: any) => {
-      const items = (json && json.items) || [];
-      logsToRender = items.map((item: any, index: number) => ({
-        id: item.ip + item.time + index + item.url,
-        time: format(item.time * 1000),
-        ip: item.ip,
-        url: _.truncate(item.url, { length: 50 }),
-        action: item.action || "",
-        layer: item.layer || "",
-        reason: _.truncate(item.reason || item.matched_rule || "", {
-          length: 40,
-        }),
-      }));
-    });
+  const loadDecisions = async () => {
+    if (decisionsLoading || destroyed) return;
+    decisionsLoading = true;
+    const query = buildQuery();
+    try {
+      const json = await $store.api.doCall("/decisions" + query);
+      if (!destroyed && query === buildQuery()) decisions = json?.items || [];
+    } catch {
+      // Keep the last successful page during a transient refresh failure.
+    } finally {
+      decisionsLoading = false;
+      if (destroyed) return;
+      if (decisionRefreshPending) {
+        decisionRefreshPending = false;
+        loadDecisions();
+      } else {
+        decisionTimer = setTimeout(loadDecisions, 5000);
+      }
+    }
+  };
+
+  const loadDevices = async () => {
+    if (devicesLoading || destroyed) return;
+    devicesLoading = true;
+    try {
+      const json = await $store.api.doCall("/devices");
+      if (!destroyed) deviceNames = buildDeviceNameMap(json?.devices);
+    } catch {
+      // Device discovery can be unavailable; raw decision IPs remain useful.
+    } finally {
+      devicesLoading = false;
+      if (!destroyed) deviceTimer = setTimeout(loadDevices, 60000);
+    }
+  };
+
+  const refreshDecisions = () => {
+    if (decisionTimer) clearTimeout(decisionTimer);
+    decisionTimer = null;
+    if (decisionsLoading) {
+      decisionRefreshPending = true;
+      return;
+    }
+    loadDecisions();
   };
 
   const clearSearch = () => {
     search = "";
-    loadDecisions();
+    refreshDecisions();
   };
 
-  const startInterval = () => {
-    if (interval) clearInterval(interval);
-    interval = setInterval(loadDecisions, 5000);
-  };
+  $: logsToRender = decisions.map((item: any, index: number) => ({
+    id: item.ip + item.time + index + item.url,
+    time: format(item.time * 1000),
+    client: formatDeviceAddress(deviceNames, item.ip),
+    url: _.truncate(item.url, { length: 50 }),
+    action: item.action || "",
+    layer: item.layer || "",
+    reason: _.truncate(item.reason || item.matched_rule || "", { length: 40 }),
+  }));
 
-  $: if (actionFilter || layerFilter) {
-    loadDecisions();
-    startInterval();
+  $: {
+    const nextFilter = actionFilter + "\0" + layerFilter;
+    if (mounted && nextFilter !== activeFilter) {
+      activeFilter = nextFilter;
+      refreshDecisions();
+    }
   }
 
-  onDestroy(() => {
-    if (interval) clearInterval(interval);
+  onMount(() => {
+    mounted = true;
+    activeFilter = actionFilter + "\0" + layerFilter;
+    loadDecisions();
+    loadDevices();
   });
 
-  onMount(() => {
-    loadDecisions();
-    startInterval();
+  onDestroy(() => {
+    destroyed = true;
+    if (decisionTimer) clearTimeout(decisionTimer);
+    if (deviceTimer) clearTimeout(deviceTimer);
   });
 </script>
 
@@ -93,9 +144,15 @@
         going to Settings and changing the log file location to "/tmp/log.db".
       </Tag>
     </div>
-    <div style="display: flex; gap: 16px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 15px;">
+    <div
+      style="display: flex; gap: 16px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 15px;"
+    >
       <div style="flex: 1; min-width: 200px;">
-        <Search bind:value={search} on:clear={clearSearch} placeholder="Search by domain..." />
+        <Search
+          bind:value={search}
+          on:clear={clearSearch}
+          placeholder="Search by domain..."
+        />
       </div>
       <div style="min-width: 160px;">
         <Select bind:selected={actionFilter} labelText="Action">
@@ -123,7 +180,7 @@
       style="width:100%; min-height: 600px;"
       headers={[
         { key: "time", value: "Time" },
-        { key: "ip", value: "Client IP" },
+        { key: "client", value: "Client" },
         { key: "url", value: "URL" },
         { key: "action", value: "Action" },
         { key: "layer", value: "Layer" },
