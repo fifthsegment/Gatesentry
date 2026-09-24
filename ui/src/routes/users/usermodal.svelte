@@ -1,109 +1,151 @@
 <script lang="ts">
   import {
-    Button,
-    Form,
+    InlineNotification,
     RadioButton,
     RadioButtonGroup,
     TextInput,
   } from "carbon-components-svelte";
-  import Modal from "../../components/modal.svelte";
+  import { createEventDispatcher } from "svelte";
   import { _ } from "svelte-i18n";
-  import { createEventDispatcher, onDestroy, onMount } from "svelte";
+
   import { store } from "../../store/apistore";
-  import { notificationstore } from "../../store/notifications";
-  import { createNotificationError } from "../../lib/utils";
   import type { UserType } from "../../types";
-  const dispatch = createEventDispatcher();
-  export let showForm = false;
+
+  const dispatch = createEventDispatcher<{
+    saved: { username: string; editing: boolean };
+    createuser: { username: string };
+    updateuser: { username: string };
+  }>();
+
   export let user: UserType | null = null;
-  // new user
-  let username = user?.username ?? "";
-  let password = user?.password ?? "";
-  let allowAccess =
-    user?.allowaccess && user.allowaccess == true ? "true" : "false";
+  export let saving = false;
 
-  onDestroy(() => {
-    username = "";
+  let formUser: UserType | null | undefined;
+  let username = "";
+  let password = "";
+  let allowAccess = "false";
+  let attempted = false;
+  let error = "";
+
+  $: if (user !== formUser) {
+    formUser = user;
+    username = user?.username ?? "";
     password = "";
-    allowAccess = "true";
-  });
+    allowAccess = user?.allowaccess ? "true" : "false";
+    attempted = false;
+    error = "";
+  }
 
-  const showError = (message: string) => {
-    notificationstore.add(
-      createNotificationError(
-        {
-          title: $_("Error"),
-          subtitle: $_("Error : " + message),
-        },
-        $_,
-      ),
-    );
-  };
+  $: usernameInvalid = attempted && username.trim().length < 3;
+  $: passwordInvalid =
+    attempted && (!user || password.length > 0) && password.length < 10;
+  $: valid =
+    username.trim().length >= 3 &&
+    (user ? password.length === 0 || password.length >= 10 : password.length >= 10);
 
-  const handleCreateUser = async (event) => {
-    event.preventDefault();
+  function responseError(response: any) {
+    return response?.error ?? response?.Error ?? $_("The user could not be saved.");
+  }
+
+  export async function submit() {
+    attempted = true;
+    error = "";
+    if (!valid || saving) return;
+
+    saving = true;
+    const editing = Boolean(user);
+    const normalizedUsername = user?.username ?? username.trim();
+
     try {
-      if (user) {
-        const response = await $store.api.updateUser({
-          username,
-          password,
-          allowaccess: allowAccess == "true" ? true : false,
-        });
-        if (response.ok) {
-          dispatch("updateuser", { username, password });
-        } else {
-          showError(response.error);
-        }
+      const payload = {
+        username: normalizedUsername,
+        password,
+        allowaccess: allowAccess === "true",
+      };
+      const response = editing
+        ? await $store.api.updateUser(payload)
+        : await $store.api.createUser(payload);
+
+      if (!response?.ok) {
+        error = responseError(response);
         return;
-      } else {
-        const response = await $store.api.createUser({
-          username,
-          password,
-          allowaccess: allowAccess == "true" ? true : false,
-        });
-        if (response.ok) {
-          dispatch("createuser", { username, password });
-        } else {
-          showError(response.error);
-        }
       }
-    } catch (error) {
-      showError(error.message);
+
+      const detail = { username: normalizedUsername, editing };
+      dispatch("saved", detail);
+      dispatch(editing ? "updateuser" : "createuser", {
+        username: normalizedUsername,
+      });
+    } catch (caught) {
+      error =
+        caught instanceof Error && caught.message
+          ? caught.message
+          : $_("The user could not be saved.");
+    } finally {
+      saving = false;
     }
-  };
+  }
 </script>
 
-<Form on:submit={handleCreateUser}>
+<div class="user-form">
+  {#if error}
+    <InlineNotification
+      lowContrast
+      kind="error"
+      title={$_("User not saved")}
+      subtitle={error}
+      on:close={() => (error = "")}
+    />
+  {/if}
+
   <TextInput
     bind:value={username}
-    id="user"
-    labelText={$_("User")}
-    disabled={user ? true : false}
+    id="proxy-user-name"
+    labelText={$_("Username")}
+    helperText={user
+      ? $_("Usernames cannot be changed.")
+      : $_("At least 3 characters.")}
+    disabled={Boolean(user) || saving}
+    invalid={usernameInvalid}
+    invalidText={$_("Enter a username with at least 3 characters.")}
+    data-modal-primary-focus
   />
-  <br />
+
   <TextInput
     bind:value={password}
-    id="password"
-    labelText={$_("Password")}
+    id="proxy-user-password"
+    labelText={user ? $_("New password") : $_("Password")}
+    helperText={user
+      ? $_("Leave blank to keep the current password. New passwords need at least 10 characters.")
+      : $_("At least 10 characters.")}
     type="password"
+    disabled={saving}
+    invalid={passwordInvalid}
+    invalidText={$_("Enter a password with at least 10 characters.")}
   />
-  <br />
+
   <RadioButtonGroup
-    legendText="Allow internet access"
+    legendText={$_("Internet access")}
+    orientation="vertical"
+    disabled={saving}
     bind:selected={allowAccess}
   >
-    <RadioButton value="true" labelText={$_("Allow access")} />
-    <RadioButton value="false" labelText={$_("Deny access")} />
+    <RadioButton
+      id="proxy-user-access-allow"
+      value="true"
+      labelText={$_("Allow access")}
+    />
+    <RadioButton
+      id="proxy-user-access-deny"
+      value="false"
+      labelText={$_("Deny access")}
+    />
   </RadioButtonGroup>
-  <div class="content-right" style="margin-top: 10px;">
-    {#if user}
-      <Button type="submit" on:click={handleCreateUser}
-        >{$_("Save User")}</Button
-      >
-    {:else}
-      <Button type="submit" on:click={handleCreateUser}
-        >{$_("Create User")}</Button
-      >
-    {/if}
-  </div>
-</Form>
+</div>
+
+<style>
+  .user-form {
+    display: grid;
+    gap: 1rem;
+  }
+</style>
