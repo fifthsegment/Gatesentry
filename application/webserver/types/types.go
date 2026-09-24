@@ -1,6 +1,8 @@
 package gatesentryWebserverTypes
 
 import (
+	"time"
+
 	gatesentryLogger "bitbucket.org/abdullah_irfan/gatesentryf/logger"
 	GatesentryTypes "bitbucket.org/abdullah_irfan/gatesentryf/types"
 )
@@ -34,6 +36,7 @@ type TemporaryRuntime struct {
 	GetInstallationId       func() string
 	GetTotalConsumptionData func() (string, string)
 	GetApplicationVersion   func() string
+	GetProxyTraffic         func() (uploadBytes, downloadBytes uint64, startedAt time.Time)
 	Logger                  *gatesentryLogger.Log
 	Reload                  func()
 }
@@ -46,6 +49,7 @@ type InputArgs struct {
 	GetInstallationId       func() string
 	GetTotalConsumptionData func() (string, string)
 	GetApplicationVersion   func() string
+	GetProxyTraffic         func() (uploadBytes, downloadBytes uint64, startedAt time.Time)
 	Reload                  func()
 }
 
@@ -58,6 +62,7 @@ func NewTemporaryRuntime(args InputArgs) *TemporaryRuntime {
 		GetInstallationId:       args.GetInstallationId,
 		GetTotalConsumptionData: args.GetTotalConsumptionData,
 		GetApplicationVersion:   args.GetApplicationVersion,
+		GetProxyTraffic:         args.GetProxyTraffic,
 		Reload:                  args.Reload,
 	}
 }

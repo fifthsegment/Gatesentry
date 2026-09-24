@@ -47,9 +47,16 @@ var GSBASEPATH = "/"
 
 // const INSTALLATIONID = "3";
 var GSVerString = ""
+var proxyTrafficSnapshot func() (uploadBytes, downloadBytes uint64, startedAt time.Time)
 
 func SetGSVer(v string) {
 	GSVerString = v
+}
+
+// SetProxyTrafficSnapshot configures process-lifetime proxy traffic reporting.
+// It must be called before Start launches the web server.
+func SetProxyTrafficSnapshot(snapshot func() (uploadBytes, downloadBytes uint64, startedAt time.Time)) {
+	proxyTrafficSnapshot = snapshot
 }
 
 func SetInstallationID(a string) {

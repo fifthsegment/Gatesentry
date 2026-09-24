@@ -2,8 +2,8 @@ package main
 
 import (
 	"context"
-	"html"
 	"flag"
+	"html"
 	"log"
 	"net"
 	"net/http"
@@ -395,6 +395,10 @@ func runGateSentry(startup chan<- error) (returnErr error) {
 	if err != nil {
 		return fmt.Errorf("parse web admin port: %w", err)
 	}
+	application.SetProxyTrafficSnapshot(func() (uint64, uint64, time.Time) {
+		snapshot := gatesentryproxy.ProxyTrafficSnapshot()
+		return snapshot.UploadBytes, snapshot.DownloadBytes, snapshot.StartedAt
+	})
 	R, err = application.Start(webadminport)
 	if err != nil {
 		return fmt.Errorf("initialize GateSentry: %w", err)
@@ -1012,7 +1016,8 @@ func runGateSentry(startup chan<- error) (returnErr error) {
 
 	server := http.Server{Handler: proxyHandler}
 	log.Printf("Starting up...Listening on = %s", addr)
-	if err = server.Serve(tcpKeepAliveListener{proxyListener.(*net.TCPListener)}); err != nil {
+	clientListener := gatesentryproxy.CountTrafficListener(tcpKeepAliveListener{proxyListener.(*net.TCPListener)})
+	if err = server.Serve(clientListener); err != nil {
 		return err
 	}
 	return nil

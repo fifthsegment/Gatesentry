@@ -57,6 +57,7 @@ func (l *TransparentProxyListener) Accept() (net.Conn, error) {
 }
 
 func (l *TransparentProxyListener) handleConnection(conn net.Conn) {
+	conn = CountTraffic(conn)
 	defer conn.Close()
 
 	// Routed traffic (routers, VPN exit nodes) arrives from addresses the

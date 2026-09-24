@@ -17,7 +17,7 @@
     StructuredListCell,
     StructuredListBody,
   } from "carbon-components-svelte";
-  import { createEventDispatcher } from "svelte";
+  import { createEventDispatcher, onDestroy } from "svelte";
   import { getBasePath } from "../../lib/navigate";
 
   const API_BASE = getBasePath() + "/api/devices";
@@ -44,6 +44,11 @@
   let activity: any[] = [];
   let activityLoading = false;
   let activityError = "";
+  let activityLoaded = false;
+  let activityTimer: ReturnType<typeof setTimeout> | null = null;
+  let activityController: AbortController | null = null;
+  let activityRequestRunning = false;
+  let destroyed = false;
   let detailLoadedFor = "";
 
   function getToken(): string {
@@ -73,10 +78,9 @@
     policyLoading = true;
     policyError = "";
     try {
-      const response = await fetch(
-        API_BASE + "/" + device.id + "/policy",
-        { headers: authHeaders(false) },
-      );
+      const response = await fetch(API_BASE + "/" + device.id + "/policy", {
+        headers: authHeaders(false),
+      });
       if (!response.ok) {
         throw new Error(await readErrorMessage(response));
       }
@@ -107,22 +111,36 @@
   }
 
   async function loadActivity() {
-    activityLoading = true;
+    if (activityRequestRunning || destroyed) return;
+    activityRequestRunning = true;
+    activityLoading = !activityLoaded;
     activityError = "";
+    activityController = new AbortController();
     try {
       const response = await fetch(
-        API_BASE + "/" + device.id + "/activity",
-        { headers: authHeaders(false) },
+        API_BASE + "/" + device.id + "/activity?since=86400&limit=100",
+        {
+          headers: authHeaders(false),
+          signal: activityController.signal,
+        },
       );
       if (!response.ok) {
         throw new Error(await readErrorMessage(response));
       }
       const data = await response.json();
-      activity = data.items || [];
+      if (!destroyed) {
+        activity = data.items || [];
+        activityLoaded = true;
+      }
     } catch (err) {
-      activityError = err.message;
+      if (!destroyed && err?.name !== "AbortError") {
+        activityError = err.message;
+      }
     } finally {
+      activityRequestRunning = false;
       activityLoading = false;
+      activityController = null;
+      if (!destroyed) activityTimer = setTimeout(loadActivity, 5000);
     }
   }
 
@@ -130,18 +148,15 @@
     saving = true;
     error = "";
     try {
-      const response = await fetch(
-        API_BASE + "/" + device.id + "/name",
-        {
-          method: "POST",
-          headers: authHeaders(true),
-          body: JSON.stringify({
-            name: manualName,
-            owner: owner,
-            category: category,
-          }),
-        },
-      );
+      const response = await fetch(API_BASE + "/" + device.id + "/name", {
+        method: "POST",
+        headers: authHeaders(true),
+        body: JSON.stringify({
+          name: manualName,
+          owner: owner,
+          category: category,
+        }),
+      });
       if (!response.ok) {
         throw new Error(await readErrorMessage(response));
       }
@@ -158,14 +173,11 @@
     assignmentError = "";
     assignmentSaved = false;
     try {
-      const response = await fetch(
-        API_BASE + "/" + device.id + "/assignment",
-        {
-          method: "PUT",
-          headers: authHeaders(true),
-          body: JSON.stringify({ group_id: selectedGroup }),
-        },
-      );
+      const response = await fetch(API_BASE + "/" + device.id + "/assignment", {
+        method: "PUT",
+        headers: authHeaders(true),
+        body: JSON.stringify({ group_id: selectedGroup }),
+      });
       if (!response.ok) {
         throw new Error(await readErrorMessage(response));
       }
@@ -187,6 +199,12 @@
     loadGroups();
     loadActivity();
   }
+
+  onDestroy(() => {
+    destroyed = true;
+    if (activityTimer) clearTimeout(activityTimer);
+    activityController?.abort();
+  });
 
   function close() {
     dispatch("close");
@@ -236,16 +254,30 @@
     if (!policy) return "";
     const parts: string[] = [];
     if (policy.blocked_categories?.length) {
-      parts.push(policy.blocked_categories.length + " blocked categor" + (policy.blocked_categories.length === 1 ? "y" : "ies"));
+      parts.push(
+        policy.blocked_categories.length +
+          " blocked categor" +
+          (policy.blocked_categories.length === 1 ? "y" : "ies"),
+      );
     }
     if (policy.blocked_domains?.length) {
-      parts.push(policy.blocked_domains.length + " blocked domain" + (policy.blocked_domains.length === 1 ? "" : "s"));
+      parts.push(
+        policy.blocked_domains.length +
+          " blocked domain" +
+          (policy.blocked_domains.length === 1 ? "" : "s"),
+      );
     }
     if (policy.allowed_domains?.length) {
-      parts.push(policy.allowed_domains.length + " allowed domain" + (policy.allowed_domains.length === 1 ? "" : "s"));
+      parts.push(
+        policy.allowed_domains.length +
+          " allowed domain" +
+          (policy.allowed_domains.length === 1 ? "" : "s"),
+      );
     }
     if (policy.rule_count) {
-      parts.push(policy.rule_count + " rule" + (policy.rule_count === 1 ? "" : "s"));
+      parts.push(
+        policy.rule_count + " rule" + (policy.rule_count === 1 ? "" : "s"),
+      );
     }
     if (policy.safe_search) parts.push("safe search");
     return parts.length ? parts.join(", ") : "blocks nothing of its own";
@@ -285,10 +317,10 @@
     </FormGroup>
 
     <h5 style="margin-top: 1.5rem; margin-bottom: 0.5rem;">Policy</h5>
-    <p class="section-note"
-      >A device without a policy of its own uses the default policy. Owner
-      and category above never change filtering.</p
-    >
+    <p class="section-note">
+      A device without a policy of its own uses the default policy. Owner and
+      category above never change filtering.
+    </p>
     {#if assignmentError}
       <div class="error-message">{assignmentError}</div>
     {/if}
@@ -319,9 +351,9 @@
       </Button>
     </div>
 
-    <h5 style="margin-top: 1.5rem; margin-bottom: 0.5rem;"
-      >Effective protection</h5
-    >
+    <h5 style="margin-top: 1.5rem; margin-bottom: 0.5rem;">
+      Effective protection
+    </h5>
     {#if policyLoading && !policyView}
       <InlineLoading description="Loading protection view..." />
     {:else if policyError && !policyView}
@@ -371,9 +403,7 @@
           <StructuredListCell>Policy Identity</StructuredListCell>
           <StructuredListCell>
             {#if policyView?.identity}
-              <Tag size="sm" type="blue"
-                >{policyView.identity.source}</Tag
-              >
+              <Tag size="sm" type="blue">{policyView.identity.source}</Tag>
               {policyView.identity.explanation || ""}
             {:else}
               —
@@ -427,9 +457,7 @@
                     <Tag size="sm" type="magenta">shared address</Tag>
                   {/if}
                   {#if address.stale_observation}
-                    <Tag size="sm" type="warm-gray"
-                      >stale observation</Tag
-                    >
+                    <Tag size="sm" type="warm-gray">stale observation</Tag>
                   {/if}
                   {#if !address.dns_resolves_device}
                     <Tag size="sm" type="red"
@@ -452,9 +480,7 @@
                     <Tag size="sm" type="magenta">shared address</Tag>
                   {/if}
                   {#if address.stale_observation}
-                    <Tag size="sm" type="warm-gray"
-                      >stale observation</Tag
-                    >
+                    <Tag size="sm" type="warm-gray">stale observation</Tag>
                   {/if}
                   {#if !address.dns_resolves_device}
                     <Tag size="sm" type="red"
@@ -493,8 +519,7 @@
         <StructuredListRow>
           <StructuredListCell>Status</StructuredListCell>
           <StructuredListCell>
-            <span
-              class="status-dot {device?.online ? 'online' : 'offline'}"
+            <span class="status-dot {device?.online ? 'online' : 'offline'}"
             ></span>
             {device?.online ? "Online" : "Offline"}
           </StructuredListCell>
@@ -549,13 +574,11 @@
       </StructuredListBody>
     </StructuredList>
 
-    <h5 style="margin-top: 1.5rem; margin-bottom: 0.5rem;"
-      >Recent activity (decision history)</h5
-    >
-    {#if activityLoading}
+    <h5 style="margin-top: 1.5rem; margin-bottom: 0.5rem;">
+      Recent activity (decision history)
+    </h5>
+    {#if activityLoading && !activityLoaded}
       <InlineLoading description="Loading device activity..." />
-    {:else if activityError}
-      <div class="error-message">{activityError}</div>
     {:else if activity.length === 0}
       <p class="section-note">
         No logged decisions for this device's current addresses in the last 24
@@ -565,18 +588,18 @@
       <ul class="activity-list">
         {#each activity as item}
           <li>
-            <span class="activity-time"
-              >{formatActivityTime(item.time)}</span
-            >
+            <span class="activity-time">{formatActivityTime(item.time)}</span>
             <Tag size="sm" type={item.type === "dns" ? "blue" : "purple"}
               >{item.type}</Tag
             >
             {#if item.dnsResponseType || item.proxyResponseType}
-              <Tag size="sm" type={
-                (item.dnsResponseType || item.proxyResponseType) === "blocked"
+              <Tag
+                size="sm"
+                type={(item.dnsResponseType || item.proxyResponseType) ===
+                "blocked"
                   ? "red"
-                  : "gray"
-              }>
+                  : "gray"}
+              >
                 {item.dnsResponseType || item.proxyResponseType}
               </Tag>
             {/if}
@@ -585,6 +608,9 @@
           </li>
         {/each}
       </ul>
+    {/if}
+    {#if activityError}
+      <div class="refresh-error">Live refresh unavailable: {activityError}</div>
     {/if}
     <p class="section-note">
       <a href={getBasePath() + "/logs"}>View full decision history</a>
@@ -616,6 +642,11 @@
     color: #da1e28;
     margin-bottom: 1rem;
     font-size: 0.875rem;
+  }
+  .refresh-error {
+    color: var(--cds-text-helper, #6f6f6f);
+    font-size: 0.75rem;
+    margin-top: 0.5rem;
   }
   .success-message {
     color: #0e6027;

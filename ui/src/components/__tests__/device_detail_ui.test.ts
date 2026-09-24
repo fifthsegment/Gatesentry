@@ -47,3 +47,10 @@ test("device detail saves labels through the modal submit event", () => {
   expect(source).toContain("on:submit={save}");
   expect(source).not.toContain("on:click:button--primary");
 });
+
+test("device activity refreshes while the modal is open", () => {
+  expect(source).toContain("activity?since=86400&limit=100");
+  expect(source).toContain("setTimeout(loadActivity, 5000)");
+  expect(source).toContain("activityController?.abort()");
+  expect(source).toContain("clearTimeout(activityTimer)");
+});

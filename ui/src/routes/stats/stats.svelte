@@ -15,6 +15,12 @@
   import { _ } from "svelte-i18n";
 
   type Count = { key: string; count: number };
+  type ProxyTraffic = {
+    upload_bytes: number;
+    download_bytes: number;
+    total_bytes: number;
+    started_at: string;
+  };
   type Summary = {
     window: string;
     total: number;
@@ -52,12 +58,31 @@
   let loadError = "";
   let chart: any = null;
   let chartHolder: HTMLDivElement;
-  let timer: ReturnType<typeof setInterval> | null = null;
+  let summaryTimer: ReturnType<typeof setTimeout> | null = null;
+  let summaryLoading = false;
+  let summaryRefreshPending = false;
+  let traffic: ProxyTraffic | null = null;
+  let trafficTimer: ReturnType<typeof setTimeout> | null = null;
+  let trafficLoading = false;
+  let destroyed = false;
 
   const fmt = (n: number | undefined) =>
     typeof n === "number" ? n.toLocaleString() : "—";
   const pct = (part: number, whole: number) =>
     whole > 0 ? ((part / whole) * 100).toFixed(1) + "%" : "—";
+
+  const formatBytes = (bytes: number | undefined) => {
+    if (typeof bytes !== "number") return "—";
+    const units = ["B", "KiB", "MiB", "GiB", "TiB"];
+    let value = bytes;
+    let unit = 0;
+    while (value >= 1024 && unit < units.length - 1) {
+      value /= 1024;
+      unit += 1;
+    }
+    const digits = unit === 0 || value >= 100 ? 0 : value >= 10 ? 1 : 2;
+    return `${value.toFixed(digits)} ${units[unit]}`;
+  };
 
   const chartData = (s: Summary) =>
     (s.timeline || []).flatMap((b) => {
@@ -91,38 +116,94 @@
   };
 
   const load = async () => {
+    if (summaryLoading || destroyed) return;
+    summaryLoading = true;
+    const requested = selected;
     try {
-      const days = windows[selected];
-      summary = await $store.api.doCall(`/decisions/summary?days=${days}`);
-      loadError = "";
-      if (summary) drawChart(summary);
+      const days = windows[requested];
+      const value = await $store.api.doCall(`/decisions/summary?days=${days}`);
+      if (!destroyed && requested === selected) {
+        summary = value;
+        loadError = "";
+        if (summary) drawChart(summary);
+      }
     } catch (error) {
-      loadError = "Unable to load statistics.";
+      if (!destroyed && requested === selected) {
+        loadError = "Unable to load statistics.";
+      }
+    } finally {
+      summaryLoading = false;
+      if (destroyed) return;
+      if (summaryRefreshPending) {
+        summaryRefreshPending = false;
+        load();
+      } else {
+        summaryTimer = setTimeout(load, 30000);
+      }
+    }
+  };
+
+  const refreshSummary = () => {
+    if (summaryTimer) clearTimeout(summaryTimer);
+    summaryTimer = null;
+    if (summaryLoading) {
+      summaryRefreshPending = true;
+      return;
+    }
+    load();
+  };
+
+  const loadTraffic = async () => {
+    if (trafficLoading || destroyed) return;
+    trafficLoading = true;
+    try {
+      const value = await $store.api.doCall("/proxy/traffic");
+      if (!destroyed) traffic = value;
+    } catch {
+      // Preserve the last live snapshot during a transient API failure.
+    } finally {
+      trafficLoading = false;
+      if (!destroyed) trafficTimer = setTimeout(loadTraffic, 5000);
     }
   };
 
   const countRows = (items: Count[] | undefined, prefix: string) =>
-    (items || []).map((d, i) => ({ id: prefix + i, key: d.key, count: fmt(d.count) }));
+    (items || []).map((d, i) => ({
+      id: prefix + i,
+      key: d.key,
+      count: fmt(d.count),
+    }));
 
-  const mapRows = (m: Record<string, number> | undefined, names: Record<string, string>, total: number) =>
+  const mapRows = (
+    m: Record<string, number> | undefined,
+    names: Record<string, string>,
+    total: number,
+  ) =>
     Object.entries(m || {})
       .sort((a, b) => b[1] - a[1])
-      .map(([k, v]) => ({ id: k, key: names[k] || k, count: fmt(v), share: pct(v, total) }));
+      .map(([k, v]) => ({
+        id: k,
+        key: names[k] || k,
+        count: fmt(v),
+        share: pct(v, total),
+      }));
 
   $: blocked = summary?.by_action?.block || 0;
 
   const selectWindow = (index: number) => {
     selected = index;
-    load();
+    refreshSummary();
   };
 
   onMount(() => {
     load();
-    timer = setInterval(load, 30000);
+    loadTraffic();
   });
 
   onDestroy(() => {
-    if (timer) clearInterval(timer);
+    destroyed = true;
+    if (summaryTimer) clearTimeout(summaryTimer);
+    if (trafficTimer) clearTimeout(trafficTimer);
     if (chart) chart.destroy();
   });
 </script>
@@ -148,7 +229,12 @@
   </header>
 
   {#if loadError}
-    <InlineNotification kind="error" title={$_("Stats unavailable")} subtitle={loadError} hideCloseButton />
+    <InlineNotification
+      kind="error"
+      title={$_("Stats unavailable")}
+      subtitle={loadError}
+      hideCloseButton
+    />
   {/if}
 
   <section class="tiles">
@@ -159,7 +245,9 @@
     <div class="tile">
       <span class="tile-label">{$_("Blocked")}</span>
       <span class="tile-value">{fmt(blocked)}</span>
-      <span class="tile-foot">{pct(blocked, summary?.total || 0)} {$_("of requests")}</span>
+      <span class="tile-foot"
+        >{pct(blocked, summary?.total || 0)} {$_("of requests")}</span
+      >
     </div>
     <div class="tile">
       <span class="tile-label">{$_("Active clients")}</span>
@@ -176,6 +264,24 @@
         <Tag type="red" size="sm">{$_("Check the logs")}</Tag>
       {/if}
     </div>
+    <div class="tile traffic-tile">
+      <span class="tile-label">{$_("Live proxy traffic")}</span>
+      <span class="tile-value">{formatBytes(traffic?.total_bytes)}</span>
+      <span class="tile-foot">
+        {$_("Down")}
+        {formatBytes(traffic?.download_bytes)} · {$_("Up")}
+        {formatBytes(traffic?.upload_bytes)}
+      </span>
+      <span class="tile-foot">
+        {#if traffic?.started_at}
+          {$_("Since GateSentry started")} · {new Date(
+            traffic.started_at,
+          ).toLocaleString()}
+        {:else}
+          {$_("Since GateSentry started")}
+        {/if}
+      </span>
+    </div>
   </section>
 
   <section class="panel">
@@ -190,7 +296,10 @@
         {#if summary.top_blocked_domains?.length}
           <DataTable
             size="short"
-            headers={[{ key: "key", value: $_("Domain") }, { key: "count", value: $_("Blocks") }]}
+            headers={[
+              { key: "key", value: $_("Domain") },
+              { key: "count", value: $_("Blocks") },
+            ]}
             rows={countRows(summary.top_blocked_domains, "b")}
           />
         {:else}
@@ -202,7 +311,10 @@
         {#if summary.top_domains?.length}
           <DataTable
             size="short"
-            headers={[{ key: "key", value: $_("Domain") }, { key: "count", value: $_("Requests") }]}
+            headers={[
+              { key: "key", value: $_("Domain") },
+              { key: "count", value: $_("Requests") },
+            ]}
             rows={countRows(summary.top_domains, "t")}
           />
         {:else}
@@ -233,8 +345,15 @@
         {#if summary.blocks_by_policy?.length}
           <DataTable
             size="short"
-            headers={[{ key: "name", value: $_("Policy") }, { key: "count", value: $_("Blocks") }]}
-            rows={summary.blocks_by_policy.map((p) => ({ id: p.id, name: p.name, count: fmt(p.count) }))}
+            headers={[
+              { key: "name", value: $_("Policy") },
+              { key: "count", value: $_("Blocks") },
+            ]}
+            rows={summary.blocks_by_policy.map((p) => ({
+              id: p.id,
+              name: p.name,
+              count: fmt(p.count),
+            }))}
           />
         {:else}
           <p class="helper">{$_("No policy blocks in this window.")}</p>
@@ -245,7 +364,10 @@
         {#if summary.top_reasons?.length}
           <DataTable
             size="short"
-            headers={[{ key: "key", value: $_("Reason") }, { key: "count", value: $_("Decisions") }]}
+            headers={[
+              { key: "key", value: $_("Reason") },
+              { key: "count", value: $_("Decisions") },
+            ]}
             rows={countRows(summary.top_reasons, "r")}
           />
         {:else}
