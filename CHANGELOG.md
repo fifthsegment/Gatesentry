@@ -1,5 +1,17 @@
 # CHANGELOG
 
+## v2.1.0 (24 September 2026)
+
+### Policies page
+
+- Each policy card shows a one-line summary of what it blocks, with rules and devices behind a "Details and devices" toggle
+- The policy editor has a Bedtime switch (times and nights) alongside safe search; custom rules, proxy users, and the description are under Advanced, which opens automatically for policies that use them
+- Starter policies sit under the page heading; "Test a site" and gateway-wide categories are collapsible
+
+### Fixes
+
+- Saving a device's name, owner, or category from the device details dialog did nothing
+
 ## v2.0.0 (24 September 2026)
 
 **Breaking:** the policy document format changes from version 1 to version 2. Existing policies upgrade automatically on first read and keep enforcing what they enforced before; the next policy write persists the new format. The v1 API fields (`action`, `domains`, `categories` on a group, and `mitm_action` on a rule) are replaced by the fields below.
