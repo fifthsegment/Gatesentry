@@ -11,12 +11,26 @@ import (
 type DiscoverySource string
 
 const (
-	SourceDDNS    DiscoverySource = "ddns"    // RFC 2136 Dynamic DNS UPDATE
-	SourceLease   DiscoverySource = "lease"   // DHCP lease file reader
-	SourceMDNS    DiscoverySource = "mdns"    // mDNS/Bonjour browser
-	SourcePassive DiscoverySource = "passive" // Passive DNS query observation
-	SourceManual  DiscoverySource = "manual"  // User-entered via UI
+	SourceDDNS      DiscoverySource = "ddns"      // RFC 2136 Dynamic DNS UPDATE
+	SourceLease     DiscoverySource = "lease"     // DHCP lease file reader
+	SourceMDNS      DiscoverySource = "mdns"      // mDNS/Bonjour browser
+	SourcePassive   DiscoverySource = "passive"   // Passive DNS query observation
+	SourceManual    DiscoverySource = "manual"    // User-entered via UI
+	SourceTailscale DiscoverySource = "tailscale" // Linked tailscaled peer
 )
+
+// TailscaleIdentity links one stable tailscaled node to a canonical device.
+// Addresses and reachability are runtime observations; NodeID and names are the
+// durable link metadata. WoLMACs are informational and are never LAN identity.
+type TailscaleIdentity struct {
+	NodeID    string    `json:"node_id"`
+	Name      string    `json:"name,omitempty"`
+	DNSName   string    `json:"dns_name,omitempty"`
+	Addresses []string  `json:"addresses,omitempty"`
+	Online    bool      `json:"online"`
+	LastSeen  time.Time `json:"last_seen,omitempty"`
+	WoLMACs   []string  `json:"wol_macs,omitempty"`
+}
 
 // Device represents a physical device on the local network.
 type Device struct {
@@ -46,6 +60,10 @@ type Device struct {
 	// Stored as lowercase colon-separated (e.g., "aa:bb:cc:dd:ee:ff").
 	MACs []string `json:"macs,omitempty"`
 
+	// TailscaleNodes are explicitly linked overlay identities. Tailscale does
+	// not carry LAN MAC addresses, so these remain a separate namespace.
+	TailscaleNodes []TailscaleIdentity `json:"tailscale_nodes,omitempty"`
+
 	// --- Current network addresses ---
 
 	// IPv4 is the current IPv4 address (empty string if unknown).
@@ -65,8 +83,14 @@ type Device struct {
 	// FirstSeen is when the device was first observed.
 	FirstSeen time.Time `json:"first_seen"`
 
-	// LastSeen is when the device was last observed (any method).
+	// LastSeen is when the device was last observed by any method.
 	LastSeen time.Time `json:"last_seen"`
+
+	// LANLastSeen tracks direct LAN/passive ownership separately from overlay
+	// activity. It is runtime-only: persisted assignments contain no current
+	// address claims, and Tailscale activity must not keep a stale LAN claim
+	// fresh for policy attribution.
+	LANLastSeen time.Time `json:"-"`
 
 	// Online indicates whether the device has been seen within the
 	// configured online threshold (default: 5 minutes).
@@ -97,7 +121,8 @@ type Device struct {
 
 // GetDisplayName returns the most stable available label for this device.
 // A user-assigned name always wins. Automatic labels prefer MAC identity,
-// followed by a DNS hostname and finally the current IP address.
+// followed by a LAN hostname, another observed name, and finally the current
+// LAN address.
 func (d *Device) GetDisplayName() string {
 	if d.ManualName != "" {
 		return d.ManualName
@@ -111,6 +136,14 @@ func (d *Device) GetDisplayName() string {
 	if d.DNSName != "" {
 		return d.DNSName
 	}
+	for _, identity := range d.TailscaleNodes {
+		if identity.Name != "" {
+			return identity.Name
+		}
+		if identity.DNSName != "" {
+			return identity.DNSName
+		}
+	}
 	if len(d.MDNSNames) > 0 {
 		return d.MDNSNames[0]
 	}
@@ -121,6 +154,25 @@ func (d *Device) GetDisplayName() string {
 		return d.IPv6
 	}
 	return "Unknown"
+}
+
+// HasIP reports whether ip is one of the device's current LAN or linked
+// Tailscale addresses.
+func (d *Device) HasIP(ip string) bool {
+	if ip == "" {
+		return false
+	}
+	if d.IPv4 == ip || d.IPv6 == ip {
+		return true
+	}
+	for _, identity := range d.TailscaleNodes {
+		for _, address := range identity.Addresses {
+			if address == ip {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // HasSource returns true if the device was discovered by the given source.

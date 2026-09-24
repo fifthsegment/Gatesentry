@@ -160,6 +160,32 @@ var healthHandler HttpHandlerFunc = func(w http.ResponseWriter, r *http.Request)
 	SendJSON(w, map[string]string{"status": "ok"})
 }
 
+func registerTailscaleRoutes(server *GsWeb, authenticationMiddleware mux.MiddlewareFunc, settings *gatesentry2storage.MapStore) {
+	// Set no-store before authentication so rejected requests cannot be cached
+	// either. The handler also sets it on authenticated responses.
+	tailscaleAuthentication := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Cache-Control", "no-store")
+			authenticationMiddleware(next).ServeHTTP(w, r)
+		})
+	}
+	server.Put("/api/devices/{id}/tailscale", mux.MiddlewareFunc(tailscaleAuthentication), func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiDeviceTailscaleLinkPUT(w, r, ParseJSONRequest)
+	})
+	server.Delete("/api/devices/{id}/tailscale/{nodeID}", mux.MiddlewareFunc(tailscaleAuthentication), func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiDeviceTailscaleUnlinkDELETE(w, r)
+	})
+	server.Get("/api/tailscale/status", mux.MiddlewareFunc(tailscaleAuthentication), func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiTailscaleStatusGET(w, r)
+	})
+	server.Put("/api/tailscale/config", mux.MiddlewareFunc(tailscaleAuthentication), func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiTailscaleConfigPUT(w, r, settings, ParseJSONRequest)
+	})
+	server.Get("/api/tailscale/peers", mux.MiddlewareFunc(tailscaleAuthentication), func(w http.ResponseWriter, r *http.Request) {
+		gatesentryWebserverEndpoints.GSApiTailscalePeersGET(w, r)
+	})
+}
+
 func RegisterEndpointsStartServer(
 	Filters *[]gatesentryFilters.GSFilter,
 	runtime *gatesentryWebserverTypes.TemporaryRuntime,
@@ -515,6 +541,7 @@ func RegisterEndpointsStartServer(
 	internalServer.Delete("/api/devices/{id}", authenticationMiddleware, func(w http.ResponseWriter, r *http.Request) {
 		gatesentryWebserverEndpoints.GSApiDeviceDelete(w, r)
 	})
+	registerTailscaleRoutes(internalServer, authenticationMiddleware, internalSettings)
 	log.Println("Device API endpoints registered")
 
 	// Policy group endpoints

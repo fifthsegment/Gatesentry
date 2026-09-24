@@ -517,9 +517,13 @@ func (m *MapStore) UpdateValue(key string, update func(string) (string, error)) 
 	if err != nil {
 		return err
 	}
-	next, err := update(values[key])
+	current, exists := values[key]
+	next, err := update(current)
 	if err != nil {
 		return err
+	}
+	if exists && next == current {
+		return nil
 	}
 	values[key] = next
 	data, err := json.Marshal(values)

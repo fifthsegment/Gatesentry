@@ -3,6 +3,7 @@ package backup
 import (
 	"crypto/rand"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -56,8 +57,28 @@ func seedStores(t *testing.T, settings, devices *gatesentry2storage.MapStore) {
 	if err := settings.Update("strictness", "2000"); err != nil {
 		t.Fatal(err)
 	}
-	if err := devices.Update("assignments", `{"version":1,"assignments":{"dev-1":{"id":"dev-1","dns_name":"phone"}}}`); err != nil {
+	if err := devices.Update("assignments", `{"version":2,"assignments":{"dev-1":{"id":"dev-1","dns_name":"phone","tailscale_nodes":[{"node_id":"node-1","name":"phone-tailnet"}]}}}`); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestCreateBackupSeedsEmptyDeviceAssignments(t *testing.T) {
+	setupTestDir(t)
+	settings, devices := openStores(t)
+	if err := settings.Update("settings_schema_version", "1"); err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := CreateBackup(settings, devices, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	archive, err := ValidateArchive(data)
+	if err != nil {
+		t.Fatalf("clean-install backup is not restorable: %v", err)
+	}
+	if got := archive.Devices[deviceAssignmentsKey]; got != `{"version":2,"assignments":{}}` {
+		t.Fatalf("assignments = %q", got)
 	}
 }
 
@@ -174,7 +195,7 @@ func TestValidateArchiveInvalid(t *testing.T) {
 		{"non_numeric_schema", []byte(`{"format_version":1,"settings":{"settings_schema_version":"abc"},"devices":{}}`)},
 		{
 			"newer_device_version",
-			[]byte(`{"format_version":1,"settings":{"settings_schema_version":"1"},"devices":{"assignments":"{\"version\":99}"}}`),
+			[]byte(`{"format_version":1,"settings":{"settings_schema_version":"1"},"devices":{"assignments":"{\"version\":3}"}}`),
 		},
 		{
 			"malformed_device_version",
@@ -187,6 +208,48 @@ func TestValidateArchiveInvalid(t *testing.T) {
 				t.Fatal("expected validation error, got nil")
 			}
 		})
+	}
+}
+
+func TestValidateDeviceAssignmentsVersionCompatibility(t *testing.T) {
+	for _, version := range []int{1, 2} {
+		t.Run(fmt.Sprintf("accepts_v%d", version), func(t *testing.T) {
+			raw := fmt.Sprintf(`{"version":%d,"assignments":{}}`, version)
+			if err := validateDeviceAssignmentsVersion(raw); err != nil {
+				t.Fatalf("validateDeviceAssignmentsVersion(v%d): %v", version, err)
+			}
+		})
+	}
+
+	tests := []struct {
+		name string
+		raw  string
+	}{
+		{name: "missing version", raw: `{"assignments":{}}`},
+		{name: "zero version", raw: `{"version":0,"assignments":{}}`},
+		{name: "negative version", raw: `{"version":-1,"assignments":{}}`},
+		{name: "malformed version", raw: `{"version":"2","assignments":{}}`},
+		{name: "unsupported version", raw: `{"version":3,"assignments":{}}`},
+		{name: "malformed document", raw: `{"version":2`},
+		{name: "missing assignments", raw: `{"version":2}`},
+		{name: "null assignments", raw: `{"version":2,"assignments":null}`},
+		{name: "malformed assignments", raw: `{"version":2,"assignments":[]}`},
+	}
+	for _, tt := range tests {
+		t.Run("rejects_"+tt.name, func(t *testing.T) {
+			if err := validateDeviceAssignmentsVersion(tt.raw); err == nil {
+				t.Fatal("expected validation error, got nil")
+			}
+		})
+	}
+}
+
+func TestValidateArchiveRequiresDeviceAssignments(t *testing.T) {
+	for _, devices := range []string{`{}`, `{"assignments":""}`} {
+		data := []byte(fmt.Sprintf(`{"format_version":1,"settings":{"settings_schema_version":"1"},"devices":%s}`, devices))
+		if _, err := ValidateArchive(data); err == nil {
+			t.Fatalf("ValidateArchive with devices %s: expected validation error", devices)
+		}
 	}
 }
 

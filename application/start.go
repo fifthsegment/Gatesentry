@@ -5,6 +5,7 @@ import (
 	"os"
 	"strconv"
 
+	gatesentryDnsServer "bitbucket.org/abdullah_irfan/gatesentryf/dns/server"
 	gatesentryWebserver "bitbucket.org/abdullah_irfan/gatesentryf/webserver"
 )
 
@@ -42,4 +43,5 @@ func Start(webadminport int) (*GSRuntime, error) {
 
 func Stop() {
 	fmt.Println("Stopping GateSentry " + GSVerString)
+	gatesentryDnsServer.StopPolicyEnforcement()
 }

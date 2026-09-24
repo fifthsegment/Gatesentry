@@ -54,3 +54,41 @@ test("device activity refreshes while the modal is open", () => {
   expect(source).toContain("activityController?.abort()");
   expect(source).toContain("clearTimeout(activityTimer)");
 });
+
+test("device detail links and unlinks Tailscale peers only after manual action", () => {
+  expect(source).toContain('TAILSCALE_BASE + "/peers"');
+  expect(source).toContain('/tailscale/" + encodeURIComponent(nodeID)');
+  expect(source).toContain(
+    "body: JSON.stringify({ node_id: selectedPeerNodeID })",
+  );
+  expect(source).toContain("bind:selected={selectedPeerNodeID}");
+  expect(source).toContain("disabled={tailscaleSaving || !selectedPeerNodeID}");
+  expect(source).toContain("Suggestions are shown as hints only");
+  expect(source).toContain("never select or link a peer automatically");
+  expect(source).not.toContain("selectedPeerNodeID = peer.suggestion");
+});
+
+test("device detail explains Tailscale MAC limitations", () => {
+  expect(source).toContain("normally does not provide a hardware MAC address");
+  expect(source).toContain("Wake-on-LAN");
+  expect(source).toContain("informational");
+  expect(source).toContain("peer.wol_macs");
+});
+
+test("device detail treats manager state separately from request errors", () => {
+  expect(source).toContain("tailscaleState = data");
+  expect(source).toContain(
+    'data.state === "connected" ? data.peers || [] : []',
+  );
+  expect(source).toContain('tailscaleState?.state === "connected"');
+  expect(source).toContain('if (state === "connected") return "success"');
+  expect(source).toContain(
+    'if (state === "degraded" || state === "connecting") return "warning"',
+  );
+  expect(source).toContain(
+    'if (state === "unavailable" || state === "stopped") return "error"',
+  );
+  expect(source).toContain(
+    "subtitle={tailscaleState.message || tailscaleState.backend_state}",
+  );
+});

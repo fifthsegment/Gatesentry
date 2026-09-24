@@ -470,3 +470,52 @@ func TestDNSSafeSearchRewritesYouTube(t *testing.T) {
 		t.Fatalf("second answer = %v, want the restricted endpoint's address", w.msg.Answer[1])
 	}
 }
+
+func TestLinkedTailscaleAddressUsesCanonicalDevicePolicy(t *testing.T) {
+	svc, cleanup := setupTestPolicyServer(t)
+	defer cleanup()
+
+	const (
+		deviceID    = "canonical-phone"
+		lanIP       = "192.0.2.70"
+		tailscaleIP = "100.64.0.70"
+	)
+	if _, err := deviceStore.UpsertDeviceE(&discovery.Device{
+		ID: deviceID, Hostnames: []string{"phone"}, IPv4: lanIP, Persistent: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := deviceStore.LinkTailscaleIdentityE(deviceID, discovery.TailscaleIdentity{
+		NodeID: "node-stable-secret", Addresses: []string{tailscaleIP}, Online: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.SaveGroups([]gatesentryPolicy.PolicyGroup{{
+		ID: "kids", Name: "Kids", BlockedDomains: []string{"games.example"},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.SaveAssignments([]gatesentryPolicy.DeviceAssignment{{DeviceID: deviceID, GroupID: "kids"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Reload(); err != nil {
+		t.Fatal(err)
+	}
+
+	lanIdentity := svc.ResolveIdentityForDNS(lanIP, "")
+	tailscaleIdentity := svc.ResolveIdentityForDNS(tailscaleIP, "")
+	if lanIdentity.DeviceID != deviceID || tailscaleIdentity.DeviceID != deviceID {
+		t.Fatalf("resolved devices: LAN=%+v Tailscale=%+v, want %q", lanIdentity, tailscaleIdentity, deviceID)
+	}
+	if lanIdentity.GroupID != "kids" || tailscaleIdentity.GroupID != lanIdentity.GroupID || tailscaleIdentity.Source != lanIdentity.Source {
+		t.Fatalf("resolved policies differ: LAN=%+v Tailscale=%+v", lanIdentity, tailscaleIdentity)
+	}
+
+	lanDecision := svc.EvaluateDNS(lanIdentity, "play.games.example")
+	tailscaleDecision := svc.EvaluateDNS(tailscaleIdentity, "play.games.example")
+	if lanDecision.Action != gatesentryPolicy.ActionBlock || tailscaleDecision.Action != lanDecision.Action ||
+		tailscaleDecision.GroupID != lanDecision.GroupID || tailscaleDecision.MatchedDomain != lanDecision.MatchedDomain ||
+		tailscaleDecision.Reason != lanDecision.Reason {
+		t.Fatalf("policy decisions differ: LAN=%+v Tailscale=%+v", lanDecision, tailscaleDecision)
+	}
+}

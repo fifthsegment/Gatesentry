@@ -53,10 +53,12 @@ const DefaultBrowseTimeout = 5 * time.Second
 // MDNSBrowser performs periodic mDNS/Bonjour service discovery on the
 // local network and feeds discovered devices into the DeviceStore.
 type MDNSBrowser struct {
-	store         *DeviceStore
-	interval      time.Duration
-	browseTimeout time.Duration
-	serviceTypes  []string
+	store                *DeviceStore
+	interval             time.Duration
+	browseTimeout        time.Duration
+	serviceTypes         []string
+	localAddressProvider func() []net.IP
+	browseProvider       func(string, time.Duration) []*bonjour.ServiceEntry
 
 	stopCh  chan struct{}
 	stopped chan struct{}
@@ -70,12 +72,15 @@ func NewMDNSBrowser(store *DeviceStore, interval time.Duration) *MDNSBrowser {
 	if interval <= 0 {
 		interval = DefaultScanInterval
 	}
-	return &MDNSBrowser{
-		store:         store,
-		interval:      interval,
-		browseTimeout: DefaultBrowseTimeout,
-		serviceTypes:  DefaultServiceTypes,
+	browser := &MDNSBrowser{
+		store:                store,
+		interval:             interval,
+		browseTimeout:        DefaultBrowseTimeout,
+		serviceTypes:         DefaultServiceTypes,
+		localAddressProvider: localInterfaceAddresses,
 	}
+	browser.browseProvider = browser.browseServiceType
+	return browser
 }
 
 // SetServiceTypes overrides the default list of mDNS service types to browse.
@@ -187,7 +192,7 @@ func (b *MDNSBrowser) scanOnce() {
 		default:
 		}
 
-		entries := b.browseServiceType(svcType, browseTimeout)
+		entries := b.browseProvider(svcType, browseTimeout)
 		for _, entry := range entries {
 			b.processEntry(entry)
 		}
@@ -240,7 +245,7 @@ func (b *MDNSBrowser) browseServiceType(serviceType string, timeout time.Duratio
 }
 
 func (b *MDNSBrowser) processEntry(entry *bonjour.ServiceEntry) {
-	if entry == nil {
+	if entry == nil || b.isSelfGateSentryEntry(entry) {
 		return
 	}
 
@@ -255,82 +260,88 @@ func (b *MDNSBrowser) processEntry(entry *bonjour.ServiceEntry) {
 		ipv6 = entry.AddrIPv6.String()
 	}
 
-	// Need at least an IP or hostname to create a meaningful device entry
-	if ipv4 == "" && ipv6 == "" && hostname == "" {
+	// A service name without an address cannot identify a usable network
+	// device. It may arrive as a partial mDNS response and must not create an
+	// addressless row that later restores as Unknown.
+	if ipv4 == "" && ipv6 == "" {
 		return
 	}
 
-	// Associate the observation using the most stable available identity:
-	// MAC address, then hostname, then the current IP address.
-	mac := ""
-	if ipv4 != "" {
-		mac = LookupARPEntry(ipv4)
-	}
-	var existing *Device
-	if mac != "" {
-		existing = b.store.FindDeviceByMAC(mac)
-	}
-	if existing == nil && hostname != "" {
-		existing = b.store.FindDeviceByHostname(hostname)
-	}
-	if existing == nil && instanceName != "" {
-		existing = b.store.FindDeviceByHostname(instanceName)
-	}
-	if existing == nil && ipv4 != "" {
-		existing = b.store.FindDeviceByIP(ipv4)
-	}
-	if existing == nil && ipv6 != "" {
-		existing = b.store.FindDeviceByIP(ipv6)
-	}
-
-	// Build the device struct for upsert
-	device := &Device{
+	device := Device{
 		Source:  SourceMDNS,
 		Sources: []DiscoverySource{SourceMDNS},
 		IPv4:    ipv4,
 		IPv6:    ipv6,
 		Online:  true,
 	}
-
 	if instanceName != "" {
 		device.MDNSNames = []string{instanceName}
 	}
 	if hostname != "" {
 		device.Hostnames = []string{hostname}
 	}
-
-	// If enriching an existing device, set its ID so UpsertDevice merges
-	if existing != nil {
-		device.ID = existing.ID
-
-		// Preserve existing IPs that mDNS didn't provide
-		if device.IPv4 == "" && existing.IPv4 != "" {
-			device.IPv4 = existing.IPv4
-		}
-		if device.IPv6 == "" && existing.IPv6 != "" {
-			device.IPv6 = existing.IPv6
-		}
-
-		// Prefer GUA/ULA over link-local IPv6 — don't downgrade a better address
-		if device.IPv6 != "" && existing.IPv6 != "" &&
-			IsLinkLocalIPv6(device.IPv6) && !IsLinkLocalIPv6(existing.IPv6) {
-			device.IPv6 = existing.IPv6
+	if ipv4 != "" {
+		if mac := LookupARPEntry(ipv4); mac != "" {
+			device.MACs = []string{mac}
 		}
 	}
 
-	if mac != "" {
-		device.MACs = []string{mac}
+	deviceID, created, err := b.store.ObserveDevice(device)
+	if err != nil {
+		log.Printf("[mDNS] Ignored ambiguous or invalid service observation: %v", err)
+		return
 	}
-
-	deviceID := b.store.UpsertDevice(device)
-
-	if existing == nil {
-		log.Printf("[mDNS] New device: %q (%s) at %s/%s [%s]",
-			instanceName, hostname, ipv4, ipv6, entry.Service)
+	if created {
+		log.Printf("[mDNS] New device: %q (%s) at %s/%s [%s]", instanceName, hostname, ipv4, ipv6, entry.Service)
 	} else {
-		log.Printf("[mDNS] Enriched device %s: %q (%s) [%s]",
-			deviceID, instanceName, hostname, entry.Service)
+		log.Printf("[mDNS] Enriched device %s: %q (%s) [%s]", deviceID, instanceName, hostname, entry.Service)
 	}
+}
+
+func (b *MDNSBrowser) isSelfGateSentryEntry(entry *bonjour.ServiceEntry) bool {
+	marker := false
+	for _, text := range entry.Text {
+		if strings.EqualFold(strings.TrimSpace(text), "app=gatesentry") {
+			marker = true
+			break
+		}
+	}
+	if !marker {
+		return false
+	}
+	addresses := b.localAddressProvider()
+	for _, advertised := range []net.IP{entry.AddrIPv4, entry.AddrIPv6} {
+		if advertised == nil {
+			continue
+		}
+		for _, local := range addresses {
+			if local.Equal(advertised) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func localInterfaceAddresses() []net.IP {
+	addresses, err := net.InterfaceAddrs()
+	if err != nil {
+		return nil
+	}
+	result := make([]net.IP, 0, len(addresses))
+	for _, address := range addresses {
+		var value string
+		switch typed := address.(type) {
+		case *net.IPNet:
+			value = typed.IP.String()
+		case *net.IPAddr:
+			value = typed.IP.String()
+		}
+		if ip := net.ParseIP(value); ip != nil {
+			result = append(result, ip)
+		}
+	}
+	return result
 }
 
 // CleanMDNSHostname strips mDNS suffixes and trailing dots from a hostname.

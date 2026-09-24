@@ -109,3 +109,30 @@ func TestCreateBundleUsesSafeAllowlist(t *testing.T) {
 		t.Fatalf("filter summary missing: %+v", bundle.Filters)
 	}
 }
+
+func TestRunDoesNotExposeStableTailscaleNodeIDs(t *testing.T) {
+	devices := gatesentryDiscovery.NewDeviceStore("local")
+	if _, err := devices.UpsertDeviceE(&gatesentryDiscovery.Device{
+		ID: "canonical-phone", IPv4: "192.0.2.70", Persistent: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	const nodeID = "node-stable-secret"
+	if _, err := devices.LinkTailscaleIdentityE("canonical-phone", gatesentryDiscovery.TailscaleIdentity{
+		NodeID: nodeID, Addresses: []string{"100.64.0.70"}, Online: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := json.Marshal(Run(Deps{
+		Devices:       devices,
+		Listener:      func(context.Context, string, string) error { return nil },
+		UpstreamCheck: func(context.Context, string) error { return nil },
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), nodeID) {
+		t.Fatalf("diagnostics leaked stable Tailscale node ID: %s", data)
+	}
+}

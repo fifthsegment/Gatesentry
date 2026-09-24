@@ -87,6 +87,57 @@ sudo systemctl restart systemd-resolved
   normally forward only port 53, so a non-standard port is mostly useful for
   testing.
 
+## Optional Tailscale integration
+
+GateSentry can read peer status from a `tailscaled` process running on the same
+Linux host. The integration is disabled by default and must still be enabled in
+the GateSentry settings after the socket is available. It is read-only: peer
+suggestions are not automatically linked to inventory devices.
+
+Host networking shares the host network namespace, not its filesystem. It does
+**not** make the host's Unix socket visible inside the container. To opt in,
+uncomment the read-only runtime-directory bind mount in the compose file:
+
+```yaml
+volumes:
+  - /var/run/tailscale:/var/run/tailscale:ro
+```
+
+Mount only the runtime directory containing `tailscaled.sock`. **Never mount
+`/var/lib/tailscale`**: it contains the daemon's durable identity and private
+state, which GateSentry neither needs nor reads. The standard socket paths
+`/var/run/tailscale/tailscaled.sock` and `/run/tailscale/tailscaled.sock` are
+auto-detected. For a custom location, mount its containing runtime directory at
+a chosen container path and set the exact in-container path:
+
+```yaml
+environment:
+  - GATESENTRY_TAILSCALE_SOCKET=/run/gatesentry-tailscale/tailscaled.sock
+```
+
+For a native installation, no bind mount is needed. The GateSentry service
+account must be able to traverse the runtime directory and connect to the Unix
+socket. For a container running as a non-root user, grant the container process
+the socket's existing group (for example with Compose `group_add`) or a narrow
+ACL. Check the socket owner, group, and mode with
+`stat /var/run/tailscale/tailscaled.sock`. Do not use a global `chmod`, make the
+socket world-writable, or weaken permissions on the whole runtime directory.
+Remember that daemon restarts can recreate the socket, so make permission
+changes through the service configuration rather than an ad-hoc file mode.
+
+Tailscale normally does not expose a peer's hardware MAC address. Any
+Wake-on-LAN MAC metadata is informational and is never used to match or link a
+LAN device. After an operator explicitly links a stable Tailscale node ID to a
+device, its currently observed Tailscale addresses resolve to that same device
+and therefore follow the device's existing policy assignment. Unlinked peers
+do not inherit a device policy.
+
+If the socket disappears, check the Tailscale status in GateSentry, restore the
+mount and permissions, restart `tailscaled` if necessary, and refresh status.
+Do not delete and recreate device links: the stable node links are durable and
+will be reused when peer status is available again. Disabling the integration
+clears runtime address and reachability observations, not those durable links.
+
 ## Persistent state and backups
 
 All durable state lives in the mounted data directory (`./docker_root` for
@@ -95,7 +146,9 @@ Option A, `./gatesentry-data` for Option B), including:
 - `installation.key` - per-installation encryption key. Without it the
   settings stores cannot be decrypted; keep it inside every backup.
 - `GSSettings`, `GSWebSettings` - encrypted settings stores.
-- `GSDevices` - durable device records (stable identifiers).
+- `GSDevices` - durable device records, including explicitly linked stable
+  Tailscale node IDs and names. Transient Tailscale addresses and reachability
+  observations are omitted and are refreshed from `tailscaled`.
 
 Back up while the container is stopped so files are consistent:
 
@@ -165,7 +218,9 @@ git checkout <previous-tag> && docker compose up -d --build   # or pin the previ
 
 Do not roll binaries back without restoring the matching data-directory
 backup: releases older than the secure first-run change cannot use the new
-administrator record, and older releases simply ignore newer device records.
+administrator record. A binary that supports only device-assignment version 1
+rejects version 2 records containing durable Tailscale links; binaries from
+before `GSDevices` existed ignore that store.
 See [Secure first-run administration](secure-first-run.md#upgrade-rollout-and-recovery).
 
 ## Point your network at GateSentry

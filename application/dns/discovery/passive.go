@@ -2,70 +2,43 @@ package discovery
 
 import (
 	"bufio"
+	"errors"
 	"log"
 	"net"
 	"os"
 	"strings"
-	"time"
 )
 
 func (ds *DeviceStore) ObservePassiveQuery(clientIP string) {
-	if clientIP == "" {
+	ip := normalizeIP(clientIP)
+	if ip == "" {
 		return
 	}
-
-	// Skip loopback addresses — not real devices
-	if clientIP == "127.0.0.1" || clientIP == "::1" || clientIP == "0.0.0.0" {
-		return
+	device := Device{
+		Source:  SourcePassive,
+		Sources: []DiscoverySource{SourcePassive},
+		Online:  true,
 	}
-
-	mac := LookupARPEntry(clientIP)
-
-	// Associate observations by the most stable identity available: MAC first,
-	// then an already-known address. Hostname-aware sources add the hostname
-	// fallback before reaching the address fallback.
-	if mac != "" {
-		existingByMAC := ds.FindDeviceByMAC(mac)
-		if existingByMAC != nil {
-			if net.ParseIP(clientIP).To4() != nil {
-				ds.UpdateDeviceIP(existingByMAC.ID, clientIP, "")
-			} else {
-				ds.UpdateDeviceIP(existingByMAC.ID, "", clientIP)
-			}
-			log.Printf("[Discovery] Passive: updated IP for device %s (%s → %s)",
-				existingByMAC.GetDisplayName(), existingByMAC.IPv4, clientIP)
-			return
+	if net.ParseIP(ip).To4() != nil {
+		device.IPv4 = ip
+		if mac := LookupARPEntry(ip); mac != "" {
+			device.MACs = []string{mac}
 		}
+	} else {
+		device.IPv6 = ip
 	}
-
-	existing := ds.FindDeviceByIP(clientIP)
-	if existing != nil {
-		ds.TouchDevice(existing.ID)
+	id, created, err := ds.ObserveDevice(device)
+	if err != nil {
+		if !errors.Is(err, ErrAmbiguousObservation) {
+			log.Printf("[Discovery] Passive observation rejected: %v", err)
+		}
 		return
 	}
-
-	// New device, unknown MAC — create a passive entry
-	now := time.Now()
-	device := &Device{
-		Source:    SourcePassive,
-		Sources:   []DiscoverySource{SourcePassive},
-		FirstSeen: now,
-		LastSeen:  now,
-		Online:    true,
-	}
-
-	if net.ParseIP(clientIP) != nil && net.ParseIP(clientIP).To4() != nil {
-		device.IPv4 = clientIP
+	if created {
+		log.Printf("[Discovery] Passive: new device from %s", ip)
 	} else {
-		device.IPv6 = clientIP
+		log.Printf("[Discovery] Passive: refreshed device %s from %s", id, ip)
 	}
-
-	if mac != "" {
-		device.MACs = []string{mac}
-	}
-
-	ds.UpsertDevice(device)
-	log.Printf("[Discovery] Passive: new device from %s (MAC: %s)", clientIP, mac)
 }
 
 // LookupARPEntry attempts to find the MAC address for an IP from the
@@ -92,12 +65,7 @@ func LookupARPEntry(ip string) string {
 			continue
 		}
 		if fields[0] == ip {
-			mac := strings.ToLower(fields[3])
-			// "00:00:00:00:00:00" means incomplete ARP entry
-			if mac == "00:00:00:00:00:00" {
-				return ""
-			}
-			return mac
+			return normalizeMAC(fields[3])
 		}
 	}
 	return ""
