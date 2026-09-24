@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"errors"
@@ -162,7 +163,7 @@ var GSPROXYPORT = "10413"
 var GSWEBADMINPORT = "10786"
 var GSBASEDIR = ""
 var Baseendpointv2 = "https://www.gatesentryfilter.com/api/"
-var GATESENTRY_VERSION = "2.2.1"
+var GATESENTRY_VERSION = "2.2.2"
 var GS_BOUND_ADDRESS = ":"
 var R *application.GSRuntime
 
@@ -190,33 +191,41 @@ type ContentScannerInput struct {
 }
 
 type program struct {
-	exit chan struct{}
+	cancel   context.CancelFunc
+	done     chan error
+	stopOnce sync.Once
 }
 
 func (p *program) Start(s service.Service) error {
 	log.Println("Starting up GateSentry")
-	p.exit = make(chan struct{})
+	ctx, cancel := context.WithCancel(context.Background())
+	p.cancel = cancel
+	p.done = make(chan error, 1)
 	startup := make(chan error, 1)
-	go p.run(startup)
+	go p.run(ctx, startup)
 	return <-startup
 }
-func (p *program) run(startup chan<- error) error {
-	if err := runGateSentry(startup); err != nil {
+
+func (p *program) run(ctx context.Context, startup chan<- error) {
+	err := runGateSentry(ctx, startup)
+	if err != nil {
 		log.Printf("GateSentry stopped with error: %v", err)
-		return err
 	}
-	for {
-		select {
-		case <-p.exit:
-			log.Println("Stopping GateSentry")
-			application.Stop()
-			return nil
-		}
-	}
+	p.done <- err
+	close(p.done)
 }
+
 func (p *program) Stop(s service.Service) error {
-	close(p.exit)
-	return nil
+	p.stopOnce.Do(func() {
+		log.Println("Stopping GateSentry")
+		p.cancel()
+	})
+	select {
+	case err := <-p.done:
+		return err
+	case <-time.After(20 * time.Second):
+		return errors.New("timed out waiting for GateSentry shutdown")
+	}
 }
 
 func preupgradeCheck(binpath string) error {
@@ -350,10 +359,10 @@ func readRuntimeSetting(key, conservativeFallback string) string {
 }
 
 func RunGateSentry() error {
-	return runGateSentry(nil)
+	return runGateSentry(context.Background(), nil)
 }
 
-func runGateSentry(startup chan<- error) (returnErr error) {
+func runGateSentry(ctx context.Context, startup chan<- error) (returnErr error) {
 	startupSignaled := false
 	signalStartup := func(err error) {
 		if startup != nil && !startupSignaled {
@@ -399,11 +408,21 @@ func runGateSentry(startup chan<- error) (returnErr error) {
 		snapshot := gatesentryproxy.ProxyTrafficSnapshot()
 		return snapshot.UploadBytes, snapshot.DownloadBytes, snapshot.StartedAt
 	})
+	application.SetBoundAddress(&GS_BOUND_ADDRESS)
 	R, err = application.Start(webadminport)
 	if err != nil {
 		return fmt.Errorf("initialize GateSentry: %w", err)
 	}
-	R.BoundAddress = &GS_BOUND_ADDRESS
+	defer func() {
+		if returnErr == nil {
+			return
+		}
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := application.Stop(cleanupCtx); err != nil {
+			log.Printf("GateSentry startup cleanup error: %v", err)
+		}
+	}()
 
 	application.StartBonjour()
 	gatesentryproxy.InitProxy()
@@ -594,13 +613,18 @@ func runGateSentry(startup chan<- error) (returnErr error) {
 		*&gafd.FilterResponse = []byte(gresponder.BuildGeneralResponsePage([]string{msg}, -1))
 	}
 
-	// Making a comm channel for our internal dns server
-	go application.DNSServerThread(application.GetBaseDir(), R.Logger, R.DNSServerChannel, R.GSSettings, R.GSDevices, R.DnsServerInfo)
+	dnsDone := make(chan struct{})
+	go func() {
+		defer close(dnsDone)
+		application.DNSServerThread(ctx, application.GetBaseDir(), R.Logger, R.DNSServerChannel, R.GSSettings, R.GSDevices, R.DnsServerInfo)
+	}()
+	application.SetDNSControllerDone(dnsDone)
 
 	addr := "0.0.0.0:"
 	addr += GSPROXYPORT
 
 	ttt := time.NewTicker(time.Second * 10)
+	defer ttt.Stop()
 	portavailable := false
 	for {
 		fmt.Println("Listening for proxy connections on : " + GSPROXYPORT)
@@ -627,7 +651,11 @@ func runGateSentry(startup chan<- error) (returnErr error) {
 		if portavailable {
 			break
 		}
-		<-ttt.C
+		select {
+		case <-ttt.C:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
 
 	// if portavailable {}
@@ -999,12 +1027,13 @@ func runGateSentry(startup chan<- error) (returnErr error) {
 	// 	}
 	// })
 
+	var transparentServer *gatesentryproxy.TransparentProxyServer
 	if runtime.GOOS == "linux" && !transparentProxyDisabled {
+		transparentServer = gatesentryproxy.NewTransparentProxyServer(&proxyHandler)
 		go func() {
 			transparentAddr := "0.0.0.0:" + strconv.Itoa(gatesentryproxy.GetTransparentProxyPort())
 			log.Printf("[Transparent] Starting transparent proxy server on %s", transparentAddr)
 
-			transparentServer := gatesentryproxy.NewTransparentProxyServer(&proxyHandler)
 			if err := transparentServer.Start(transparentAddr); err != nil {
 				log.Printf("[Transparent] Warning: Could not start transparent proxy server: %v", err)
 				log.Printf("[Transparent] Continuing without transparent proxy. Set GS_TRANSPARENT_PROXY=false to suppress this warning.")
@@ -1015,10 +1044,35 @@ func runGateSentry(startup chan<- error) (returnErr error) {
 	}
 
 	server := http.Server{Handler: proxyHandler}
+	shutdownDone := make(chan error, 1)
+	go func() {
+		<-ctx.Done()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		var shutdownErr error
+		if err := server.Shutdown(shutdownCtx); err != nil {
+			shutdownErr = errors.Join(shutdownErr, fmt.Errorf("stop explicit proxy: %w", err))
+			_ = server.Close()
+		}
+		if transparentServer != nil {
+			if err := transparentServer.Stop(); err != nil && !errors.Is(err, net.ErrClosed) {
+				shutdownErr = errors.Join(shutdownErr, fmt.Errorf("stop transparent proxy: %w", err))
+			}
+		}
+		if err := application.Stop(shutdownCtx); err != nil {
+			shutdownErr = errors.Join(shutdownErr, err)
+		}
+		shutdownDone <- shutdownErr
+	}()
+
 	log.Printf("Starting up...Listening on = %s", addr)
 	clientListener := gatesentryproxy.CountTrafficListener(tcpKeepAliveListener{proxyListener.(*net.TCPListener)})
-	if err = server.Serve(clientListener); err != nil {
-		return err
+	serveErr := server.Serve(clientListener)
+	if serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) && !errors.Is(serveErr, net.ErrClosed) {
+		return serveErr
+	}
+	if ctx.Err() != nil {
+		return <-shutdownDone
 	}
 	return nil
 }

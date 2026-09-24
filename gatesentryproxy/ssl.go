@@ -182,7 +182,7 @@ func ConnectDirect(conn net.Conn, serverAddr string, extraData []byte, gpt *GSPr
 	ulChan := make(chan int64)
 	go func() {
 		log.Printf("Non-MITM connection : Writing data to connection")
-		destwithcounter := &DataPassThru{Writer: conn, Contenttype: "", Passthru: gpt}
+		destwithcounter := &accountingWriter{writer: conn, passthru: gpt}
 		n, _ := io.Copy(destwithcounter, serverConn)
 		time.Sleep(time.Second)
 		conn.Close()
@@ -191,7 +191,7 @@ func ConnectDirect(conn net.Conn, serverAddr string, extraData []byte, gpt *GSPr
 
 	// go func() {
 	// 	log.Printf("Non-MITM connection : Writing data to connection")
-	// 	destwithcounter := &DataPassThru{Writer: conn, Contenttype: "", Passthru: gpt}
+	// 	destwithcounter := &accountingWriter{writer: conn, passthru: gpt}
 
 	// 	// Create a counter for tracking downloaded bytes
 	// 	counter := &ByteCounter{}

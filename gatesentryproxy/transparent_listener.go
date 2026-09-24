@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -409,6 +410,8 @@ type TransparentProxyServer struct {
 	Server   *http.Server
 	Handler  *ProxyHandler
 	Listener net.Listener
+	mu       sync.Mutex
+	stopped  bool
 }
 
 func NewTransparentProxyServer(handler *ProxyHandler) *TransparentProxyServer {
@@ -422,19 +425,29 @@ func (s *TransparentProxyServer) Start(addr string) error {
 	if err != nil {
 		return err
 	}
+	transparentListener := NewTransparentProxyListener(listener, s.Handler)
 
-	s.Listener = NewTransparentProxyListener(listener, s.Handler)
-
-	s.Server = &http.Server{
-		Handler: s.Handler,
+	s.mu.Lock()
+	if s.stopped {
+		s.mu.Unlock()
+		_ = transparentListener.Close()
+		return net.ErrClosed
 	}
+	s.Listener = transparentListener
+	s.Server = &http.Server{Handler: s.Handler}
+	server := s.Server
+	s.mu.Unlock()
 
-	return s.Server.Serve(s.Listener)
+	return server.Serve(transparentListener)
 }
 
 func (s *TransparentProxyServer) Stop() error {
-	if s.Listener != nil {
-		return s.Listener.Close()
+	s.mu.Lock()
+	s.stopped = true
+	listener := s.Listener
+	s.mu.Unlock()
+	if listener != nil {
+		return listener.Close()
 	}
 	return nil
 }

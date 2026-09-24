@@ -95,6 +95,10 @@ func (g *GsWeb) Delete(path string, handlerOrMiddleware interface{}, optionalHan
 	}
 }
 
+func (g *GsWeb) Handler() http.Handler {
+	return g.router
+}
+
 func (g *GsWeb) ListenAndServe(port string) error {
-	return http.ListenAndServe(port, g.router)
+	return http.ListenAndServe(port, g.Handler())
 }

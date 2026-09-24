@@ -218,7 +218,9 @@ func (R *GSRuntime) Init() error {
 	filters := []gatesentry2filters.GSFilter{}
 	gatesentry2filters.SetBaseDir(GSBASEDIR)
 	R.Filters = gatesentry2filters.LoadFilters(filters)
+	R.usersMu.Lock()
 	R.AuthUsers = []GatesentryTypes.GSUser{}
+	R.usersMu.Unlock()
 	gatesentry2storage.SetBaseDir(GSBASEDIR)
 	log.Println("Making a new MapStore for GSSettings")
 	var err error
@@ -446,7 +448,11 @@ llHxr1oRgfKfh/NFn7AGoS8sGIRVE80P
 	}
 
 	if R.Logger == nil {
-		R.Logger = gatesentry2logger.NewLogger(log_location)
+		logger, err := gatesentry2logger.OpenLogger(log_location)
+		if err != nil {
+			return fmt.Errorf("open activity logger: %w", err)
+		}
+		R.Logger = logger
 	} else {
 		log.Println("Gatesentry Logger already exists")
 	}
@@ -463,6 +469,11 @@ llHxr1oRgfKfh/NFn7AGoS8sGIRVE80P
 		return err
 	}
 	//
+	if err := R.ReloadCertificate(); err != nil {
+		return err
+	}
+
+	// No fallible initialization remains after background workers start.
 	R.GSUserRunDataSaver()
 
 	//R.KeepAliveMonitor()
@@ -474,19 +485,13 @@ llHxr1oRgfKfh/NFn7AGoS8sGIRVE80P
 	 */
 	ConsumptionUpdater()
 
-	if err := R.ReloadCertificate(); err != nil {
-		return err
+	dnsEnabled := R.readKnownGoodSetting("enable_dns_server", "false")
+	log.Println("DNS server setting = " + dnsEnabled)
+	if dnsEnabled == "true" {
+		R.DNSServerChannel <- 1
+	} else {
+		R.DNSServerChannel <- 2
 	}
-
-	go func() {
-		dnsEnabled := R.readKnownGoodSetting("enable_dns_server", "false")
-		log.Println("DNS server setting = " + dnsEnabled)
-		if dnsEnabled == "true" {
-			R.DNSServerChannel <- 1
-		} else {
-			R.DNSServerChannel <- 2
-		}
-	}()
 	return nil
 }
 

@@ -135,26 +135,28 @@ func decodeBase64Credentials(auth string) (user, pass string, ok bool) {
 	return auth[:colon], auth[colon+1:], true
 }
 
-type DataPassThru struct {
-	io.Writer
-	Bytes []byte
-	// total int64 // Total # of bytes transferred
-	Contenttype string
-	Passthru    *GSProxyPassthru
+// accountingWriter reports bytes successfully written without retaining a copy
+// of the payload. Proxy responses and CONNECT tunnels can be arbitrarily long,
+// so accounting must stay constant-memory.
+type accountingWriter struct {
+	writer      io.Writer
+	contentType string
+	passthru    *GSProxyPassthru
 }
 
-func (pt *DataPassThru) Write(p []byte) (int, error) {
-	n, err := pt.Writer.Write(p)
-	pt.Bytes = append(pt.Bytes, p...)
-	if err == nil {
-		IProxy.ContentSizeHandler(
-			GSContentSizeFilterData{
-				Url:         "",
-				ContentType: pt.Contenttype,
-				ContentSize: int64(n),
-				User:        pt.Passthru.User,
-			},
-		)
+func (w *accountingWriter) Write(p []byte) (int, error) {
+	n, err := w.writer.Write(p)
+	if n > 0 && IProxy != nil && IProxy.ContentSizeHandler != nil {
+		user := ""
+		if w.passthru != nil {
+			user = w.passthru.User
+		}
+		IProxy.ContentSizeHandler(GSContentSizeFilterData{
+			Url:         "",
+			ContentType: w.contentType,
+			ContentSize: int64(n),
+			User:        user,
+		})
 	}
 	return n, err
 }
@@ -387,8 +389,12 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if r.Header.Get("Upgrade") == "websocket" {
-		HandleWebsocketConnection(r, w)
+	if upgrade := strings.TrimSpace(r.Header.Get("Upgrade")); upgrade != "" {
+		if strings.EqualFold(upgrade, "websocket") {
+			HandleWebsocketConnection(r, w)
+		} else {
+			http.Error(w, "Unsupported protocol upgrade", http.StatusNotImplemented)
+		}
 		return
 	}
 
@@ -398,7 +404,7 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	gzipOK := strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") && !isLanAddress(client)
+	gzipOK := acceptsEncoding(r.Header.Get("Accept-Encoding"), "gzip") && !isLanAddress(client)
 	r.Header.Del("Accept-Encoding")
 
 	var rt http.RoundTripper
@@ -427,6 +433,11 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode == http.StatusSwitchingProtocols {
+		http.Error(w, "Unsupported upstream protocol upgrade", http.StatusBadGateway)
+		return
+	}
+
 	contentType := strings.ToLower(resp.Header.Get("Content-Type"))
 	if strings.Contains(contentType, ";") {
 		t := strings.Split(contentType, ";")
@@ -438,6 +449,18 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		log.Println("Content type is = ", contentType, " for ", r.URL.String())
 	}
 	// contentTypeBytes := []byte(contentType)
+
+	// Responses forbidden from carrying a message body must not consume or
+	// emit one, even if a broken upstream supplied bytes.
+	if responseHasNoBody(r.Method, resp.StatusCode) {
+		if contentLength := resp.Header.Get("Content-Length"); contentLength != "" {
+			w.Header().Set("Content-Length", contentLength)
+		} else if r.Method == http.MethodHead && resp.ContentLength >= 0 {
+			w.Header().Set("Content-Length", strconv.FormatInt(resp.ContentLength, 10))
+		}
+		copyResponseHeader(w, resp)
+		return
+	}
 
 	// contentTypeStatusBlocked, _ := IProxy.RunHandler("contenttypeblocked", "", &contentTypeBytes, passthru)
 	if policy.BlocksContentType(contentType) {
@@ -461,44 +484,51 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var buf bytes.Buffer
-	limitedReader := &io.LimitedReader{R: resp.Body, N: int64(MaxContentScanSize)}
-	teeReader := io.TeeReader(limitedReader, &buf)
-
-	localCopyData, err := io.ReadAll(teeReader)
-
-	if err != nil {
-		log.Printf("error while reading response body (URL: %s): %s", r.URL, err)
+	// Content types that no filter consumes should not pay the bounded-buffer
+	// cost. Unknown and generic binary responses remain inspectable because
+	// magic-byte media detection can still identify them.
+	if !responseContentNeedsInspection(contentType) {
+		if err := writeResponseStream(w, resp, contentType, passthru, nil, resp.Body, canDynamicCompress(r, resp, gzipOK)); err != nil {
+			log.Printf("error while copying non-inspectable response (URL: %s): %s", r.URL, err)
+		}
+		return
 	}
 
-	if limitedReader.N == 0 {
+	// Encoded representations cannot be inspected safely without decoding.
+	// Stream them unchanged rather than scanning compressed bytes.
+	if resp.Header.Get("Content-Encoding") != "" {
+		if err := writeResponseStream(w, resp, contentType, passthru, nil, resp.Body, false); err != nil {
+			log.Printf("error while copying encoded response (URL: %s): %s", r.URL, err)
+		}
+		return
+	}
+
+	// A known oversized response cannot be inspected, so stream it directly
+	// without allocating the scan buffer at all.
+	if resp.ContentLength > MaxContentScanSize {
 		log.Println("response body too long to filter:", r.URL)
-		if gzipOK {
-			resp.Header.Set("Content-Encoding", "gzip")
-			gzw := gzip.NewWriter(w)
-			defer gzw.Close()
-		} else if resp.ContentLength > 0 {
-			w.Header().Set("Content-Length", strconv.FormatInt(resp.ContentLength, 10))
-		}
-
-		destwithcounter := &DataPassThru{
-			Writer:      w,
-			Contenttype: contentType,
-			Passthru:    passthru,
-		}
-
-		copyResponseHeader(w, resp)
-
-		_, err := io.Copy(destwithcounter, resp.Body)
-		resp.Header.Set("Content-Encoding", "gzip")
-
-		if err != nil {
+		if err := writeResponseStream(w, resp, contentType, passthru, nil, resp.Body, canDynamicCompress(r, resp, gzipOK)); err != nil {
 			log.Printf("error while copying response (URL: %s): %s", r.URL, err)
-			errorData := &GSProxyErrorData{Error: err.Error()}
-			IProxy.ProxyErrorHandler(errorData)
-			sendBlockMessageBytes(w, r, nil, errorData.FilterResponse, nil)
-			return
 		}
+		return
+	}
+
+	// Read at most the configured scan limit plus one sentinel byte. This
+	// distinguishes an exactly-at-limit response from an oversized response
+	// without retaining a second copy of the body.
+	localCopyData, overLimit, err := readBoundedBody(resp.Body, MaxContentScanSize)
+	if err != nil {
+		log.Printf("error while reading response body (URL: %s): %s", r.URL, err)
+		http.Error(w, "Bad gateway", http.StatusBadGateway)
+		return
+	}
+
+	if overLimit {
+		log.Println("response body too long to filter:", r.URL)
+		if err := writeResponseStream(w, resp, contentType, passthru, localCopyData, resp.Body, canDynamicCompress(r, resp, gzipOK)); err != nil {
+			log.Printf("error while copying response (URL: %s): %s", r.URL, err)
+		}
+		return
 	}
 
 	kind, _ := filetype.Match(localCopyData)
@@ -508,53 +538,176 @@ func (h ProxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		contentType = kind.MIME.Value
 	}
-	responseSentMedia, proxyActionTaken := ScanMedia(localCopyData, contentType, r, w, resp, buf, passthru)
-	if responseSentMedia == true {
+	responseSentMedia, proxyActionTaken := ScanMedia(localCopyData, contentType, r, w, resp, passthru)
+	if responseSentMedia {
 		passthru.ProxyActionToLog = proxyActionTaken
-		// IProxy.RunHandler("log", "", &requestUrlBytes, passthru)
 		IProxy.LogHandler(GSLogData{Url: r.URL.String(), User: user, Action: proxyActionTaken, ClientIP: client, Layer: "content"})
 		return
 	}
 
-	responseSentText, proxyActionTaken := ScanText(localCopyData, contentType, r, w, resp, buf, passthru)
-	if responseSentText == true {
+	responseSentText, proxyActionTaken := ScanText(localCopyData, contentType, r, w, resp, passthru)
+	if responseSentText {
 		passthru.ProxyActionToLog = proxyActionTaken
-		// IProxy.RunHandler("log", "", &requestUrlBytes, passthru)
 		IProxy.LogHandler(GSLogData{Url: r.URL.String(), User: user, Action: proxyActionTaken, ClientIP: client, Layer: "content"})
 		return
 	}
 
-	if gzipOK && len(localCopyData) > 1000 {
+	if canDynamicCompress(r, resp, gzipOK) && len(localCopyData) > 1000 {
 		resp.Header.Set("Content-Encoding", "gzip")
+		stripTransformedRepresentationHeaders(resp.Header)
+		addVary(resp.Header, "Accept-Encoding")
 		copyResponseHeader(w, resp)
-		gzw := gzip.NewWriter(w)
-		var dest io.Writer
-		dest = gzw
-		destwithcounter := &DataPassThru{Writer: dest, Contenttype: contentType, Passthru: passthru}
-		destwithcounter.Write(localCopyData)
-		gzw.Close()
+		dest := &accountingWriter{writer: w, contentType: contentType, passthru: passthru}
+		gzw := gzip.NewWriter(dest)
+		_, writeErr := io.Copy(gzw, bytes.NewReader(localCopyData))
+		closeErr := gzw.Close()
+		if writeErr != nil {
+			log.Printf("error while writing response (URL: %s): %s", r.URL, writeErr)
+		} else if closeErr != nil {
+			log.Printf("error while closing gzip response (URL: %s): %s", r.URL, closeErr)
+		}
 	} else {
 		w.Header().Set("Content-Length", strconv.Itoa(len(localCopyData)))
 		copyResponseHeader(w, resp)
-		destwithcounter := &DataPassThru{Writer: w, Contenttype: contentType, Passthru: passthru}
-		destwithcounter.Write(localCopyData)
+		dest := &accountingWriter{writer: w, contentType: contentType, passthru: passthru}
+		if _, err := io.Copy(dest, bytes.NewReader(localCopyData)); err != nil {
+			log.Printf("error while writing response (URL: %s): %s", r.URL, err)
+		}
+	}
+
+}
+
+func acceptsEncoding(header, encoding string) bool {
+	exactFound, exactAccepted := false, false
+	wildcardFound, wildcardAccepted := false, false
+	for _, value := range strings.Split(header, ",") {
+		parts := strings.Split(value, ";")
+		name := strings.TrimSpace(parts[0])
+		if !strings.EqualFold(name, encoding) && name != "*" {
+			continue
+		}
+		accepted := true
+		for _, parameter := range parts[1:] {
+			key, value, found := strings.Cut(strings.TrimSpace(parameter), "=")
+			if found && strings.EqualFold(strings.TrimSpace(key), "q") {
+				quality, err := strconv.ParseFloat(strings.TrimSpace(value), 64)
+				accepted = err == nil && quality > 0
+			}
+		}
+		if strings.EqualFold(name, encoding) {
+			exactFound, exactAccepted = true, accepted
+		} else {
+			wildcardFound, wildcardAccepted = true, accepted
+		}
+	}
+	if exactFound {
+		return exactAccepted
+	}
+	return wildcardFound && wildcardAccepted
+}
+
+func responseContentNeedsInspection(contentType string) bool {
+	mediaType := strings.ToLower(strings.TrimSpace(strings.SplitN(contentType, ";", 2)[0]))
+	return mediaType == "" || mediaType == "application/octet-stream" || strings.Contains(mediaType, "html") ||
+		strings.HasPrefix(mediaType, "image/") || strings.HasPrefix(mediaType, "audio/") || strings.HasPrefix(mediaType, "video/")
+}
+
+func canDynamicCompress(r *http.Request, resp *http.Response, gzipOK bool) bool {
+	return gzipOK && resp.StatusCode != http.StatusPartialContent && r.Header.Get("Range") == "" &&
+		resp.Header.Get("Content-Range") == "" && resp.Header.Get("Content-Encoding") == ""
+}
+
+func stripTransformedRepresentationHeaders(header http.Header) {
+	for _, key := range []string{"Content-Length", "Content-Range", "Accept-Ranges", "ETag", "Digest", "Content-Digest", "Content-MD5"} {
+		deleteHeaderFold(header, key)
 	}
 }
 
-func sendInsecureBlockBytes(w http.ResponseWriter, r *http.Request, resp *http.Response, content []byte, contentType *string) {
-	w.WriteHeader(http.StatusOK)
-	// string ends with
+func stripReplacementRepresentationHeaders(header http.Header) {
+	stripTransformedRepresentationHeaders(header)
+	deleteHeaderFold(header, "Last-Modified")
+}
 
+func deleteHeaderFold(header http.Header, name string) {
+	for key := range header {
+		if strings.EqualFold(key, name) {
+			delete(header, key)
+		}
+	}
+}
+
+func addVary(header http.Header, value string) {
+	for _, existing := range header.Values("Vary") {
+		for _, token := range strings.Split(existing, ",") {
+			if strings.EqualFold(strings.TrimSpace(token), value) || strings.TrimSpace(token) == "*" {
+				return
+			}
+		}
+	}
+	header.Add("Vary", value)
+}
+
+func responseHasNoBody(method string, status int) bool {
+	return method == http.MethodHead || status >= 100 && status < 200 || status == http.StatusNoContent || status == http.StatusNotModified
+}
+
+// readBoundedBody returns one buffer containing at most limit+1 bytes. The
+// extra byte is retained as part of the passthrough prefix when overLimit is
+// true, so no byte is dropped or reordered.
+func readBoundedBody(src io.Reader, limit int64) (data []byte, overLimit bool, err error) {
+	if limit < 0 {
+		limit = 0
+	}
+	data, err = io.ReadAll(io.LimitReader(src, limit+1))
+	return data, int64(len(data)) > limit, err
+}
+
+// writeResponseStream writes the already-read prefix before the unread body.
+// It optionally gzip-compresses the complete ordered stream when the client
+// accepts gzip and the upstream response is identity encoded.
+func writeResponseStream(w http.ResponseWriter, resp *http.Response, contentType string, passthru *GSProxyPassthru, prefix []byte, body io.Reader, gzipOK bool) error {
+	compress := gzipOK && resp.StatusCode != http.StatusPartialContent && resp.Header.Get("Content-Range") == "" && resp.Header.Get("Content-Encoding") == ""
+	if compress {
+		resp.Header.Set("Content-Encoding", "gzip")
+		stripTransformedRepresentationHeaders(resp.Header)
+		addVary(resp.Header, "Accept-Encoding")
+	} else if resp.ContentLength >= 0 {
+		w.Header().Set("Content-Length", strconv.FormatInt(resp.ContentLength, 10))
+	}
+	copyResponseHeader(w, resp)
+
+	dest := &accountingWriter{writer: w, contentType: contentType, passthru: passthru}
+	var output io.Writer = dest
+	var gzw *gzip.Writer
+	if compress {
+		gzw = gzip.NewWriter(dest)
+		output = gzw
+	}
+	_, copyErr := io.Copy(output, io.MultiReader(bytes.NewReader(prefix), body))
+	if gzw != nil {
+		if closeErr := gzw.Close(); copyErr == nil {
+			copyErr = closeErr
+		}
+	}
+	return copyErr
+}
+
+func sendInsecureBlockBytes(w http.ResponseWriter, r *http.Request, resp *http.Response, content []byte, contentType *string) {
+	w.Header().Del("Content-Encoding")
 	if contentType != nil && isImage(*contentType) {
-		reasonForBlockArray := append([]string{"", "Image blocked by Gatesentry", "Reason(s) for blocking", "1. The content type is blocked"})
+		reasonForBlockArray := []string{"", "Image blocked by Gatesentry", "Reason(s) for blocking", "1. The content type is blocked"}
 		emptyImage, _ := createEmptyImage(500, 500, "jpeg", reasonForBlockArray)
 		w.Header().Set("Content-Type", "image/jpeg; charset=utf-8")
-		w.Write(emptyImage)
+		w.Header().Set("Content-Length", strconv.Itoa(len(emptyImage)))
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(emptyImage)
 		return
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write(content)
+	w.Header().Set("Content-Length", strconv.Itoa(len(content)))
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(content)
 }
 
 func sendBlockMessageBytes(w http.ResponseWriter, r *http.Request, resp *http.Response, content []byte, contentType *string) {
@@ -641,6 +794,7 @@ func logProxyActionWithReason(url string, user string, action ProxyAction, clien
 
 // copyResponseHeader writes resp's header and status code to w.
 func copyResponseHeader(w http.ResponseWriter, resp *http.Response) {
+	removeHopByHopHeaders(resp.Header)
 	newHeader := w.Header()
 	for key, values := range resp.Header {
 		if key == "Content-Length" {
@@ -657,7 +811,7 @@ func copyResponseHeader(w http.ResponseWriter, resp *http.Response) {
 // removeHopByHopHeaders removes header fields listed in
 // http://tools.ietf.org/html/draft-ietf-httpbis-p1-messaging-14#section-7.1.3.1
 func removeHopByHopHeaders(h http.Header) {
-	toRemove := HOP_BY_HOP
+	toRemove := append([]string(nil), HOP_BY_HOP...)
 	if c := h.Get("Connection"); c != "" {
 		for _, key := range strings.Split(c, ",") {
 			toRemove = append(toRemove, strings.TrimSpace(key))

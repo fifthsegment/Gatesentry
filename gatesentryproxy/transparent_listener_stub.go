@@ -7,6 +7,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"sync"
 )
 
 type TransparentProxyListener struct {
@@ -30,6 +31,8 @@ type TransparentProxyServer struct {
 	Server   *http.Server
 	Handler  *ProxyHandler
 	Listener net.Listener
+	mu       sync.Mutex
+	stopped  bool
 }
 
 func NewTransparentProxyServer(handler *ProxyHandler) *TransparentProxyServer {
