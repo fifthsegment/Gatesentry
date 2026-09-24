@@ -124,11 +124,11 @@ echo "  no-credentials -> 407"
 
 # ---- 9. Block via policy group -----------------------------------------
 echo "== block via policy group =="
-curl --fail --silent --show-error -X POST "$base/policy/groups" -H 'Content-Type: application/json' -H "$auth_header" -d '{"name":"smoke-block","domains":["httpbin.org"],"action":"block","users":["smokeproxy"]}' > "$group_json"
+curl --fail --silent --show-error -X POST "$base/policy/groups" -H 'Content-Type: application/json' -H "$auth_header" -d '{"name":"smoke-block","blocked_domains":["httpbin.org"],"users":["smokeproxy"]}' > "$group_json"
 curl -s -o "$block_out" -w '%{http_code}' --proxy "$proxy_url" "http://$TEST_DOMAIN$TEST_PATH" || true
 block_size=$(wc -c < "$block_out")
-[[ "$block_size" -eq 0 ]] || fail "blocked domain returned $block_size bytes, expected 0"
-echo "  $TEST_DOMAIN blocked (size=0)"
+grep -qi "blocked by your network" "$block_out" || fail "blocked domain returned $block_size bytes, expected the block page"
+echo "  $TEST_DOMAIN blocked (block page)"
 
 # ---- 10. Exception bypass ---------------------------------------------
 echo "== exception bypass =="
@@ -144,8 +144,8 @@ echo "== revoke exception =="
 curl --fail --silent --show-error -X DELETE "$base/exceptions/$exc_id" -H "$auth_header" > /dev/null
 curl -s -o "$block_out" -w '%{http_code}' --proxy "$proxy_url" "http://$TEST_DOMAIN$TEST_PATH" || true
 block_size=$(wc -c < "$block_out")
-[[ "$block_size" -eq 0 ]] || fail "after revoke, blocked domain returned $block_size bytes, expected 0"
-echo "  block restored after revoke (size=0)"
+grep -qi "blocked by your network" "$block_out" || fail "after revoke, blocked domain returned $block_size bytes, expected the block page"
+echo "  block restored after revoke (block page)"
 
 # ---- 12. Pause suppresses block --------------------------------------
 echo "== pause: temporary suppression =="
@@ -161,8 +161,8 @@ echo "== pause: revoke restores block =="
 curl --fail --silent --show-error -X DELETE "$base/pauses/$pause_id" -H "$auth_header" > /dev/null
 curl -s -o "$block_out" -w '%{http_code}' --proxy "$proxy_url" "http://$TEST_DOMAIN$TEST_PATH" || true
 block_size=$(wc -c < "$block_out")
-[[ "$block_size" -eq 0 ]] || fail "after pause revoke, blocked domain returned $block_size bytes, expected 0"
-echo "  block restored after pause revoke (size=0)"
+grep -qi "blocked by your network" "$block_out" || fail "after pause revoke, blocked domain returned $block_size bytes, expected the block page"
+echo "  block restored after pause revoke (block page)"
 
 # ---- 14. Inactive schedule suppresses block --------------------------
 echo "== schedule: inactive window suppresses block =="
@@ -174,7 +174,7 @@ sched_hh=$(printf "%02d" $(( (10#$cur_hh + 12) % 24 )))
 sched_from="${sched_hh}:00"
 sched_to="${sched_hh}:30"
 curl --fail --silent --show-error -X PUT "$base/policy/groups/$group_id" -H 'Content-Type: application/json' -H "$auth_header" \
-  -d "{\"name\":\"smoke-block\",\"domains\":[\"httpbin.org\"],\"action\":\"block\",\"users\":[\"smokeproxy\"],\"priority\":0,\"schedule\":{\"timezone\":\"UTC\",\"windows\":[{\"from\":\"$sched_from\",\"to\":\"$sched_to\"}]}}" > /dev/null
+  -d "{\"name\":\"smoke-block\",\"users\":[\"smokeproxy\"],\"priority\":0,\"rules\":[{\"id\":\"smoke-window\",\"enabled\":true,\"action\":\"block\",\"target\":{\"domains\":[\"httpbin.org\"]},\"schedule\":{\"timezone\":\"UTC\",\"windows\":[{\"from\":\"$sched_from\",\"to\":\"$sched_to\"}]}}]}" > /dev/null
 curl -s -o "$bypass_out" -w '%{http_code}' --proxy "$proxy_url" "http://$TEST_DOMAIN$TEST_PATH" || true
 bypass_size=$(wc -c < "$bypass_out")
 [[ "$bypass_size" -gt 10 ]] || fail "inactive schedule did not suppress block: $bypass_size bytes, expected forwarded content"
@@ -183,11 +183,11 @@ echo "  $TEST_DOMAIN forwarded outside schedule window ($bypass_size bytes)"
 # ---- 15. Clear schedule restores block -------------------------------
 echo "== schedule: clear schedule restores block =="
 curl --fail --silent --show-error -X PUT "$base/policy/groups/$group_id" -H 'Content-Type: application/json' -H "$auth_header" \
-  -d '{"name":"smoke-block","domains":["httpbin.org"],"action":"block","users":["smokeproxy"],"priority":0}' > /dev/null
+  -d '{"name":"smoke-block","blocked_domains":["httpbin.org"],"users":["smokeproxy"],"priority":0}' > /dev/null
 curl -s -o "$block_out" -w '%{http_code}' --proxy "$proxy_url" "http://$TEST_DOMAIN$TEST_PATH" || true
 block_size=$(wc -c < "$block_out")
-[[ "$block_size" -eq 0 ]] || fail "after clearing schedule, blocked domain returned $block_size bytes, expected 0"
-echo "  block restored after schedule cleared (size=0)"
+grep -qi "blocked by your network" "$block_out" || fail "after clearing schedule, blocked domain returned $block_size bytes, expected the block page"
+echo "  block restored after schedule cleared (block page)"
 
 # ---- 16. Policy preview: active decision ---------------------------
 echo "== policy preview: active decision =="
@@ -201,7 +201,7 @@ echo "  preview reports active=block for httpbin.org"
 echo "== policy preview: proposed comparison =="
 group_id=$("$PYTHON" -c "import json,sys; print(json.load(open(sys.argv[1]))['group']['id'])" "$group_json")
 curl --fail --silent --show-error -X POST "$base/policy/preview" -H 'Content-Type: application/json' -H "$auth_header" \
-  -d "{\"user\":\"smokeproxy\",\"domain\":\"httpbin.org\",\"proposed\":{\"groups\":[{\"id\":\"preview-allow\",\"name\":\"preview-allow\",\"action\":\"allow\",\"domains\":[\"httpbin.org\"],\"users\":[\"smokeproxy\"]}],\"assignments\":[]}}" > "$sched_json"
+  -d "{\"user\":\"smokeproxy\",\"domain\":\"httpbin.org\",\"proposed\":{\"groups\":[{\"id\":\"preview-allow\",\"name\":\"preview-allow\",\"allowed_domains\":[\"httpbin.org\"],\"users\":[\"smokeproxy\"]}],\"assignments\":[]}}" > "$sched_json"
 proposed_action=$("$PYTHON" -c "import json,sys; print(json.load(open(sys.argv[1]))['proposed']['action'])" "$sched_json")
 changed=$("$PYTHON" -c "import json,sys; print(str(json.load(open(sys.argv[1]))['changed']).lower())" "$sched_json")
 [[ "$proposed_action" == "allow" ]] || fail "preview proposed action was $proposed_action, expected allow"
@@ -212,8 +212,8 @@ echo "  preview reports proposed=allow, changed=true"
 echo "== policy preview: live policy untouched =="
 curl -s -o "$block_out" -w '%{http_code}' --proxy "$proxy_url" "http://$TEST_DOMAIN$TEST_PATH" || true
 block_size=$(wc -c < "$block_out")
-[[ "$block_size" -eq 0 ]] || fail "after preview, live block returned $block_size bytes, expected 0"
-echo "  live block still enforced after preview (size=0)"
+grep -qi "blocked by your network" "$block_out" || fail "after preview, live block returned $block_size bytes, expected the block page"
+echo "  live block still enforced after preview (block page)"
 
 
 # ---- 19. MITM: enable, download CA, verify HTTPS interception ---------
@@ -284,8 +284,8 @@ echo "  restore ok (recovery point recorded)"
 echo "== restore: block re-enforced after restore =="
 curl -s -o "$block_out" -w '%{http_code}' --proxy "$proxy_url" "http://$TEST_DOMAIN$TEST_PATH" || true
 block_size=$(wc -c < "$block_out")
-[[ "$block_size" -eq 0 ]] || fail "after restore, $TEST_DOMAIN returned $block_size bytes, expected 0 (blocked)"
-echo "  $TEST_DOMAIN blocked again after restore (size=0)"
+grep -qi "blocked by your network" "$block_out" || fail "after restore, $TEST_DOMAIN returned $block_size bytes, expected the block page"
+echo "  $TEST_DOMAIN blocked again after restore (block page)"
 
 # ---- 25. Restore: unrelated traffic still proxies --------------------
 echo "== restore: runtime still forwards unrelated traffic =="
@@ -300,7 +300,7 @@ corrupt_code=$(curl -s -o "$corrupt_out" -w '%{http_code}' -X POST "$base/restor
 [[ "$corrupt_code" == "400" ]] || fail "corrupt restore returned $corrupt_code, expected 400"
 curl -s -o "$block_out" -w '%{http_code}' --proxy "$proxy_url" "http://$TEST_DOMAIN$TEST_PATH" || true
 block_size=$(wc -c < "$block_out")
-[[ "$block_size" -eq 0 ]] || fail "after corrupt restore, $TEST_DOMAIN returned $block_size bytes, expected 0 (still blocked)"
+grep -qi "blocked by your network" "$block_out" || fail "after corrupt restore, $TEST_DOMAIN returned $block_size bytes, expected the block page"
 curl -s -o "$forward_out" -w '%{http_code}' --proxy "$proxy_url" "http://$FORWARD_DOMAIN/" || true
 forward_size=$(wc -c < "$forward_out")
 [[ "$forward_size" -gt 100 ]] || fail "after corrupt restore, HTTP forward returned only $forward_size bytes"

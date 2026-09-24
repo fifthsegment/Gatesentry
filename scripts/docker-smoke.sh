@@ -85,18 +85,18 @@ curl --fail --silent --show-error -X POST "$base/users" \
 # --- Create block policy group ---
 curl --fail --silent --show-error -X POST "$base/policy/groups" \
   -H 'Content-Type: application/json' -H "$auth_header" \
-  -d "{\"name\":\"smoke-block\",\"domains\":[\"$TEST_DOMAIN\"],\"action\":\"block\",\"users\":[\"$SMOKE_PROXY_USER\"]}" > "$group_json"
+  -d "{\"name\":\"smoke-block\",\"blocked_domains\":[\"$TEST_DOMAIN\"],\"users\":[\"$SMOKE_PROXY_USER\"]}" > "$group_json"
 
 proxy_url="http://$SMOKE_PROXY_USER:$SMOKE_PROXY_PASS@127.0.0.1:$proxy_port"
 
 # --- Test 1: Blocked domain returns empty body ---
 curl -s -o "$block_out" -w '%{http_code}' --proxy "$proxy_url" "http://$TEST_DOMAIN$TEST_PATH" || true
 block_size=$(wc -c < "$block_out")
-if [[ "$block_size" -ne 0 ]]; then
-  echo "error: blocked domain returned $block_size bytes, expected 0 (block path writes no body)" >&2
+if ! grep -qi "blocked by your network" "$block_out"; then
+  echo "error: blocked domain returned $block_size bytes, expected the block page" >&2
   exit 1
 fi
-echo "  block: $TEST_DOMAIN returns empty body (size=0)"
+echo "  block: $TEST_DOMAIN returns empty body (block page)"
 
 # --- Test 2: Installation-scoped exception bypasses the block ---
 curl --fail --silent --show-error -X POST "$base/exceptions" \
@@ -116,11 +116,11 @@ echo "  exception: $TEST_DOMAIN bypasses block (size=$bypass_size)"
 curl --fail --silent --show-error -X DELETE "$base/exceptions/$exc_id" -H "$auth_header" > /dev/null
 curl -s -o "$block_out" -w '%{http_code}' --proxy "$proxy_url" "http://$TEST_DOMAIN$TEST_PATH" || true
 block_size=$(wc -c < "$block_out")
-if [[ "$block_size" -ne 0 ]]; then
-  echo "error: after revoke, blocked domain returned $block_size bytes, expected 0" >&2
+if ! grep -qi "blocked by your network" "$block_out"; then
+  echo "error: after revoke, blocked domain returned $block_size bytes, expected the block page" >&2
   exit 1
 fi
-echo "  revoke: block restored after exception revoked (size=0)"
+echo "  revoke: block restored after exception revoked (block page)"
 
 # --- Test 4: Non-MITM proxy forwards normal traffic ---
 curl -s -o "$mitm_out" -w '%{http_code}' --proxy "$proxy_url" "http://example.com/" || true
