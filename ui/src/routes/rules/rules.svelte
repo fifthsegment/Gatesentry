@@ -9,9 +9,7 @@
 </Breadcrumb>
 <h2>Policies</h2>
 <p class="lead">
-  A policy decides what a device can reach: categories and domains it blocks, sites it always allows, safe search,
-  and rules for bedtime, school hours, or parts of a site. DNS enforces it for every device that uses GateSentry for
-  DNS; the proxy also enforces URL and response-type rules.
+  Each device follows one policy. Pick what to block, turn on safe search or bedtime, and add devices to it.
 </p>
 <Policygroups />
 

@@ -13,7 +13,7 @@
   import { getBasePath } from "../../lib/navigate";
   import Categoryselect from "./categoryselect.svelte";
   import Groupform from "./groupform.svelte";
-  import { DEFAULT_GROUP_ID, copyGroup, emptyGroup, persistableGroup, ruleSentence } from "./policymodel";
+  import { DEFAULT_GROUP_ID, copyGroup, emptyGroup, persistableGroup, policySummary, ruleSentence } from "./policymodel";
   import type {
     CategoryStatus,
     Device,
@@ -367,6 +367,12 @@
     return { text: "Not blocked by policy", type: "gray" };
   }
 
+  // Starters are the quickest way in, so they lead the page until the first
+  // policy of your own exists, then fold away under "Create policy".
+  $: customPolicies = groups.filter((group) => group.id !== DEFAULT_GROUP_ID).length;
+  let showStarters = false;
+  let expanded: Record<string, boolean> = {};
+
   onMount(load);
 </script>
 
@@ -384,13 +390,62 @@
     <div class="section-heading">
       <div>
         <h3>Policies</h3>
-        <p class="section-intro">
-          Every device uses exactly one policy: the one you assign it, or the default policy. A proxy user who signs in
-          uses their own policy on any device.
-        </p>
       </div>
-      <Button size="small" kind="secondary" disabled={saving} on:click={beginCreate}>Create policy</Button>
+      <div class="heading-actions">
+        {#if customPolicies}
+          <Button size="small" kind="ghost" on:click={() => (showStarters = !showStarters)}
+            >{showStarters ? "Hide starters" : "Use a starter"}</Button
+          >
+        {/if}
+        <Button size="small" kind="secondary" disabled={saving} on:click={beginCreate}>Create policy</Button>
+      </div>
     </div>
+
+    {#if !customPolicies || showStarters}
+      <div class="starters">
+        <h4>Start from a starter</h4>
+        <p class="section-intro">Adds an ordinary policy you can edit. Adding it again never overwrites your changes.</p>
+        {#if sharedLimitations.length}
+          <div class="shared-caveats">
+            <InlineNotification
+              kind="info"
+              lowContrast
+              hideCloseButton
+              title="Applies to every starter"
+              subtitle={sharedLimitations.join(" ")}
+            />
+          </div>
+        {/if}
+        <div class="template-grid">
+          {#each templates as template (template.id)}
+            <Tile>
+              <div class="template-tile">
+                <h4>{template.name}</h4>
+                <p class="tile-description">{template.description}</p>
+                {#if template.categories?.length}
+                  <div class="tags">
+                    {#each template.categories as category}
+                      <Tag size="sm" type="red">{categoryName(category)}</Tag>
+                    {/each}
+                  </div>
+                {/if}
+                {#if template.limitations?.length}
+                  <p class="tile-caveat">{template.limitations.join(" ")}</p>
+                {/if}
+                <Button
+                  size="small"
+                  kind={templateApplied(template) ? "ghost" : "primary"}
+                  disabled={saving || !template.available || templateApplied(template)}
+                  on:click={() => applyTemplate(template)}
+                >
+                  {templateApplied(template) ? "Added" : "Add policy"}
+                </Button>
+              </div>
+            </Tile>
+          {/each}
+        </div>
+      </div>
+    {/if}
 
     {#if editingGroupId === "new"}
       <div class="group-slot">
@@ -433,89 +488,97 @@
                   {#if group.id === DEFAULT_GROUP_ID}
                     <Tag size="sm" type="blue">default</Tag>
                   {/if}
-                  {#if group.safe_search}
-                    <Tag size="sm" type="purple">safe search</Tag>
-                  {/if}
+                  <span class="device-count">
+                    {(assignedByGroup[group.id] || []).length} device{(assignedByGroup[group.id] || []).length === 1 ? "" : "s"}{group.users.length ? " · " + group.users.length + " proxy user" + (group.users.length === 1 ? "" : "s") : ""}
+                  </span>
                 </div>
-                {#if group.description}
-                  <p>{group.description}</p>
+                <p class="summary-line">{policySummary(group, categoryName)}</p>
+                {#if group.id === DEFAULT_GROUP_ID}
+                  <p class="muted">Every device uses exactly one policy. Devices you haven't assigned use this one.</p>
+                {:else if !(assignedByGroup[group.id] || []).length && !group.users.length}
+                  <p class="muted">No devices yet, so this policy changes nothing until you add one.</p>
                 {/if}
 
-                {#if group.blocked_categories.length || group.blocked_domains.length}
-                  <div class="tags">
-                    <span class="tags-label">Blocks</span>
-                    {#each group.blocked_categories as category}
-                      <Tag size="sm" type="red">{categoryName(category)}</Tag>
-                    {/each}
-                    {#each group.blocked_domains as domain}
-                      <Tag size="sm" type="outline">{domain}</Tag>
-                    {/each}
-                  </div>
-                {/if}
-                {#if group.allowed_domains.length}
-                  <div class="tags">
-                    <span class="tags-label">Always allows</span>
-                    {#each group.allowed_domains as domain}
-                      <Tag size="sm" type="green">{domain}</Tag>
-                    {/each}
-                  </div>
-                {/if}
-                {#if group.rules.length}
-                  <ol class="rule-list">
-                    {#each group.rules as rule (rule.id)}
-                      <li class:off={!rule.enabled}>
-                        {rule.name ? rule.name + ": " : ""}{ruleSentence(rule, categoryName)}{rule.enabled ? "" : " (off)"}
-                      </li>
-                    {/each}
-                  </ol>
-                {/if}
-                {#if !group.blocked_categories.length && !group.blocked_domains.length && !group.allowed_domains.length && !group.rules.length && !group.safe_search}
-                  <p class="muted">Blocks nothing of its own; the gateway-wide blocklist and categories still apply.</p>
-                {/if}
+                <button type="button" class="link-button" on:click={() => (expanded[group.id] = !expanded[group.id])}>
+                  {expanded[group.id] ? "Hide details" : "Details and devices"}
+                </button>
 
-                <div class="group-assignment">
-                  <h5>Devices on this policy ({(assignedByGroup[group.id] || []).length})</h5>
-                  {#if (assignedByGroup[group.id] || []).length}
+                {#if expanded[group.id]}
+                  {#if group.description}
+                    <p>{group.description}</p>
+                  {/if}
+                  {#if group.blocked_categories.length || group.blocked_domains.length}
                     <div class="tags">
-                      {#each assignedByGroup[group.id] as deviceID (deviceID)}
-                        {#if group.id === DEFAULT_GROUP_ID}
-                          <Tag size="sm">{deviceName(deviceID)}</Tag>
-                        {:else}
-                          <Tag
-                            size="sm"
-                            filter
-                            title="Move to the default policy"
-                            on:close={() => setDevicePolicy(deviceID, DEFAULT_GROUP_ID)}>{deviceName(deviceID)}</Tag
-                          >
-                        {/if}
+                      <span class="tags-label">Blocks</span>
+                      {#each group.blocked_categories as category}
+                        <Tag size="sm" type="red">{categoryName(category)}</Tag>
+                      {/each}
+                      {#each group.blocked_domains as domain}
+                        <Tag size="sm" type="outline">{domain}</Tag>
                       {/each}
                     </div>
-                  {:else if group.id !== DEFAULT_GROUP_ID}
-                    <p class="muted">No devices yet, so this policy changes nothing until you add one.</p>
                   {/if}
-                  {#if group.users.length}
-                    <p class="muted">Proxy users: {group.users.join(", ")}</p>
-                  {/if}
-                  {#if group.id !== DEFAULT_GROUP_ID && devicesNotOn(group.id).length}
-                    <div class="assign-row">
-                      <Select size="sm" hideLabel labelText="Add a device" bind:selected={assigningDevice[group.id]}>
-                        <SelectItem value="" text="Add a device..." />
-                        {#each devicesNotOn(group.id) as device (device.id)}
-                          <SelectItem value={device.id} text={deviceLabel(device)} />
-                        {/each}
-                      </Select>
-                      <Button
-                        size="small"
-                        kind="tertiary"
-                        disabled={saving || !assigningDevice[group.id]}
-                        on:click={() => {
-                          setDevicePolicy(assigningDevice[group.id], group.id);
-                          assigningDevice[group.id] = "";
-                        }}>Add</Button
-                      >
+                  {#if group.allowed_domains.length}
+                    <div class="tags">
+                      <span class="tags-label">Always allows</span>
+                      {#each group.allowed_domains as domain}
+                        <Tag size="sm" type="green">{domain}</Tag>
+                      {/each}
                     </div>
                   {/if}
-                </div>
+                  {#if group.rules.length}
+                    <ol class="rule-list">
+                      {#each group.rules as rule (rule.id)}
+                        <li class:off={!rule.enabled}>
+                          {rule.name ? rule.name + ": " : ""}{ruleSentence(rule, categoryName)}{rule.enabled ? "" : " (off)"}
+                        </li>
+                      {/each}
+                    </ol>
+                  {/if}
+
+                  <div class="group-assignment">
+                    <h5>Devices on this policy ({(assignedByGroup[group.id] || []).length})</h5>
+                    {#if (assignedByGroup[group.id] || []).length}
+                      <div class="tags">
+                        {#each assignedByGroup[group.id] as deviceID (deviceID)}
+                          {#if group.id === DEFAULT_GROUP_ID}
+                            <Tag size="sm">{deviceName(deviceID)}</Tag>
+                          {:else}
+                            <Tag
+                              size="sm"
+                              filter
+                              title="Move to the default policy"
+                              on:close={() => setDevicePolicy(deviceID, DEFAULT_GROUP_ID)}>{deviceName(deviceID)}</Tag
+                            >
+                          {/if}
+                        {/each}
+                      </div>
+                    {/if}
+                    {#if group.users.length}
+                      <p class="muted">Proxy users: {group.users.join(", ")}</p>
+                    {/if}
+                  </div>
+                {/if}
+
+                {#if group.id !== DEFAULT_GROUP_ID && devicesNotOn(group.id).length}
+                  <div class="assign-row">
+                    <Select size="sm" hideLabel labelText="Add a device" bind:selected={assigningDevice[group.id]}>
+                      <SelectItem value="" text="Add a device..." />
+                      {#each devicesNotOn(group.id) as device (device.id)}
+                        <SelectItem value={device.id} text={deviceLabel(device)} />
+                      {/each}
+                    </Select>
+                    <Button
+                      size="small"
+                      kind="tertiary"
+                      disabled={saving || !assigningDevice[group.id]}
+                      on:click={() => {
+                        setDevicePolicy(assigningDevice[group.id], group.id);
+                        assigningDevice[group.id] = "";
+                      }}>Add</Button
+                    >
+                  </div>
+                {/if}
               </div>
               <div class="group-actions">
                 <Button size="small" kind="ghost" disabled={saving} on:click={() => beginEdit(group)}>Edit</Button>
@@ -532,11 +595,10 @@
     {/each}
   </section>
 
-  <section class="section">
-    <h3>Test a site</h3>
+  <details class="section fold">
+    <summary><h3>Test a site</h3></summary>
     <p class="section-intro">
-      See what a device gets for a domain or URL right now, and which rule decides it. This uses the same evaluator
-      that filters live traffic and changes nothing.
+      Check whether a site is blocked for a device right now, and which setting decides it. Nothing is changed.
     </p>
     <Tile>
       <div class="test-row">
@@ -597,60 +659,12 @@
         </div>
       {/if}
     </Tile>
-  </section>
+  </details>
 
-  <section class="section">
+  <details class="section fold">
+    <summary><h3>Gateway-wide categories</h3></summary>
     <div class="section-heading">
       <div>
-        <h3>Starter policies</h3>
-        <p class="section-intro">Adds an ordinary policy you can edit. Adding it again never overwrites your changes.</p>
-      </div>
-    </div>
-    {#if sharedLimitations.length}
-      <div class="shared-caveats">
-        <InlineNotification
-          kind="info"
-          lowContrast
-          hideCloseButton
-          title="Applies to every starter"
-          subtitle={sharedLimitations.join(" ")}
-        />
-      </div>
-    {/if}
-    <div class="template-grid">
-      {#each templates as template (template.id)}
-        <Tile>
-          <div class="template-tile">
-            <h4>{template.name}</h4>
-            <p class="tile-description">{template.description}</p>
-            {#if template.categories?.length}
-              <div class="tags">
-                {#each template.categories as category}
-                  <Tag size="sm" type="red">{categoryName(category)}</Tag>
-                {/each}
-              </div>
-            {/if}
-            {#if template.limitations?.length}
-              <p class="tile-caveat">{template.limitations.join(" ")}</p>
-            {/if}
-            <Button
-              size="small"
-              kind={templateApplied(template) ? "ghost" : "primary"}
-              disabled={saving || !template.available || templateApplied(template)}
-              on:click={() => applyTemplate(template)}
-            >
-              {templateApplied(template) ? "Added" : "Add policy"}
-            </Button>
-          </div>
-        </Tile>
-      {/each}
-    </div>
-  </section>
-
-  <section class="section">
-    <div class="section-heading">
-      <div>
-        <h3>Gateway-wide categories</h3>
         <p class="section-intro">
           Blocked for every device on every policy, like the global blocklist. A policy's always-allowed domains can
           still exempt a site.
@@ -664,7 +678,7 @@
       disabled={savingCategories}
       on:change={(event) => (gatewaySelection = event.detail)}
     />
-  </section>
+  </details>
 {/if}
 
 <style>
@@ -700,10 +714,44 @@
   .section {
     margin-bottom: 2.5rem;
   }
+  .fold > summary {
+    margin-bottom: 1rem;
+    cursor: pointer;
+  }
+  .fold > summary h3 {
+    display: inline;
+  }
+  .heading-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 0.5rem;
+  }
+  .starters {
+    margin-bottom: 1.5rem;
+  }
+  .device-count {
+    color: #525252;
+    font-size: 0.75rem;
+  }
+  .summary-line {
+    margin-bottom: 0.25rem;
+    color: #161616 !important;
+  }
+  .link-button {
+    padding: 0;
+    border: 0;
+    background: none;
+    color: #0f62fe;
+    cursor: pointer;
+    font-size: 0.875rem;
+    margin: 0.25rem 0 0.5rem;
+  }
   .section-heading {
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
+    flex-wrap: wrap;
     gap: 1rem;
     margin: 0 0 1rem;
   }
