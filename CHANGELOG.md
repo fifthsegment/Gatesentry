@@ -1,5 +1,17 @@
 # CHANGELOG
 
+## v2.2.0 (24 September 2026)
+
+### HTTPS inspection
+
+- The Filters menu is now HTTPS inspection (Blocked keywords, Blocked content types, Sites not inspected), with a warning on each page when inspection is off
+- The Block List page is removed; its entries are moved into every policy's blocked domains on upgrade
+
+### Policies
+
+- Policies, devices, and category feeds start with GateSentry rather than with the DNS server, so the proxy enforces a policy's blocked categories even when the DNS server is disabled
+- Category lookups take constant time regardless of feed size (about 2µs per proxy decision with a million domains)
+
 ## v2.1.0 (24 September 2026)
 
 ### Policies page
