@@ -153,3 +153,10 @@ jobs:
           files: dist/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  docker:
+    needs: [build, publish]
+    uses: ./.github/workflows/build-docker.yml
+    with:
+      tag: ${{ needs.build.outputs.tag }}
+    secrets: inherit

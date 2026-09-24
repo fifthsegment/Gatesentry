@@ -7,6 +7,14 @@ on:
         description: Existing release tag to publish
         required: true
         type: string
+  # Called by "Build and release" after it publishes a release, because a
+  # release created with GITHUB_TOKEN does not trigger other workflows.
+  workflow_call:
+    inputs:
+      tag:
+        description: Existing release tag to publish
+        required: true
+        type: string
 
 permissions:
   contents: read
