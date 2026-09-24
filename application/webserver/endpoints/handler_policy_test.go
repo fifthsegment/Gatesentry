@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"bitbucket.org/abdullah_irfan/gatesentryf/dns/discovery"
 	gatesentryDnsServer "bitbucket.org/abdullah_irfan/gatesentryf/dns/server"
 	gatesentryPolicy "bitbucket.org/abdullah_irfan/gatesentryf/policy"
 	gatesentry2storage "bitbucket.org/abdullah_irfan/gatesentryf/storage"
@@ -17,8 +18,9 @@ import (
 
 func policyTestService(t *testing.T) (*gatesentryPolicy.Service, func()) {
 	t.Helper()
-	// The DNS server package owns the singleton the handlers read.
+	// The DNS server package owns the singletons the handlers read.
 	original := gatesentryDnsServer.GetPolicyService()
+	originalDevices := gatesentryDnsServer.GetDeviceStore()
 	dir := t.TempDir()
 	oldBase := gatesentry2storage.GSBASEDIR
 	gatesentry2storage.SetBaseDir(dir + string(os.PathSeparator))
@@ -31,8 +33,16 @@ func policyTestService(t *testing.T) (*gatesentryPolicy.Service, func()) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	ds := discovery.NewDeviceStore("local")
+	if _, err := ds.UpsertDeviceE(&discovery.Device{ID: "device-1", IPv4: "192.0.2.10", Source: discovery.SourcePassive}); err != nil {
+		t.Fatal(err)
+	}
+	gatesentryDnsServer.SetDeviceStoreForTests(ds)
 	gatesentryDnsServer.SetPolicyServiceForTests(svc)
-	return svc, func() { gatesentryDnsServer.SetPolicyServiceForTests(original) }
+	return svc, func() {
+		gatesentryDnsServer.SetDeviceStoreForTests(originalDevices)
+		gatesentryDnsServer.SetPolicyServiceForTests(original)
+	}
 }
 
 type staticResolver struct{}
@@ -92,6 +102,100 @@ func TestPolicyAssignmentsRejectUnknownGroup(t *testing.T) {
 	GSApiPolicyAssignmentsReplace(recorder, req)
 	if recorder.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestPolicyAssignmentsReplaceRetainsDeviceIdentity(t *testing.T) {
+	_, cleanup := policyTestService(t)
+	defer cleanup()
+	svc := gatesentryDnsServer.GetPolicyService()
+	if err := svc.SaveGroups([]gatesentryPolicy.PolicyGroup{{ID: "kids", Name: "Kids"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Reload(); err != nil {
+		t.Fatal(err)
+	}
+	ds := gatesentryDnsServer.GetDeviceStore()
+	devices, err := gatesentry2storage.OpenMapStore("GSDevices", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ds.AttachPersistence(devices); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodPut, "/api/policy/assignments", bytes.NewBufferString(
+		`{"assignments":[{"device_id":"device-1","group_id":"kids"}]}`))
+	recorder := httptest.NewRecorder()
+	GSApiPolicyAssignmentsReplace(recorder, req)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	restarted := discovery.NewDeviceStore("local")
+	if err := restarted.AttachPersistence(devices); err != nil {
+		t.Fatal(err)
+	}
+	if got := restarted.GetDevice("device-1"); got == nil || !got.Persistent {
+		t.Fatalf("restored device = %+v", got)
+	}
+}
+
+func TestPolicyAssignmentsReplaceRejectsMissingDevice(t *testing.T) {
+	svc, cleanup := policyTestService(t)
+	defer cleanup()
+	if err := svc.SaveGroups([]gatesentryPolicy.PolicyGroup{{ID: "kids", Name: "Kids"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Reload(); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodPut, "/api/policy/assignments", bytes.NewBufferString(
+		`{"assignments":[{"device_id":"missing","group_id":"kids"}]}`))
+	recorder := httptest.NewRecorder()
+	GSApiPolicyAssignmentsReplace(recorder, req)
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	if len(svc.Snapshot().Assignments) != 0 {
+		t.Fatalf("rejected assignments = %v", svc.Snapshot().Assignments)
+	}
+}
+
+func TestPolicyAssignmentsReplaceDeviceWriteFailureDoesNotCommit(t *testing.T) {
+	svc, cleanup := policyTestService(t)
+	base := gatesentry2storage.GSBASEDIR
+	defer cleanup()
+	if err := svc.SaveGroups([]gatesentryPolicy.PolicyGroup{{ID: "kids", Name: "Kids"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Reload(); err != nil {
+		t.Fatal(err)
+	}
+	ds := gatesentryDnsServer.GetDeviceStore()
+	devices, err := gatesentry2storage.OpenMapStore("GSDevices", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ds.AttachPersistence(devices); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(base); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodPut, "/api/policy/assignments", bytes.NewBufferString(
+		`{"assignments":[{"device_id":"device-1","group_id":"kids"}]}`))
+	recorder := httptest.NewRecorder()
+	GSApiPolicyAssignmentsReplace(recorder, req)
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	if len(svc.Snapshot().Assignments) != 0 {
+		t.Fatalf("assignments committed after device write failure: %v", svc.Snapshot().Assignments)
+	}
+	if got := ds.GetDevice("device-1"); got == nil || got.Persistent {
+		t.Fatalf("failed persistence changed device = %+v", got)
 	}
 }
 

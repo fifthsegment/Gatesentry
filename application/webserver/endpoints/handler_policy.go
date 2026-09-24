@@ -333,6 +333,32 @@ func GSApiPolicyAssignmentsReplace(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	ds := gatesentryDnsServer.GetDeviceStore()
+	if len(body.Assignments) > 0 {
+		if ds == nil {
+			deviceStoreOrError(w)
+			return
+		}
+		for _, assignment := range body.Assignments {
+			if ds.GetDevice(assignment.DeviceID) == nil {
+				http.Error(w, `{"error":"Device not found"}`, http.StatusNotFound)
+				return
+			}
+		}
+	}
+	// Device identity and policy are separate durable documents. Retain every
+	// referenced identity first so a failed device write cannot create an
+	// assignment whose canonical target disappears after restart. A later policy
+	// failure may leave a harmless retained device, but never a dangling mapping.
+	for _, assignment := range body.Assignments {
+		if _, ok, err := ds.MarkDevicePersistentE(assignment.DeviceID); err != nil {
+			http.Error(w, `{"error":"Unable to persist device identity"}`, http.StatusInternalServerError)
+			return
+		} else if !ok {
+			http.Error(w, `{"error":"Device not found"}`, http.StatusNotFound)
+			return
+		}
+	}
 	if err := svc.SaveAssignments(body.Assignments); err != nil {
 		http.Error(w, `{"error":"Unable to persist assignments"}`, http.StatusInternalServerError)
 		return

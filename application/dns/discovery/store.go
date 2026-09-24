@@ -964,6 +964,41 @@ type ManualFieldsUpdate struct {
 	SetCategory   bool
 }
 
+// MarkDevicePersistentE retains one canonical device across restarts without
+// turning its current LAN address into durable identity. Policy assignment uses
+// this before storing a device ID so the reference cannot outlive its target.
+func (ds *DeviceStore) MarkDevicePersistentE(id string) (*Device, bool, error) {
+	ds.mutationMu.Lock()
+	defer ds.mutationMu.Unlock()
+
+	ds.mu.Lock()
+	current := ds.devices[id]
+	if current == nil {
+		ds.mu.Unlock()
+		return nil, false, nil
+	}
+	original := cloneDevice(current)
+	updated := *cloneDevice(current)
+	updated.Persistent = true
+	persistence := ds.persistence
+	if persistence == nil {
+		ds.devices[id] = cloneDevice(&updated)
+		ds.rebuildIndexes()
+		ds.mu.Unlock()
+		return cloneDevice(&updated), true, nil
+	}
+	ds.mu.Unlock()
+	if err := persistence.persistIfChanged(updated); err != nil {
+		return original, true, err
+	}
+
+	ds.mu.Lock()
+	ds.devices[id] = cloneDevice(&updated)
+	ds.rebuildIndexes()
+	ds.mu.Unlock()
+	return cloneDevice(&updated), true, nil
+}
+
 // UpdateManualFieldsE applies user-managed fields to one device. Discovery
 // remains the owner of observed identity: this method never changes addresses,
 // sources, last-seen, or online state. It returns the updated copy and any
