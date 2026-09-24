@@ -234,6 +234,19 @@ func GSApiDeviceAssignmentSet(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"Invalid JSON body"}`, http.StatusBadRequest)
 		return
 	}
+	if req.GroupID != "" && req.GroupID != gatesentryPolicy.DefaultGroupID {
+		if _, exists := svc.Snapshot().Groups[req.GroupID]; !exists {
+			http.Error(w, `{"error":"Unknown policy group id"}`, http.StatusBadRequest)
+			return
+		}
+		if _, ok, err := ds.MarkDevicePersistentE(id); err != nil {
+			http.Error(w, `{"error":"Unable to persist device identity"}`, http.StatusInternalServerError)
+			return
+		} else if !ok {
+			http.Error(w, `{"error":"Device not found"}`, http.StatusNotFound)
+			return
+		}
+	}
 	if err := svc.SetDeviceAssignment(id, req.GroupID); err != nil {
 		if errors.Is(err, gatesentryPolicy.ErrUnknownGroup) {
 			http.Error(w, `{"error":"Unknown policy group id"}`, http.StatusBadRequest)

@@ -77,7 +77,7 @@ func TestCreateBackupSeedsEmptyDeviceAssignments(t *testing.T) {
 	if err != nil {
 		t.Fatalf("clean-install backup is not restorable: %v", err)
 	}
-	if got := archive.Devices[deviceAssignmentsKey]; got != `{"version":2,"assignments":{}}` {
+	if got := archive.Devices[deviceAssignmentsKey]; got != `{"version":3,"assignments":{}}` {
 		t.Fatalf("assignments = %q", got)
 	}
 }
@@ -212,7 +212,7 @@ func TestValidateArchiveInvalid(t *testing.T) {
 }
 
 func TestValidateDeviceAssignmentsVersionCompatibility(t *testing.T) {
-	for _, version := range []int{1, 2} {
+	for _, version := range []int{1, 2, 3} {
 		t.Run(fmt.Sprintf("accepts_v%d", version), func(t *testing.T) {
 			raw := fmt.Sprintf(`{"version":%d,"assignments":{}}`, version)
 			if err := validateDeviceAssignmentsVersion(raw); err != nil {
@@ -229,7 +229,7 @@ func TestValidateDeviceAssignmentsVersionCompatibility(t *testing.T) {
 		{name: "zero version", raw: `{"version":0,"assignments":{}}`},
 		{name: "negative version", raw: `{"version":-1,"assignments":{}}`},
 		{name: "malformed version", raw: `{"version":"2","assignments":{}}`},
-		{name: "unsupported version", raw: `{"version":3,"assignments":{}}`},
+		{name: "unsupported version", raw: `{"version":4,"assignments":{}}`},
 		{name: "malformed document", raw: `{"version":2`},
 		{name: "missing assignments", raw: `{"version":2}`},
 		{name: "null assignments", raw: `{"version":2,"assignments":null}`},

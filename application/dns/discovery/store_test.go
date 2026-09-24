@@ -1280,7 +1280,7 @@ func TestObserveDeviceConcurrentFirstObservationConverges(t *testing.T) {
 	}
 }
 
-func TestTailscaleLinkResolvesCanonicalDeviceAndClearsOfflineAlias(t *testing.T) {
+func TestTailscaleLinkResolvesCanonicalDeviceAndRetainsOfflineAlias(t *testing.T) {
 	store := NewDeviceStore("local")
 	if _, err := store.UpsertDeviceE(&Device{ID: "phone", IPv4: "192.0.2.30", MACs: []string{"aa:bb:cc:dd:ee:ff"}, Persistent: true}); err != nil {
 		t.Fatal(err)
@@ -1295,12 +1295,138 @@ func TestTailscaleLinkResolvesCanonicalDeviceAndClearsOfflineAlias(t *testing.T)
 	if err := store.ApplyTailscaleSnapshot([]TailscaleIdentity{{NodeID: "node-1", Name: "Pixel", Addresses: []string{"100.64.0.30"}, Online: false}}); err != nil {
 		t.Fatal(err)
 	}
-	if got := store.FindDeviceByIP("100.64.0.30"); got != nil {
-		t.Fatalf("offline peer retained active address claim: %+v", got)
+	if got := store.FindDeviceByIP("100.64.0.30"); got == nil || got.ID != "phone" {
+		t.Fatalf("offline peer lost durable address claim: %+v", got)
 	}
 	device := store.GetDevice("phone")
-	if device == nil || len(device.TailscaleNodes) != 1 || device.TailscaleNodes[0].Online || len(device.TailscaleNodes[0].Addresses) != 0 {
+	if device == nil || len(device.TailscaleNodes) != 1 || device.TailscaleNodes[0].Online || len(device.TailscaleNodes[0].Addresses) != 1 {
 		t.Fatalf("offline linked device = %+v", device)
+	}
+}
+
+func TestTailscaleSnapshotMovesAliasToNewAddress(t *testing.T) {
+	store := NewDeviceStore("local")
+	if _, err := store.UpsertDeviceE(&Device{ID: "phone", Persistent: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.LinkTailscaleIdentityE("phone", TailscaleIdentity{NodeID: "node-1", Addresses: []string{"100.64.0.7"}, Online: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := store.ApplyTailscaleSnapshot([]TailscaleIdentity{{NodeID: "node-1", Addresses: []string{"100.64.0.8"}, Online: true}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := store.FindDeviceByIP("100.64.0.7"); got != nil {
+		t.Fatalf("old alias still resolves: %+v", got)
+	}
+	if got := store.FindDeviceByIP("100.64.0.8"); got == nil || got.ID != "phone" {
+		t.Fatalf("new alias = %+v", got)
+	}
+}
+
+func TestTailscaleSnapshotRetainsAliasWhenPeerMissing(t *testing.T) {
+	store := NewDeviceStore("local")
+	if _, err := store.UpsertDeviceE(&Device{ID: "phone", Persistent: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.LinkTailscaleIdentityE("phone", TailscaleIdentity{NodeID: "node-1", Addresses: []string{"100.64.0.9"}, Online: true, LastSeen: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := store.ApplyTailscaleSnapshot(nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := store.FindDeviceByIP("100.64.0.9"); got == nil || got.ID != "phone" || got.TailscaleNodes[0].Online {
+		t.Fatalf("missing peer alias = %+v", got)
+	}
+}
+
+func TestTailscaleSnapshotDoesNotCreateUnlinkedPeer(t *testing.T) {
+	store := NewDeviceStore("local")
+	if err := store.ApplyTailscaleSnapshot([]TailscaleIdentity{{NodeID: "node-1", Addresses: []string{"100.64.0.10"}, Online: true}}); err != nil {
+		t.Fatal(err)
+	}
+	if store.DeviceCount() != 0 || store.FindDeviceByIP("100.64.0.10") != nil {
+		t.Fatalf("unlinked peer entered inventory: %+v", store.GetAllDevices())
+	}
+}
+
+func TestTailscaleSnapshotReconcilesTransientDuplicate(t *testing.T) {
+	store := NewDeviceStore("local")
+	if _, err := store.UpsertDeviceE(&Device{ID: "phone", ManualName: "Pixel", Persistent: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.LinkTailscaleIdentityE("phone", TailscaleIdentity{NodeID: "node-1", Name: "Pixel"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpsertDeviceE(&Device{ID: "observed", IPv4: "100.64.0.40", Source: SourcePassive}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := store.ApplyTailscaleSnapshotProtected([]TailscaleIdentity{{NodeID: "node-1", Addresses: []string{"100.64.0.40"}, Online: true}}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if store.GetDevice("observed") != nil || store.DeviceCount() != 1 {
+		t.Fatalf("transient duplicate survived snapshot: %+v", store.GetAllDevices())
+	}
+	if got := store.FindDeviceByIP("100.64.0.40"); got == nil || got.ID != "phone" || store.IPClaimCount("100.64.0.40") != 1 {
+		t.Fatalf("canonical alias = %+v, claims = %d", got, store.IPClaimCount("100.64.0.40"))
+	}
+}
+
+func TestTailscaleSnapshotKeepsEnrichedConflictAmbiguous(t *testing.T) {
+	store := NewDeviceStore("local")
+	if _, err := store.UpsertDeviceE(&Device{ID: "phone", Persistent: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.LinkTailscaleIdentityE("phone", TailscaleIdentity{NodeID: "node-1"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpsertDeviceE(&Device{ID: "observed", IPv4: "100.64.0.39", MACs: []string{"aa:bb:cc:dd:ee:ff"}, Source: SourcePassive}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := store.ApplyTailscaleSnapshotProtected([]TailscaleIdentity{{NodeID: "node-1", Addresses: []string{"100.64.0.39"}, Online: true}}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if store.GetDevice("observed") == nil || store.IPClaimCount("100.64.0.39") != 2 {
+		t.Fatalf("enriched conflict was consolidated: %+v", store.GetAllDevices())
+	}
+}
+
+func TestTailscaleSnapshotKeepsProtectedConflictAmbiguous(t *testing.T) {
+	store := NewDeviceStore("local")
+	if _, err := store.UpsertDeviceE(&Device{ID: "phone", Persistent: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.LinkTailscaleIdentityE("phone", TailscaleIdentity{NodeID: "node-1"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpsertDeviceE(&Device{ID: "observed", IPv4: "100.64.0.41", Source: SourcePassive}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := store.ApplyTailscaleSnapshotProtected([]TailscaleIdentity{{NodeID: "node-1", Addresses: []string{"100.64.0.41"}, Online: true}}, map[string]bool{"observed": true}); err != nil {
+		t.Fatal(err)
+	}
+	if store.GetDevice("observed") == nil || store.IPClaimCount("100.64.0.41") != 2 {
+		t.Fatalf("protected conflict was consolidated: %+v", store.GetAllDevices())
+	}
+}
+
+func TestTailscaleClearRetainsLastKnownAlias(t *testing.T) {
+	store := NewDeviceStore("local")
+	if _, err := store.UpsertDeviceE(&Device{ID: "phone", Persistent: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.LinkTailscaleIdentityE("phone", TailscaleIdentity{NodeID: "node-1", Addresses: []string{"100.64.0.42"}, Online: true, LastSeen: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+
+	store.ClearTailscaleObservations()
+	device := store.FindDeviceByIP("100.64.0.42")
+	if device == nil || device.ID != "phone" || device.TailscaleNodes[0].Online || device.Online {
+		t.Fatalf("cleared linked device = %+v", device)
 	}
 }
 

@@ -431,6 +431,23 @@ func TestHandleDNS_BareHostname(t *testing.T) {
 	}
 }
 
+func TestDeviceResolverKeepsLastKnownTailscaleAliasFresh(t *testing.T) {
+	original := deviceStore
+	deviceStore = discovery.NewDeviceStore("local")
+	defer func() { deviceStore = original }()
+	if _, err := deviceStore.UpsertDeviceE(&discovery.Device{
+		ID:             "linked-device",
+		TailscaleNodes: []discovery.TailscaleIdentity{{NodeID: "node-1", Addresses: []string{"100.64.0.7"}}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	deviceID, ambiguous, stale := (deviceResolver{}).ResolveDeviceByIP("100.64.0.7")
+	if deviceID != "linked-device" || ambiguous || stale {
+		t.Fatalf("resolved alias = %q ambiguous=%v stale=%v", deviceID, ambiguous, stale)
+	}
+}
+
 func TestDeviceResolverTreatsTailscaleAddressCollisionAsAmbiguous(t *testing.T) {
 	original := deviceStore
 	deviceStore = discovery.NewDeviceStore("local")

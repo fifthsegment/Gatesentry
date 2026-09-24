@@ -208,7 +208,7 @@ func TestDeviceAssignmentInvalidPayloadLeavesBytesAndRAMUnchanged(t *testing.T) 
 	}{
 		{name: "malformed json", raw: `{"version":1,"assignments":`},
 		{name: "malformed assignments", raw: `{"version":1,"assignments":[]}`},
-		{name: "future version", raw: `{"version":3,"assignments":{"new":{"id":"new","persistent":true}}}`},
+		{name: "future version", raw: `{"version":4,"assignments":{"new":{"id":"new","persistent":true}}}`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -475,6 +475,32 @@ func TestDurableMutationFailuresLeaveInventoryAndDiskUnchanged(t *testing.T) {
 	}
 }
 
+func TestMarkDevicePersistentFailureLeavesInventoryAndDiskUnchanged(t *testing.T) {
+	store := &assignmentFailStore{}
+	ds := NewDeviceStore("local")
+	if err := ds.AttachPersistence(store); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ds.UpsertDeviceE(&Device{ID: "passive", IPv4: "192.0.2.10", Source: SourcePassive}); err != nil {
+		t.Fatal(err)
+	}
+	beforeDisk := store.rawValue()
+	store.setFailure(true)
+
+	if _, ok, err := ds.MarkDevicePersistentE("passive"); err == nil || !ok {
+		t.Fatalf("mark persistent: ok=%v err=%v, want true/error", ok, err)
+	}
+	if got := ds.GetDevice("passive"); got == nil || got.Persistent {
+		t.Fatalf("failed retention changed RAM: %+v", got)
+	}
+	if store.rawValue() != beforeDisk {
+		t.Fatal("failed retention changed disk")
+	}
+	if _, ok, err := ds.MarkDevicePersistentE("missing"); err != nil || ok {
+		t.Fatalf("missing device: ok=%v err=%v, want false/nil", ok, err)
+	}
+}
+
 func TestApplyTailscaleSnapshotFailureRollsBackAllDevices(t *testing.T) {
 	store := &assignmentFailStore{}
 	ds := NewDeviceStore("local")
@@ -600,8 +626,8 @@ func TestDeviceAssignmentV1MigrationKeepsOnlyDurableIntent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if sourceVersion != 2 || decoded.Version != 2 {
-		t.Fatalf("versions = %d/%d, want 2", sourceVersion, decoded.Version)
+	if sourceVersion != deviceAssignmentsVersion || decoded.Version != deviceAssignmentsVersion {
+		t.Fatalf("versions = %d/%d, want %d", sourceVersion, decoded.Version, deviceAssignmentsVersion)
 	}
 	if len(decoded.Assignments) != 4 {
 		t.Fatalf("migrated assignments = %v, want four durable records", decoded.Assignments)
@@ -663,11 +689,70 @@ func TestLinkedTailscaleIdentityPersistsWithoutRuntimeMetadata(t *testing.T) {
 	if identity.NodeID != "node-1" || identity.Name != "pixel" || identity.DNSName != "pixel.tailnet" {
 		t.Fatalf("durable identity = %+v", identity)
 	}
-	if identity.Online || len(identity.Addresses) != 0 || len(identity.WoLMACs) != 0 || !identity.LastSeen.IsZero() {
-		t.Fatalf("runtime metadata persisted: %+v", identity)
+	if identity.Online || len(identity.Addresses) != 1 || identity.Addresses[0] != "100.64.0.7" || len(identity.WoLMACs) != 0 || !identity.LastSeen.IsZero() {
+		t.Fatalf("restored identity metadata: %+v", identity)
+	}
+	if got := restarted.FindDeviceByIP("100.64.0.7"); got == nil || got.ID != "dev-1" {
+		t.Fatalf("restored Tailscale alias = %+v", got)
 	}
 	if device.Online || !device.LastSeen.IsZero() {
 		t.Fatalf("restored reachability = online:%v last_seen:%v", device.Online, device.LastSeen)
+	}
+}
+
+func TestPersistedTailscaleAliasPreventsDuplicateAfterRestart(t *testing.T) {
+	store, _ := assignmentsStore(t)
+	ds := NewDeviceStore("local")
+	if err := ds.AttachPersistence(store); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ds.UpsertDeviceE(&Device{ID: "phone", ManualName: "Pixel", Persistent: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ds.LinkTailscaleIdentityE("phone", TailscaleIdentity{NodeID: "node-1", Addresses: []string{"100.64.0.8"}, Online: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	restarted := NewDeviceStore("local")
+	if err := restarted.AttachPersistence(store); err != nil {
+		t.Fatal(err)
+	}
+	id, created, err := restarted.ObserveDevice(Device{IPv4: "100.64.0.8", Source: SourcePassive})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created || id != "phone" || restarted.DeviceCount() != 1 {
+		t.Fatalf("observation = id %q created %v count %d", id, created, restarted.DeviceCount())
+	}
+	device := restarted.GetDevice("phone")
+	if device.IPv4 != "" {
+		t.Fatalf("overlay alias was copied into LAN IPv4: %+v", device)
+	}
+}
+
+func TestDeviceAssignmentV2MigratesWithoutTailscaleAddresses(t *testing.T) {
+	store, _ := assignmentsStore(t)
+	if err := store.Update(DeviceAssignmentsKey, `{"version":2,"assignments":{"phone":{"id":"phone","manual_name":"Pixel","tailscale_nodes":[{"node_id":"node-1","name":"pixel"}]}}}`); err != nil {
+		t.Fatal(err)
+	}
+	ds := NewDeviceStore("local")
+	if err := ds.AttachPersistence(store); err != nil {
+		t.Fatal(err)
+	}
+	device := ds.GetDevice("phone")
+	if device == nil || len(device.TailscaleNodes) != 1 || len(device.TailscaleNodes[0].Addresses) != 0 {
+		t.Fatalf("migrated v2 device = %+v", device)
+	}
+	raw, err := store.GetE(DeviceAssignmentsKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, version, err := decodeDeviceAssignmentsVersion(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if version != deviceAssignmentsVersion || decoded.Version != deviceAssignmentsVersion {
+		t.Fatalf("migrated versions = %d/%d", version, decoded.Version)
 	}
 }
 
@@ -690,5 +775,51 @@ func TestTransientPassiveAndMDNSDevicesAreNotPersisted(t *testing.T) {
 	}
 	if restarted.DeviceCount() != 0 {
 		t.Fatalf("restored %d transient devices", restarted.DeviceCount())
+	}
+}
+
+func TestMarkDevicePersistentRestoresIdentityWithoutLANClaim(t *testing.T) {
+	store, _ := assignmentsStore(t)
+	ds := NewDeviceStore("local")
+	if err := ds.AttachPersistence(store); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ds.UpsertDeviceE(&Device{
+		ID: "phone", IPv4: "192.0.2.10", MACs: []string{"aa:bb:cc:dd:ee:ff"},
+		Source: SourcePassive, Sources: []DiscoverySource{SourcePassive},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	marked, ok, err := ds.MarkDevicePersistentE("phone")
+	if err != nil || !ok {
+		t.Fatalf("mark persistent: ok=%v err=%v", ok, err)
+	}
+	if !marked.Persistent || marked.IPv4 != "192.0.2.10" {
+		t.Fatalf("marked device = %+v", marked)
+	}
+
+	restarted := NewDeviceStore("local")
+	if err := restarted.AttachPersistence(store); err != nil {
+		t.Fatal(err)
+	}
+	restored := restarted.GetDevice("phone")
+	if restored == nil || !restored.Persistent {
+		t.Fatalf("restored device = %+v", restored)
+	}
+	if restored.IPv4 != "" || restored.Online || !restored.LastSeen.IsZero() {
+		t.Fatalf("restored runtime observation = %+v", restored)
+	}
+	id, created, err := restarted.ObserveDevice(Device{
+		IPv4: "192.0.2.44", MACs: []string{"aa:bb:cc:dd:ee:ff"},
+		Source: SourcePassive, Sources: []DiscoverySource{SourcePassive},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created || id != "phone" {
+		t.Fatalf("rediscovery = id %q created=%v, want phone/false", id, created)
+	}
+	if got := restarted.GetDevice("phone"); got.IPv4 != "192.0.2.44" {
+		t.Fatalf("rediscovered device = %+v", got)
 	}
 }

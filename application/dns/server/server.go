@@ -234,7 +234,10 @@ func startTailscaleManager(lifecycle *tailscaleManagerLifecycle, enabled bool, n
 
 // tailscaleDeviceAdapter is the only bridge between the LocalAPI model and
 // discovery's linked identity model.
-type tailscaleDeviceAdapter struct{ store *discovery.DeviceStore }
+type tailscaleDeviceAdapter struct {
+	store        *discovery.DeviceStore
+	protectedIDs func() map[string]bool
+}
 
 func (a tailscaleDeviceAdapter) ApplyTailscaleSnapshot(peers []gatesentryTailscale.Peer) error {
 	identities := make([]discovery.TailscaleIdentity, 0, len(peers))
@@ -245,7 +248,11 @@ func (a tailscaleDeviceAdapter) ApplyTailscaleSnapshot(peers []gatesentryTailsca
 			LastSeen: peer.LastSeen, WoLMACs: append([]string(nil), peer.WoLMACs...),
 		})
 	}
-	return a.store.ApplyTailscaleSnapshot(identities)
+	var protectedIDs map[string]bool
+	if a.protectedIDs != nil {
+		protectedIDs = a.protectedIDs()
+	}
+	return a.store.ApplyTailscaleSnapshotProtected(identities, protectedIDs)
 }
 
 func (a tailscaleDeviceAdapter) ClearTailscaleObservations() {
@@ -292,17 +299,18 @@ func (deviceResolver) ResolveDeviceByIP(ip string) (string, bool, bool) {
 	if deviceStore == nil {
 		return "", false, false
 	}
-	device := deviceStore.FindDeviceByIP(ip)
-	if device == nil {
-		return "", false, false
+	deviceID, ambiguous, lastSeen, tailscaleAlias := deviceStore.ResolveIPClaim(ip)
+	if deviceID == "" {
+		return "", ambiguous, false
 	}
 	// The claim index includes both LAN and explicitly linked Tailscale
 	// addresses. A shared overlay/LAN address must fall back to the default
 	// policy just like any other ambiguous client address.
-	ambiguous := deviceStore.IPClaimCount(ip) > 1
-	lastSeen := deviceStore.LastSeenForIP(ip)
+	if !ambiguous && tailscaleAlias {
+		return deviceID, false, false
+	}
 	stale := lastSeen.IsZero() || time.Since(lastSeen) > policyStaleDeviceThreshold
-	return device.ID, ambiguous, stale
+	return deviceID, ambiguous, stale
 }
 
 // GetPolicyService returns the DNS policy service, or nil before startup.
@@ -436,7 +444,15 @@ func StartPolicyEnforcement(basePath string, blockedLists []string, settings *ga
 			func() TailscaleManager {
 				return gatesentryTailscale.NewManager(
 					gatesentryTailscale.NewClient(),
-					tailscaleDeviceAdapter{store: deviceStore},
+					tailscaleDeviceAdapter{
+						store: deviceStore,
+						protectedIDs: func() map[string]bool {
+							if policyService == nil {
+								return nil
+							}
+							return policyService.ReferencedDeviceIDs()
+						},
+					},
 					0,
 				)
 			},

@@ -27,7 +27,7 @@ const maxSettingsSchemaVersion = 1
 
 // maxDeviceAssignmentsVersion must match discovery.deviceAssignmentsVersion in
 // persistence.go. Same duplication rationale as above.
-const maxDeviceAssignmentsVersion = 2
+const maxDeviceAssignmentsVersion = 3
 
 const (
 	settingsSchemaKey       = "settings_schema_version"
@@ -168,7 +168,7 @@ func validateDeviceAssignmentsVersion(raw string) error {
 		return errors.New("device assignments are missing version")
 	}
 	if *doc.Version < 1 || *doc.Version > maxDeviceAssignmentsVersion {
-		return fmt.Errorf("device assignments version %d is not supported (expected 1 or %d)", *doc.Version, maxDeviceAssignmentsVersion)
+		return fmt.Errorf("device assignments version %d is not supported (expected 1 through %d)", *doc.Version, maxDeviceAssignmentsVersion)
 	}
 	var assignments map[string]json.RawMessage
 	if len(doc.Assignments) == 0 {

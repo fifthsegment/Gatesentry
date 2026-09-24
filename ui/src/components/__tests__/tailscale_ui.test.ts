@@ -38,4 +38,9 @@ test("device inventory exposes linked Tailscale peers and opens link management"
   expect(devices).toContain("Manage Tailscale links");
   expect(devices).toContain("on:tailscaleChanged={loadDevices}");
   expect(devices).toContain("setInterval(loadDevices, 30000)");
+  expect(devices).toContain("node.addresses || []");
+  expect(devices).toContain("ipv4_display");
+  expect(devices).toContain("ipv6_display");
+  expect(devices).toContain('tailscaleAddresses.filter((ip) => ip.includes("."))');
+  expect(devices).toContain('tailscaleAddresses.filter((ip) => ip.includes(":"))');
 });

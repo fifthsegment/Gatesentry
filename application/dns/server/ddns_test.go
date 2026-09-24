@@ -624,6 +624,43 @@ func TestHandleDDNSUpdate_EmptyZoneSection(t *testing.T) {
 	}
 }
 
+func TestDDNSAddressMatchDoesNotMergeTailscaleAlias(t *testing.T) {
+	cleanup := setupDDNSTestServer(t)
+	defer cleanup()
+
+	if _, err := deviceStore.UpsertDeviceE(&discovery.Device{ID: "phone", Persistent: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := deviceStore.LinkTailscaleIdentityE("phone", discovery.TailscaleIdentity{NodeID: "node-1", Addresses: []string{"100.64.0.50"}}); err != nil {
+		t.Fatal(err)
+	}
+	applyDDNSAdd(ddnsUpdate{name: "other.local", rrtype: dns.TypeA, value: "100.64.0.50"}, "local")
+
+	linked := deviceStore.GetDevice("phone")
+	if linked == nil || len(linked.Hostnames) != 0 || linked.IPv4 != "" {
+		t.Fatalf("DDNS merged LAN metadata into linked alias: %+v", linked)
+	}
+	if deviceStore.DeviceCount() != 2 || deviceStore.IPClaimCount("100.64.0.50") != 2 {
+		t.Fatalf("DDNS alias collision did not remain ambiguous: %+v", deviceStore.GetAllDevices())
+	}
+}
+
+func TestCleanupOrphanedDevicesRetainsLinkedTailscaleDevice(t *testing.T) {
+	cleanup := setupDDNSTestServer(t)
+	defer cleanup()
+
+	if _, err := deviceStore.UpsertDeviceE(&discovery.Device{ID: "phone"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := deviceStore.LinkTailscaleIdentityE("phone", discovery.TailscaleIdentity{NodeID: "node-1", Name: "Pixel"}); err != nil {
+		t.Fatal(err)
+	}
+	cleanupOrphanedDevices()
+	if got := deviceStore.GetDevice("phone"); got == nil {
+		t.Fatal("DDNS cleanup removed linked Tailscale device")
+	}
+}
+
 func TestHandleDDNSUpdate_EnrichPassiveDevice(t *testing.T) {
 	cleanup := setupDDNSTestServer(t)
 	defer cleanup()

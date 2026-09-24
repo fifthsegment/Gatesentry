@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	gatesentryDnsServer "bitbucket.org/abdullah_irfan/gatesentryf/dns/server"
 	gatesentryLogger "bitbucket.org/abdullah_irfan/gatesentryf/logger"
 	gatesentryPolicy "bitbucket.org/abdullah_irfan/gatesentryf/policy"
+	gatesentry2storage "bitbucket.org/abdullah_irfan/gatesentryf/storage"
 	"github.com/gorilla/mux"
 	"github.com/tidwall/buntdb"
 )
@@ -258,10 +260,115 @@ func TestDeviceAssignmentSetClearAndUnknownGroup(t *testing.T) {
 	if _, exists := svc.Snapshot().Assignments["device-1"]; exists {
 		t.Fatal("cleared assignment still in snapshot")
 	}
+	if got := gatesentryDnsServer.GetDeviceStore().GetDevice("device-1"); got == nil || !got.Persistent {
+		t.Fatalf("clearing assignment discarded durable identity: %+v", got)
+	}
 
 	recorder = put("missing-device", `{"group_id":"kids"}`)
 	if recorder.Code != http.StatusNotFound {
 		t.Fatalf("unknown device status = %d", recorder.Code)
+	}
+}
+
+type testDeviceResolver struct {
+	store *discovery.DeviceStore
+}
+
+func (r testDeviceResolver) ResolveDeviceByIP(ip string) (string, bool, bool) {
+	deviceID, ambiguous, _, _ := r.store.ResolveIPClaim(ip)
+	return deviceID, ambiguous, false
+}
+
+func TestDeviceAssignmentPersistsPassiveIdentityAcrossRestart(t *testing.T) {
+	_, cleanupPolicy := policyTestService(t)
+	defer cleanupPolicy()
+	svc := gatesentryDnsServer.GetPolicyService()
+	seedDevicePolicyGroup(t, svc)
+	devices, err := gatesentry2storage.OpenMapStore("GSDevices", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ds := discovery.NewDeviceStore("local")
+	if err := ds.AttachPersistence(devices); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ds.UpsertDeviceE(&discovery.Device{
+		ID: "phone", IPv4: "192.0.2.10", MACs: []string{"aa:bb:cc:dd:ee:ff"},
+		Source: discovery.SourcePassive, Sources: []discovery.DiscoverySource{discovery.SourcePassive},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	gatesentryDnsServer.SetDeviceStoreForTests(ds)
+
+	req, recorder := deviceRequest(http.MethodPut, "/api/devices/phone/assignment", "phone", "", `{"group_id":"kids"}`)
+	GSApiDeviceAssignmentSet(recorder, req)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("assignment status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+
+	restarted := discovery.NewDeviceStore("local")
+	if err := restarted.AttachPersistence(devices); err != nil {
+		t.Fatal(err)
+	}
+	if got := restarted.GetDevice("phone"); got == nil || !got.Persistent || got.IPv4 != "" {
+		t.Fatalf("restored device = %+v", got)
+	}
+	id, created, err := restarted.ObserveDevice(discovery.Device{
+		IPv4: "192.0.2.44", MACs: []string{"aa:bb:cc:dd:ee:ff"},
+		Source: discovery.SourcePassive, Sources: []discovery.DiscoverySource{discovery.SourcePassive},
+	})
+	if err != nil || created || id != "phone" {
+		t.Fatalf("rediscovery = id %q created=%v err=%v", id, created, err)
+	}
+	if got := restarted.FindDeviceByIP("192.0.2.44"); got == nil || got.ID != "phone" {
+		t.Fatalf("address did not resolve to restored identity: %+v", got)
+	}
+	settings, err := gatesentry2storage.OpenMapStore("settings", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restartedPolicy, err := gatesentryPolicy.NewService(settings, testDeviceResolver{store: restarted})
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity := restartedPolicy.ResolveIdentityForDNS("192.0.2.44", "")
+	if identity.DeviceID != "phone" || identity.GroupID != "kids" {
+		t.Fatalf("identity after restart = %+v", identity)
+	}
+}
+
+func TestDeviceAssignmentPersistenceFailureDoesNotCommitPolicy(t *testing.T) {
+	_, cleanupPolicy := policyTestService(t)
+	base := gatesentry2storage.GSBASEDIR
+	defer cleanupPolicy()
+	svc := gatesentryDnsServer.GetPolicyService()
+	seedDevicePolicyGroup(t, svc)
+	devices, err := gatesentry2storage.OpenMapStore("GSDevices", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ds := discovery.NewDeviceStore("local")
+	if err := ds.AttachPersistence(devices); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ds.UpsertDeviceE(&discovery.Device{ID: "phone", IPv4: "192.0.2.10", Source: discovery.SourcePassive}); err != nil {
+		t.Fatal(err)
+	}
+	gatesentryDnsServer.SetDeviceStoreForTests(ds)
+	if err := os.RemoveAll(base); err != nil {
+		t.Fatal(err)
+	}
+
+	req, recorder := deviceRequest(http.MethodPut, "/api/devices/phone/assignment", "phone", "", `{"group_id":"kids"}`)
+	GSApiDeviceAssignmentSet(recorder, req)
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("assignment status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	if _, exists := svc.Snapshot().Assignments["phone"]; exists {
+		t.Fatal("policy assignment committed after device persistence failed")
+	}
+	if got := ds.GetDevice("phone"); got == nil || got.Persistent {
+		t.Fatalf("failed persistence changed device = %+v", got)
 	}
 }
 

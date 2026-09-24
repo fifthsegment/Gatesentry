@@ -350,6 +350,26 @@ func (ds *DeviceStore) FindDeviceByIP(ip string) *Device {
 	return cloneDevice(d)
 }
 
+// FindDeviceByLANIP returns a device only when the address is an unambiguous
+// current LAN claim. Overlay aliases are not evidence for DDNS/LAN enrichment.
+func (ds *DeviceStore) FindDeviceByLANIP(ip string) *Device {
+	ip = normalizeIP(ip)
+	ds.mu.RLock()
+	defer ds.mu.RUnlock()
+	var match *Device
+	for _, id := range ds.deviceByIPClaims[ip] {
+		device := ds.devices[id]
+		if !deviceHasLANIP(device, ip) {
+			continue
+		}
+		if match != nil && match.ID != id {
+			return nil
+		}
+		match = device
+	}
+	return cloneDevice(match)
+}
+
 // LastSeenForIP returns freshness for the specific address claim. LAN
 // observations and Tailscale aliases have independent lifecycles: activity on
 // one must not extend policy ownership of the other.
@@ -385,6 +405,40 @@ func (ds *DeviceStore) IPClaimCount(ip string) int {
 	ds.mu.RLock()
 	defer ds.mu.RUnlock()
 	return len(ds.deviceByIPClaims[normalizeIP(ip)])
+}
+
+// ResolveIPClaim returns one consistent view of address ownership for policy
+// resolution. A sole linked overlay alias is durable identity and never expires;
+// LAN claims retain the ordinary observation freshness timestamp.
+func (ds *DeviceStore) ResolveIPClaim(ip string) (deviceID string, ambiguous bool, lastSeen time.Time, tailscaleAlias bool) {
+	ip = normalizeIP(ip)
+	ds.mu.RLock()
+	defer ds.mu.RUnlock()
+	claims := ds.deviceByIPClaims[ip]
+	ambiguous = len(claims) > 1
+	deviceID = ds.deviceByIP[ip]
+	device := ds.devices[deviceID]
+	if device == nil {
+		return "", ambiguous, time.Time{}, false
+	}
+	if deviceHasLANIP(device, ip) {
+		lastSeen = device.LANLastSeen
+		if lastSeen.IsZero() {
+			lastSeen = device.LastSeen
+		}
+	}
+	for _, identity := range device.TailscaleNodes {
+		for _, address := range identity.Addresses {
+			if normalizeIP(address) != ip {
+				continue
+			}
+			tailscaleAlias = true
+			if identity.LastSeen.After(lastSeen) {
+				lastSeen = identity.LastSeen
+			}
+		}
+	}
+	return deviceID, ambiguous, lastSeen, tailscaleAlias
 }
 
 // IPClaimDeviceIDs returns every canonical device currently claiming an address
@@ -636,19 +690,36 @@ func (ds *DeviceStore) UnlinkTailscaleIdentityE(deviceID, nodeID string) (*Devic
 	return cloneDevice(&result), nil
 }
 
-// ApplyTailscaleSnapshot refreshes runtime metadata for nodes that have already
-// been explicitly linked. Unlinked peers never create inventory records.
+// ApplyTailscaleSnapshot refreshes linked nodes without creating inventory for
+// unlinked peers. Callers without policy state get the same fail-closed address
+// conflict behavior, but cannot identify otherwise transient protected rows.
 func (ds *DeviceStore) ApplyTailscaleSnapshot(peers []TailscaleIdentity) error {
+	return ds.ApplyTailscaleSnapshotProtected(peers, nil)
+}
+
+// ApplyTailscaleSnapshotProtected refreshes linked nodes and reconciles only
+// disposable address-only observations. Durable or externally referenced rows
+// remain as ambiguous claims rather than being silently consolidated.
+func (ds *DeviceStore) ApplyTailscaleSnapshotProtected(peers []TailscaleIdentity, protectedIDs map[string]bool) error {
 	ds.mutationMu.Lock()
 	defer ds.mutationMu.Unlock()
 
 	byID := make(map[string]TailscaleIdentity, len(peers))
 	for _, peer := range peers {
 		peer.NodeID = normalizeNodeID(peer.NodeID)
-		if peer.NodeID != "" {
-			byID[peer.NodeID] = peer
+		if peer.NodeID == "" {
+			continue
 		}
+		addresses := make([]string, 0, len(peer.Addresses))
+		for _, value := range peer.Addresses {
+			if address := normalizeIP(value); address != "" {
+				addresses = append(addresses, address)
+			}
+		}
+		peer.Addresses = mergeStringSlice(addresses, nil)
+		byID[peer.NodeID] = peer
 	}
+
 	ds.mu.Lock()
 	updatedDevices := make(map[string]*Device)
 	var changed []Device
@@ -672,7 +743,6 @@ func (ds *DeviceStore) ApplyTailscaleSnapshot(peers []TailscaleIdentity) error {
 		for i, linked := range updated.TailscaleNodes {
 			peer, ok := byID[normalizeNodeID(linked.NodeID)]
 			if !ok {
-				updated.TailscaleNodes[i].Addresses = nil
 				updated.TailscaleNodes[i].Online = false
 				continue
 			}
@@ -683,9 +753,10 @@ func (ds *DeviceStore) ApplyTailscaleSnapshot(peers []TailscaleIdentity) error {
 			if peer.DNSName == "" {
 				peer.DNSName = linked.DNSName
 			}
-			if !peer.Online {
-				peer.Addresses = nil
-			} else {
+			if len(peer.Addresses) == 0 {
+				peer.Addresses = append([]string(nil), linked.Addresses...)
+			}
+			if peer.Online {
 				observedOnline = true
 				if peer.LastSeen.IsZero() {
 					peer.LastSeen = time.Now()
@@ -700,8 +771,6 @@ func (ds *DeviceStore) ApplyTailscaleSnapshot(peers []TailscaleIdentity) error {
 			updated.Online = true
 			updated.LastSeen = latestSeen
 		} else if previousTailscaleOnline && !previousTailscaleSeen.IsZero() && !updated.LastSeen.After(previousTailscaleSeen) {
-			// No newer LAN/passive observation exists, so the previous online
-			// state came from Tailscale and must be cleared with its address claim.
 			updated.Online = false
 		}
 		updated.DisplayName = updated.GetDisplayName()
@@ -720,13 +789,28 @@ func (ds *DeviceStore) ApplyTailscaleSnapshot(peers []TailscaleIdentity) error {
 	for id, device := range updatedDevices {
 		ds.devices[id] = device
 	}
+	// Rebuild once so address churn no longer leaves old aliases in the claim
+	// index before deciding which pre-existing rows are safe to consolidate.
+	ds.rebuildIndexes()
+	for id, device := range updatedDevices {
+		for _, identity := range device.TailscaleNodes {
+			for _, address := range identity.Addresses {
+				for _, owner := range append([]string(nil), ds.deviceByIPClaims[normalizeIP(address)]...) {
+					if owner == id || protectedIDs[owner] || !isDisposableTailscaleAliasObservation(ds.devices[owner], address) {
+						continue
+					}
+					delete(ds.devices, owner)
+				}
+			}
+		}
+	}
 	ds.rebuildIndexes()
 	ds.mu.Unlock()
 	return nil
 }
 
-// ClearTailscaleObservations removes runtime addresses and reachability while
-// retaining explicit node links and their last-known durable labels.
+// ClearTailscaleObservations removes runtime reachability while retaining
+// explicit node links, labels, and their durable last-known overlay aliases.
 func (ds *DeviceStore) ClearTailscaleObservations() {
 	ds.mutationMu.Lock()
 	defer ds.mutationMu.Unlock()
@@ -734,9 +818,15 @@ func (ds *DeviceStore) ClearTailscaleObservations() {
 	ds.mu.Lock()
 	defer ds.mu.Unlock()
 	for _, device := range ds.devices {
+		previousTailscaleSeen := time.Time{}
 		for i := range device.TailscaleNodes {
-			device.TailscaleNodes[i].Addresses = nil
+			if device.TailscaleNodes[i].LastSeen.After(previousTailscaleSeen) {
+				previousTailscaleSeen = device.TailscaleNodes[i].LastSeen
+			}
 			device.TailscaleNodes[i].Online = false
+		}
+		if !previousTailscaleSeen.IsZero() && !device.LastSeen.After(previousTailscaleSeen) {
+			device.Online = false
 		}
 	}
 	ds.rebuildIndexes()
@@ -744,6 +834,22 @@ func (ds *DeviceStore) ClearTailscaleObservations() {
 
 func isDurableDevice(device *Device) bool {
 	return device.Persistent || device.ManualName != "" || device.Owner != "" || device.Category != "" || len(device.TailscaleNodes) > 0
+}
+
+func isDisposableTailscaleAliasObservation(device *Device, address string) bool {
+	if device == nil || isDurableDevice(device) || len(device.MACs) > 0 || len(device.Hostnames) > 0 || len(device.MDNSNames) > 0 {
+		return false
+	}
+	address = normalizeIP(address)
+	if address == "" || !deviceHasLANIP(device, address) {
+		return false
+	}
+	for _, claimed := range deviceAddresses(device) {
+		if claimed != address {
+			return false
+		}
+	}
+	return device.Source == SourcePassive && len(device.Sources) <= 1
 }
 
 // UpsertDevice adds or updates a device in the store and regenerates
@@ -856,6 +962,41 @@ type ManualFieldsUpdate struct {
 	SetManualName bool
 	SetOwner      bool
 	SetCategory   bool
+}
+
+// MarkDevicePersistentE retains one canonical device across restarts without
+// turning its current LAN address into durable identity. Policy assignment uses
+// this before storing a device ID so the reference cannot outlive its target.
+func (ds *DeviceStore) MarkDevicePersistentE(id string) (*Device, bool, error) {
+	ds.mutationMu.Lock()
+	defer ds.mutationMu.Unlock()
+
+	ds.mu.Lock()
+	current := ds.devices[id]
+	if current == nil {
+		ds.mu.Unlock()
+		return nil, false, nil
+	}
+	original := cloneDevice(current)
+	updated := *cloneDevice(current)
+	updated.Persistent = true
+	persistence := ds.persistence
+	if persistence == nil {
+		ds.devices[id] = cloneDevice(&updated)
+		ds.rebuildIndexes()
+		ds.mu.Unlock()
+		return cloneDevice(&updated), true, nil
+	}
+	ds.mu.Unlock()
+	if err := persistence.persistIfChanged(updated); err != nil {
+		return original, true, err
+	}
+
+	ds.mu.Lock()
+	ds.devices[id] = cloneDevice(&updated)
+	ds.rebuildIndexes()
+	ds.mu.Unlock()
+	return cloneDevice(&updated), true, nil
 }
 
 // UpdateManualFieldsE applies user-managed fields to one device. Discovery
