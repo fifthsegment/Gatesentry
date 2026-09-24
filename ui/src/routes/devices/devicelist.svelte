@@ -62,8 +62,8 @@
     { key: "display_name", value: "Name" },
     { key: "dns_name", value: "DNS Name" },
     { key: "tailscale_display", value: "Tailscale" },
-    { key: "ipv4", value: "IPv4" },
-    { key: "ipv6", value: "IPv6" },
+    { key: "ipv4_display", value: "IPv4" },
+    { key: "ipv6_display", value: "IPv6" },
     { key: "macs_display", value: "MAC" },
     { key: "source", value: "Via" },
     { key: "last_seen_display", value: "Last Seen" },
@@ -109,11 +109,23 @@
   }
 
   function formatDevice(d: Device): Device & Record<string, any> {
+    const tailscaleAddresses = (d.tailscale_nodes || []).flatMap(
+      (node) => node.addresses || [],
+    );
+    const ipv4Addresses = Array.from(
+      new Set([d.ipv4, ...tailscaleAddresses.filter((ip) => ip.includes("."))]),
+    ).filter(Boolean);
+    const ipv6Addresses = Array.from(
+      new Set([d.ipv6, ...tailscaleAddresses.filter((ip) => ip.includes(":"))]),
+    ).filter(Boolean);
+
     return {
       ...d,
       id: d.id,
       status: d.online ? "online" : "offline",
       display_name: d.manual_name || d.display_name || d.dns_name || "Unknown",
+      ipv4_display: ipv4Addresses.join(", "),
+      ipv6_display: ipv6Addresses.join(", "),
       macs_display: d.macs?.length ? d.macs[0] : "—",
       tailscale_display: d.tailscale_nodes?.length
         ? d.tailscale_nodes.map((node) => node.name || node.dns_name).join(", ")

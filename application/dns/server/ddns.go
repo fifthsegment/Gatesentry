@@ -191,10 +191,10 @@ func applyDDNSAdd(update ddnsUpdate, zone string) {
 	// Match existing device by hostname or IP to merge
 	existing := deviceStore.FindDeviceByHostname(hostname)
 	if existing == nil && device.IPv4 != "" {
-		existing = deviceStore.FindDeviceByIP(device.IPv4)
+		existing = deviceStore.FindDeviceByLANIP(device.IPv4)
 	}
 	if existing == nil && device.IPv6 != "" {
-		existing = deviceStore.FindDeviceByIP(device.IPv6)
+		existing = deviceStore.FindDeviceByLANIP(device.IPv6)
 	}
 	if existing != nil {
 		device.ID = existing.ID
@@ -257,13 +257,14 @@ func applyDDNSDelete(update ddnsUpdate) {
 	}
 }
 
-// cleanupOrphanedDevices removes addressless, non-persistent devices.
+// cleanupOrphanedDevices removes addressless, non-persistent devices that have
+// no durable linked overlay identity.
 func cleanupOrphanedDevices() {
 	if deviceStore == nil {
 		return
 	}
 	for _, d := range deviceStore.GetAllDevices() {
-		if d.IPv4 == "" && d.IPv6 == "" && !d.Persistent {
+		if d.IPv4 == "" && d.IPv6 == "" && !d.Persistent && len(d.TailscaleNodes) == 0 {
 			deviceStore.RemoveDevice(d.ID)
 			log.Printf("[DDNS] Cleaned up addressless device: %s (ID: %s)", d.DisplayName, d.ID)
 		}

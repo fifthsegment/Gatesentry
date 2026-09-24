@@ -10,9 +10,8 @@ import (
 )
 
 // DeviceAssignment is the durable subset of Device. Discovery owns observed
-// identity at runtime (IPs, last-seen, sources, online state); this record
-// owns only user-managed identity and the stable identifiers needed to merge
-// re-discovered traffic into the same device.
+// LAN identity and reachability at runtime; this record owns user-managed
+// identity plus stable linked identifiers and their last-known overlay aliases.
 type DeviceAssignment struct {
 	ID             string              `json:"id"`
 	DNSName        string              `json:"dns_name"`
@@ -27,8 +26,8 @@ type DeviceAssignment struct {
 	TailscaleNodes []TailscaleIdentity `json:"tailscale_nodes,omitempty"`
 }
 
-// deviceAssignments is the persisted format. Version 2 adds durable linked
-// Tailscale node identities while keeping runtime addresses out of storage.
+// deviceAssignments is the persisted format. Version 3 keeps last-known
+// Tailscale addresses with linked node identities so aliases survive restarts.
 type deviceAssignments struct {
 	Version     int                         `json:"version"`
 	Assignments map[string]DeviceAssignment `json:"assignments"`
@@ -36,7 +35,7 @@ type deviceAssignments struct {
 
 const (
 	DeviceAssignmentsKey     = "assignments"
-	deviceAssignmentsVersion = 2
+	deviceAssignmentsVersion = 3
 )
 
 // Persistence couples a DeviceStore to one durable destination for user-managed
@@ -166,8 +165,8 @@ func (p *Persistence) remove(id string) error {
 }
 
 // persistIfChanged writes only when the durable subset differs from the stored
-// record. Observed-only churn (IP, last-seen, online, sources) therefore does
-// not create writes, which keeps discovery traffic from writing user data.
+// record. LAN observations, last-seen, online, and source churn therefore do
+// not write user data; linked Tailscale alias changes do.
 func (p *Persistence) persistIfChanged(device Device) error {
 	return p.persistDevicesIfChanged([]Device{device})
 }
@@ -274,8 +273,8 @@ func decodeDeviceAssignmentsVersion(current string) (deviceAssignments, int, err
 	if err := json.Unmarshal([]byte(current), &decoded); err != nil {
 		return deviceAssignments{}, 0, fmt.Errorf("parse device assignments: %w", err)
 	}
-	if decoded.Version != 1 && decoded.Version != deviceAssignmentsVersion {
-		return deviceAssignments{}, 0, fmt.Errorf("device assignments version %d is not supported (expected 1 or %d); restore the matching GateSentry binary or the pre-upgrade data directory backup", decoded.Version, deviceAssignmentsVersion)
+	if decoded.Version < 1 || decoded.Version > deviceAssignmentsVersion {
+		return deviceAssignments{}, 0, fmt.Errorf("device assignments version %d is not supported (expected 1 through %d); restore the matching GateSentry binary or the pre-upgrade data directory backup", decoded.Version, deviceAssignmentsVersion)
 	}
 	if decoded.Assignments == nil {
 		return deviceAssignments{}, 0, errors.New("device assignments payload must contain an assignments object")
@@ -288,7 +287,7 @@ func decodeDeviceAssignmentsVersion(current string) (deviceAssignments, int, err
 			return deviceAssignments{}, 0, fmt.Errorf("device assignment key %q does not match record id %q", id, assignment.ID)
 		}
 	}
-	if decoded.Version == deviceAssignmentsVersion {
+	if decoded.Version >= 2 {
 		nodeOwners := make(map[string]string)
 		for deviceID, assignment := range decoded.Assignments {
 			for _, identity := range assignment.TailscaleNodes {
@@ -327,9 +326,20 @@ func shouldPersistDevice(device Device) bool {
 func durableTailscaleIdentities(identities []TailscaleIdentity) []TailscaleIdentity {
 	result := make([]TailscaleIdentity, 0, len(identities))
 	for _, identity := range identities {
-		if nodeID := normalizeNodeID(identity.NodeID); nodeID != "" {
-			result = append(result, TailscaleIdentity{NodeID: nodeID, Name: strings.TrimSpace(identity.Name), DNSName: strings.TrimSpace(identity.DNSName)})
+		nodeID := normalizeNodeID(identity.NodeID)
+		if nodeID == "" {
+			continue
 		}
+		addresses := make([]string, 0, len(identity.Addresses))
+		for _, value := range identity.Addresses {
+			if address := normalizeIP(value); address != "" {
+				addresses = append(addresses, address)
+			}
+		}
+		result = append(result, TailscaleIdentity{
+			NodeID: nodeID, Name: strings.TrimSpace(identity.Name), DNSName: strings.TrimSpace(identity.DNSName),
+			Addresses: mergeStringSlice(addresses, nil),
+		})
 	}
 	return result
 }

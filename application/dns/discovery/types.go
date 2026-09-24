@@ -20,8 +20,8 @@ const (
 )
 
 // TailscaleIdentity links one stable tailscaled node to a canonical device.
-// Addresses and reachability are runtime observations; NodeID and names are the
-// durable link metadata. WoLMACs are informational and are never LAN identity.
+// NodeID, names, and last-known Tailscale addresses are durable link metadata;
+// reachability is runtime-only. WoLMACs are informational and never LAN identity.
 type TailscaleIdentity struct {
 	NodeID    string    `json:"node_id"`
 	Name      string    `json:"name,omitempty"`
@@ -165,9 +165,20 @@ func (d *Device) HasIP(ip string) bool {
 	if d.IPv4 == ip || d.IPv6 == ip {
 		return true
 	}
+	return d.HasTailscaleIP(ip)
+}
+
+// HasTailscaleIP reports whether ip is a last-known alias of an explicitly
+// linked stable node. These aliases remain useful identity after reachability
+// observations expire; address conflicts are handled by the store claim index.
+func (d *Device) HasTailscaleIP(ip string) bool {
+	ip = normalizeIP(ip)
+	if ip == "" {
+		return false
+	}
 	for _, identity := range d.TailscaleNodes {
 		for _, address := range identity.Addresses {
-			if address == ip {
+			if normalizeIP(address) == ip {
 				return true
 			}
 		}
