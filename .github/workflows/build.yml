@@ -37,6 +37,9 @@ jobs:
           REQUESTED_REVISION: ${{ inputs.revision }}
           REQUESTED_TAG: ${{ inputs.tag }}
           EVENT_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+          # A push to the default branch that changes GATESENTRY_VERSION in
+          # main.go releases that version; no release branch or manual tag.
+          AUTO_RELEASE: ${{ github.event_name == 'push' && github.ref_type == 'branch' }}
         run: |
           revision=$(git rev-parse HEAD)
           if [[ -n "$REQUESTED_REVISION" ]]; then
@@ -49,7 +52,17 @@ jobs:
             tag="$EVENT_TAG"
           fi
           publish=false
-          if [[ -n "$tag" ]]; then
+          if [[ -z "$tag" && "$AUTO_RELEASE" == "true" ]]; then
+            version=$(sed -n 's/^var GATESENTRY_VERSION = "\(.*\)"$/\1/p' main.go)
+            [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "unexpected GATESENTRY_VERSION '$version'" >&2; exit 1; }
+            if git show-ref --verify --quiet "refs/tags/v$version"; then
+              echo "v$version is already released; building without publishing"
+            else
+              echo "GATESENTRY_VERSION is $version and v$version is not tagged; releasing it"
+              tag="v$version"
+              publish=true
+            fi
+          elif [[ -n "$tag" ]]; then
             git check-ref-format "refs/tags/$tag"
             git show-ref --verify --quiet "refs/tags/$tag"
             test "$(git rev-parse "refs/tags/$tag^{commit}")" = "$revision"
@@ -112,6 +125,18 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.build.outputs.revision }}
+          sparse-checkout: CHANGELOG.md
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Extract release notes from CHANGELOG
+        env:
+          TAG: ${{ needs.build.outputs.tag }}
+        run: |
+          awk -v h="## $TAG" 'index($0, h) == 1 {p=1; next} p && /^## v/ {exit} p' CHANGELOG.md > release-notes.md
+          test -s release-notes.md || echo "GateSentry $TAG" > release-notes.md
       - uses: actions/download-artifact@v5
         with:
           name: gatesentry-${{ needs.build.outputs.revision }}
@@ -123,6 +148,8 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.build.outputs.tag }}
+          target_commitish: ${{ needs.build.outputs.revision }}
+          body_path: release-notes.md
           files: dist/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
