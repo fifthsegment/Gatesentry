@@ -27,7 +27,7 @@ const maxSettingsSchemaVersion = 1
 
 // maxDeviceAssignmentsVersion must match discovery.deviceAssignmentsVersion in
 // persistence.go. Same duplication rationale as above.
-const maxDeviceAssignmentsVersion = 1
+const maxDeviceAssignmentsVersion = 2
 
 const (
 	settingsSchemaKey       = "settings_schema_version"
@@ -135,11 +135,14 @@ func ValidateArchive(data []byte) (*Archive, error) {
 	if schemaVersion > maxSettingsSchemaVersion {
 		return nil, fmt.Errorf("restore: settings schema %d is newer than this release supports (%d); restore the matching newer GateSentry binary or the pre-upgrade backup", schemaVersion, maxSettingsSchemaVersion)
 	}
-	// Validate device assignments version if present.
-	if assignments, ok := archive.Devices[deviceAssignmentsKey]; ok && assignments != "" {
-		if err := validateDeviceAssignmentsVersion(assignments); err != nil {
-			return nil, fmt.Errorf("restore: %w", err)
-		}
+	// Device assignments are required so compatibility can be verified before
+	// any live state is altered.
+	assignments, ok := archive.Devices[deviceAssignmentsKey]
+	if !ok || assignments == "" {
+		return nil, fmt.Errorf("restore: devices are missing %q data; cannot verify compatibility", deviceAssignmentsKey)
+	}
+	if err := validateDeviceAssignmentsVersion(assignments); err != nil {
+		return nil, fmt.Errorf("restore: %w", err)
 	}
 	return &archive, nil
 }
@@ -149,13 +152,24 @@ func ValidateArchive(data []byte) (*Archive, error) {
 // discovery.deviceAssignmentsVersion without importing the discovery package.
 func validateDeviceAssignmentsVersion(raw string) error {
 	var doc struct {
-		Version int `json:"version"`
+		Version     *int            `json:"version"`
+		Assignments json.RawMessage `json:"assignments"`
 	}
 	if err := json.Unmarshal([]byte(raw), &doc); err != nil {
 		return fmt.Errorf("parse device assignments: %w", err)
 	}
-	if doc.Version > maxDeviceAssignmentsVersion {
-		return fmt.Errorf("device assignments version %d is newer than this release supports (%d)", doc.Version, maxDeviceAssignmentsVersion)
+	if doc.Version == nil {
+		return errors.New("device assignments are missing version")
+	}
+	if *doc.Version < 1 || *doc.Version > maxDeviceAssignmentsVersion {
+		return fmt.Errorf("device assignments version %d is not supported (expected 1 or %d)", *doc.Version, maxDeviceAssignmentsVersion)
+	}
+	var assignments map[string]json.RawMessage
+	if len(doc.Assignments) == 0 {
+		return errors.New("device assignments payload must contain an assignments object")
+	}
+	if err := json.Unmarshal(doc.Assignments, &assignments); err != nil || assignments == nil {
+		return errors.New("device assignments payload must contain an assignments object")
 	}
 	return nil
 }

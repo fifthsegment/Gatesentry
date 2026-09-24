@@ -1,6 +1,7 @@
 package gatesentryDnsServer
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net"
@@ -16,6 +17,7 @@ import (
 	gatesentryLogger "bitbucket.org/abdullah_irfan/gatesentryf/logger"
 	gatesentryPolicy "bitbucket.org/abdullah_irfan/gatesentryf/policy"
 	gatesentry2storage "bitbucket.org/abdullah_irfan/gatesentryf/storage"
+	gatesentryTailscale "bitbucket.org/abdullah_irfan/gatesentryf/tailscale"
 	gatesentryTypes "bitbucket.org/abdullah_irfan/gatesentryf/types"
 	"github.com/miekg/dns"
 )
@@ -137,6 +139,118 @@ var restartDnsSchedulerChan chan bool
 // Initialized in StartDNSServer().
 var deviceStore *discovery.DeviceStore
 
+// TailscaleManager is the lifecycle surface used by the authenticated API.
+// Keeping this interface at the integration boundary lets handler tests supply
+// deterministic manager state without contacting the host tailscaled socket.
+type TailscaleManager interface {
+	Snapshot() gatesentryTailscale.ManagerSnapshot
+	Peers() []gatesentryTailscale.Peer
+	Peer(string) (gatesentryTailscale.Peer, bool)
+	SetEnabled(context.Context, bool) error
+	Stop()
+}
+
+type tailscaleManagerLifecycle struct {
+	mu      sync.RWMutex
+	manager TailscaleManager
+	stopped bool
+}
+
+func (l *tailscaleManagerLifecycle) get() TailscaleManager {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return l.manager
+}
+
+// publish installs a newly constructed manager unless shutdown has begun. The
+// stopped flag is permanent because policy initialization is process-lifetime
+// and guarded by policyStartOnce.
+func (l *tailscaleManagerLifecycle) publish(manager TailscaleManager) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.stopped || l.manager != nil {
+		return false
+	}
+	l.manager = manager
+	return true
+}
+
+func (l *tailscaleManagerLifecycle) stop() {
+	l.mu.Lock()
+	l.stopped = true
+	manager := l.manager
+	l.manager = nil
+	l.mu.Unlock()
+	if manager != nil {
+		manager.Stop()
+	}
+}
+
+var tailscaleManagers tailscaleManagerLifecycle
+
+// GetTailscaleManager returns the process-lifetime Tailscale manager. It is
+// initialized with the canonical device store by StartPolicyEnforcement.
+func GetTailscaleManager() TailscaleManager {
+	return tailscaleManagers.get()
+}
+
+// SetTailscaleManagerForTests replaces the process manager for endpoint tests.
+func SetTailscaleManagerForTests(manager TailscaleManager) {
+	tailscaleManagers.mu.Lock()
+	tailscaleManagers.manager = manager
+	tailscaleManagers.mu.Unlock()
+}
+
+// StopPolicyEnforcement releases process-lifetime integrations that are not
+// owned by the DNS listener. It is called during application shutdown, not by
+// StopDNSServer, because proxy-only deployments still use device policy state.
+func StopPolicyEnforcement() {
+	tailscaleManagers.stop()
+}
+
+// startTailscaleManager constructs before publishing so slow host detection
+// does not block API reads or shutdown. If shutdown wins that race, the new
+// manager is stopped without ever becoming globally visible.
+func startTailscaleManager(lifecycle *tailscaleManagerLifecycle, enabled bool, newManager func() TailscaleManager) {
+	manager := newManager()
+	if manager == nil {
+		return
+	}
+	if !lifecycle.publish(manager) {
+		manager.Stop()
+		return
+	}
+	if enabled {
+		ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+		if err := manager.SetEnabled(ctx, true); err != nil {
+			// Manager status is the operator-facing diagnostic. Do not log raw
+			// LocalAPI details or stable peer identifiers.
+			log.Printf("[Tailscale] identity collection enabled but backend is unavailable")
+		}
+		cancel()
+	}
+}
+
+// tailscaleDeviceAdapter is the only bridge between the LocalAPI model and
+// discovery's linked identity model.
+type tailscaleDeviceAdapter struct{ store *discovery.DeviceStore }
+
+func (a tailscaleDeviceAdapter) ApplyTailscaleSnapshot(peers []gatesentryTailscale.Peer) error {
+	identities := make([]discovery.TailscaleIdentity, 0, len(peers))
+	for _, peer := range peers {
+		identities = append(identities, discovery.TailscaleIdentity{
+			NodeID: peer.NodeID, Name: peer.Name, DNSName: peer.DNSName,
+			Addresses: append([]string(nil), peer.Addresses...), Online: peer.Online,
+			LastSeen: peer.LastSeen, WoLMACs: append([]string(nil), peer.WoLMACs...),
+		})
+	}
+	return a.store.ApplyTailscaleSnapshot(identities)
+}
+
+func (a tailscaleDeviceAdapter) ClearTailscaleObservations() {
+	a.store.ClearTailscaleObservations()
+}
+
 // policyService is the dedicated policy engine used by DNS enforcement.
 // Discovery owns device observations; this service owns how a resolved
 // identity maps to an enforcement decision. Initialized in StartDNSServer().
@@ -181,20 +295,12 @@ func (deviceResolver) ResolveDeviceByIP(ip string) (string, bool, bool) {
 	if device == nil {
 		return "", false, false
 	}
-	// The index maps IP to a single device, but overlapping entries can occur
-	// during IP churn when two devices have not yet been observed at their new
-	// addresses. Detect the ambiguity explicitly.
-	ambiguous := false
-	for _, other := range deviceStore.GetAllDevices() {
-		if other.ID == device.ID {
-			continue
-		}
-		if other.IPv4 == ip || other.IPv6 == ip {
-			ambiguous = true
-			break
-		}
-	}
-	stale := time.Since(device.LastSeen) > policyStaleDeviceThreshold
+	// The claim index includes both LAN and explicitly linked Tailscale
+	// addresses. A shared overlay/LAN address must fall back to the default
+	// policy just like any other ambiguous client address.
+	ambiguous := deviceStore.IPClaimCount(ip) > 1
+	lastSeen := deviceStore.LastSeenForIP(ip)
+	stale := lastSeen.IsZero() || time.Since(lastSeen) > policyStaleDeviceThreshold
 	return device.ID, ambiguous, stale
 }
 
@@ -289,24 +395,24 @@ func StartPolicyEnforcement(basePath string, blockedLists []string, settings *ga
 		zones := localZones(readSetting("dns_local_zone", "local"))
 		deviceStore = discovery.NewDeviceStoreMultiZone(zones...)
 		log.Printf("[DNS] Device store initialized with zones: %v (primary: %s)", zones, zones[0])
-		// Durable user-managed device assignments live in GSDevices (opened and
-		// fail-closed in runtime Init). Envelope corruption therefore already
-		// stops startup; this attach restores the content-level assignment
-		// subset. A load error here means the store is degraded between Init and
-		// DNS start, so persistence is disabled with the error logged rather than
-		// silently dropping assignments.
-		if devices != nil {
-			if err := deviceStore.AttachPersistence(devices); err != nil {
-				log.Printf("[DNS] Device persistence disabled after load error: %v", err)
-			}
-		}
-		// Policy enforcement is a dedicated service; discovery remains the owner
-		// of observed identity. A policy load error is logged and enforcement
-		// keeps the default (no groups) behavior rather than guessing.
+		// Load policy before attaching legacy device assignments. Attachment may
+		// prune transient v1 records, and records referenced by an assignment,
+		// pause, or exception must survive that migration.
 		policySvc, policyErr := gatesentryPolicy.NewService(settings, deviceResolver{})
 		if policyErr != nil {
 			log.Printf("[DNS] Policy service unavailable, retaining default enforcement: %v", policyErr)
+			// Without policy references it is unsafe to run destructive legacy
+			// device migration. Leave persistence unattached rather than deleting
+			// a record that policy state may still reference.
+			if devices != nil {
+				log.Printf("[DNS] Device persistence disabled because protected policy references are unavailable")
+			}
 		} else {
+			if devices != nil {
+				if err := deviceStore.AttachPersistenceWithProtectedIDs(devices, policySvc.ReferencedDeviceIDs()); err != nil {
+					log.Printf("[DNS] Device persistence disabled after load error: %v", err)
+				}
+			}
 			// Category rules are only as good as the downloaded feeds. The index is
 			// attached before the scheduler starts so the first refresh fills it and
 			// enforcement never reads a partially built map.
@@ -320,6 +426,20 @@ func StartPolicyEnforcement(basePath string, blockedLists []string, settings *ga
 			}
 			policyService = policySvc
 		}
+
+		// Start the process-lifetime manager only after policy and persistence
+		// share the canonical store. Collection remains disabled by default.
+		startTailscaleManager(
+			&tailscaleManagers,
+			readSetting("tailscale_identity_enabled", "false") == "true",
+			func() TailscaleManager {
+				return gatesentryTailscale.NewManager(
+					gatesentryTailscale.NewClient(),
+					tailscaleDeviceAdapter{store: deviceStore},
+					0,
+				)
+			},
+		)
 
 		restartDnsSchedulerChan = make(chan bool)
 

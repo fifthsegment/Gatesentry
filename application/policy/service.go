@@ -254,6 +254,29 @@ func (s *Service) Snapshot() PolicySnapshot {
 	return PolicySnapshot{Groups: groups, Assignments: assignments, Version: s.snapshot.Version, UpdatedAt: s.snapshot.UpdatedAt}
 }
 
+// ReferencedDeviceIDs returns every canonical device ID retained by durable
+// policy state, including historical pause and exception audit records. Device
+// inventory migrations use it to avoid pruning or consolidating referenced IDs.
+func (s *Service) ReferencedDeviceIDs() map[string]bool {
+	result := make(map[string]bool)
+	for deviceID := range s.Snapshot().Assignments {
+		if strings.TrimSpace(deviceID) != "" {
+			result[deviceID] = true
+		}
+	}
+	for _, pause := range s.AllPauses() {
+		if pause.Scope == PauseScopeDevice && strings.TrimSpace(pause.DeviceID) != "" {
+			result[pause.DeviceID] = true
+		}
+	}
+	for _, exception := range s.AllExceptions() {
+		if exception.Scope == ScopeDevice && strings.TrimSpace(exception.DeviceID) != "" {
+			result[exception.DeviceID] = true
+		}
+	}
+	return result
+}
+
 // ReferencedCategories returns the category IDs any policy group selects. The
 // DNS blocklist refresh downloads exactly these categories plus the ones
 // enabled gateway-wide, so a feed nobody selected never occupies memory.

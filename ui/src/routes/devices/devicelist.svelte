@@ -18,6 +18,16 @@
 
   const API_BASE = getBasePath() + "/api/devices";
 
+  interface TailscaleNode {
+    node_id: string;
+    name: string;
+    dns_name: string;
+    addresses: string[];
+    online: boolean;
+    last_seen: string;
+    wol_macs?: string[];
+  }
+
   interface Device {
     id: string;
     display_name: string;
@@ -36,6 +46,7 @@
     owner: string;
     category: string;
     persistent: boolean;
+    tailscale_nodes: TailscaleNode[];
   }
 
   let devices: Device[] = [];
@@ -50,6 +61,7 @@
     { key: "status", value: "Status" },
     { key: "display_name", value: "Name" },
     { key: "dns_name", value: "DNS Name" },
+    { key: "tailscale_display", value: "Tailscale" },
     { key: "ipv4", value: "IPv4" },
     { key: "ipv6", value: "IPv6" },
     { key: "macs_display", value: "MAC" },
@@ -103,6 +115,9 @@
       status: d.online ? "online" : "offline",
       display_name: d.manual_name || d.display_name || d.dns_name || "Unknown",
       macs_display: d.macs?.length ? d.macs[0] : "—",
+      tailscale_display: d.tailscale_nodes?.length
+        ? d.tailscale_nodes.map((node) => node.name || node.dns_name).join(", ")
+        : "—",
       last_seen_display: formatTimeAgo(d.last_seen),
     };
   }
@@ -127,12 +142,20 @@
     detailOpen = true;
   }
 
+  function openDetailRow(row: any) {
+    openDetail(row as Device);
+  }
+
   async function handleNameSaved() {
     detailOpen = false;
     selectedDevice = null;
     success = "Device updated successfully";
     setTimeout(() => (success = ""), 3000);
     await loadDevices();
+  }
+
+  function removeDeviceRow(row: any) {
+    return removeDevice(row as Device);
   }
 
   async function removeDevice(device: Device) {
@@ -190,7 +213,7 @@
   <DataTable
     sortable
     title="Device Inventory"
-    description="Devices discovered on your network via DNS queries, mDNS, and DDNS updates."
+    description="Devices discovered on your network, including explicitly linked Tailscale peers."
     {headers}
     rows={devices}
   >
@@ -216,11 +239,23 @@
           title={row.online ? "Online" : "Offline"}
         ></span>
       {:else if cell.key === "display_name"}
-        <button class="device-name-link" on:click={() => openDetail(row)}>
+        <button class="device-name-link" on:click={() => openDetailRow(row)}>
           {cell.value}
         </button>
         {#if !row.manual_name && row.source !== "manual"}
           <Tag size="sm" type="cyan">auto</Tag>
+        {/if}
+      {:else if cell.key === "tailscale_display"}
+        {#if row.tailscale_nodes?.length}
+          <div class="tailscale-links">
+            {#each row.tailscale_nodes as node}
+              <Tag size="sm" type={node.online ? "green" : "warm-gray"}>
+                {node.name || node.dns_name || node.node_id}
+              </Tag>
+            {/each}
+          </div>
+        {:else}
+          —
         {/if}
       {:else if cell.key === "source"}
         <Tag
@@ -239,12 +274,16 @@
         <OverflowMenu flipped>
           <OverflowMenuItem
             text="Edit / Name"
-            on:click={() => openDetail(row)}
+            on:click={() => openDetailRow(row)}
+          />
+          <OverflowMenuItem
+            text="Manage Tailscale links"
+            on:click={() => openDetailRow(row)}
           />
           <OverflowMenuItem
             danger
             text="Remove"
-            on:click={() => removeDevice(row)}
+            on:click={() => removeDeviceRow(row)}
           />
         </OverflowMenu>
       {:else}
@@ -269,6 +308,7 @@
       selectedDevice = null;
     }}
     on:saved={handleNameSaved}
+    on:tailscaleChanged={loadDevices}
   />
 {/if}
 
@@ -297,6 +337,11 @@
   }
   .device-name-link:hover {
     color: #0043ce; /* Carbon blue-70 */
+  }
+  .tailscale-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
   }
   .device-summary {
     margin-top: 1rem;

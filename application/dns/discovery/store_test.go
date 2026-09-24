@@ -1,7 +1,9 @@
 package discovery
 
 import (
+	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -1235,5 +1237,86 @@ func TestPTR_NoDuplicates_MultiZone(t *testing.T) {
 	// PTR always targets primary
 	if ptr4[0].Value != "macmini.jvj28.com" {
 		t.Errorf("PTR should target primary 'macmini.jvj28.com', got %q", ptr4[0].Value)
+	}
+}
+
+func TestObserveDeviceDoesNotMergeHostnameOnly(t *testing.T) {
+	store := NewDeviceStore("local")
+	firstID, _, err := store.ObserveDevice(Device{IPv4: "192.0.2.10", Hostnames: []string{"android"}, Source: SourceMDNS})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondID, _, err := store.ObserveDevice(Device{IPv4: "192.0.2.11", Hostnames: []string{"android"}, Source: SourceMDNS})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if firstID == secondID || store.DeviceCount() != 2 {
+		t.Fatalf("hostname-only observations merged: ids=%q/%q count=%d", firstID, secondID, store.DeviceCount())
+	}
+}
+
+func TestObserveDeviceConcurrentFirstObservationConverges(t *testing.T) {
+	store := NewDeviceStore("local")
+	const workers = 32
+	var wg sync.WaitGroup
+	errs := make(chan error, workers)
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, _, err := store.ObserveDevice(Device{IPv4: "192.0.2.20", Source: SourcePassive})
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if store.DeviceCount() != 1 {
+		t.Fatalf("concurrent observations created %d devices", store.DeviceCount())
+	}
+}
+
+func TestTailscaleLinkResolvesCanonicalDeviceAndClearsOfflineAlias(t *testing.T) {
+	store := NewDeviceStore("local")
+	if _, err := store.UpsertDeviceE(&Device{ID: "phone", IPv4: "192.0.2.30", MACs: []string{"aa:bb:cc:dd:ee:ff"}, Persistent: true}); err != nil {
+		t.Fatal(err)
+	}
+	linked, err := store.LinkTailscaleIdentityE("phone", TailscaleIdentity{NodeID: "node-1", Name: "Pixel", Addresses: []string{"100.64.0.30"}, Online: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if linked.ID != "phone" || store.FindDeviceByIP("100.64.0.30").ID != "phone" || store.FindDeviceByTailscaleNode("node-1").ID != "phone" {
+		t.Fatal("linked identities did not resolve to canonical device")
+	}
+	if err := store.ApplyTailscaleSnapshot([]TailscaleIdentity{{NodeID: "node-1", Name: "Pixel", Addresses: []string{"100.64.0.30"}, Online: false}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := store.FindDeviceByIP("100.64.0.30"); got != nil {
+		t.Fatalf("offline peer retained active address claim: %+v", got)
+	}
+	device := store.GetDevice("phone")
+	if device == nil || len(device.TailscaleNodes) != 1 || device.TailscaleNodes[0].Online || len(device.TailscaleNodes[0].Addresses) != 0 {
+		t.Fatalf("offline linked device = %+v", device)
+	}
+}
+
+func TestTailscaleLinkProtectsReferencedTransientAddressOwner(t *testing.T) {
+	store := NewDeviceStore("local")
+	if _, err := store.UpsertDeviceE(&Device{ID: "phone", IPv4: "192.0.2.40", Persistent: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpsertDeviceE(&Device{ID: "observed", IPv4: "100.64.0.40", Source: SourcePassive}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := store.LinkTailscaleIdentityProtectedE("phone", TailscaleIdentity{NodeID: "node-1", Addresses: []string{"100.64.0.40"}, Online: true}, map[string]bool{"observed": true})
+	if !errors.Is(err, ErrTailscaleIdentityConflict) {
+		t.Fatalf("link error = %v, want conflict", err)
+	}
+	if store.GetDevice("observed") == nil || store.FindDeviceByTailscaleNode("node-1") != nil {
+		t.Fatal("failed link partially mutated inventory")
 	}
 }

@@ -26,10 +26,15 @@ services:
 
     volumes:
       - ./gatesentry-data:/usr/local/gatesentry/gatesentry
+      # Optional, disabled by default: expose host tailscaled's runtime socket read-only.
+      # Host networking alone does not expose host filesystem sockets. Never mount /var/lib/tailscale.
+      # - /var/run/tailscale:/var/run/tailscale:ro
       # Optional first run only: a chmod 600 JSON file with {"username","password"}
       # - ./gatesentry-bootstrap.json:/run/secrets/gatesentry-bootstrap.json:ro
 
     environment:
+      # Optional explicit socket override; the mounted default above is auto-detected.
+      # - GATESENTRY_TAILSCALE_SOCKET=/var/run/tailscale/tailscaled.sock
       - TZ=Etc/UTC
       # Set only while the read-only bootstrap file is mounted, then remove it.
       # - GATESENTRY_BOOTSTRAP_FILE=/run/secrets/gatesentry-bootstrap.json

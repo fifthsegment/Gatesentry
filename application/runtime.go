@@ -259,6 +259,7 @@ func (R *GSRuntime) Init() error {
 	setDefault("timezone", "Europe/Oslo")
 	setDefault("enable_https_filtering", "false")
 	setDefault("enable_dns_server", "true")
+	setDefault("tailscale_identity_enabled", "false")
 	// Use environment variable for DNS resolver if set, otherwise use default
 	// Environment variable takes precedence over stored settings to allow
 	// containerized/deployment-time configuration

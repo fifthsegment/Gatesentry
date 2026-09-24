@@ -428,3 +428,29 @@ func TestHandleDNS_BareHostname(t *testing.T) {
 		t.Errorf("Expected 192.168.1.55, got %s", a.A.String())
 	}
 }
+
+func TestDeviceResolverTreatsTailscaleAddressCollisionAsAmbiguous(t *testing.T) {
+	original := deviceStore
+	deviceStore = discovery.NewDeviceStore("local")
+	defer func() { deviceStore = original }()
+	now := time.Now()
+	if _, err := deviceStore.UpsertDeviceE(&discovery.Device{
+		ID: "lan-device", IPv4: "100.64.0.8", LastSeen: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := deviceStore.UpsertDeviceE(&discovery.Device{
+		ID: "linked-device", LastSeen: now,
+		TailscaleNodes: []discovery.TailscaleIdentity{{NodeID: "node-1", Addresses: []string{"100.64.0.8"}}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	_, ambiguous, stale := (deviceResolver{}).ResolveDeviceByIP("100.64.0.8")
+	if !ambiguous {
+		t.Fatal("linked Tailscale/LAN address collision was not ambiguous")
+	}
+	if stale {
+		t.Fatal("fresh address collision reported stale")
+	}
+}

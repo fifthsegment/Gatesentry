@@ -334,11 +334,11 @@ func TestProcessEntry_BothIPv4AndIPv6(t *testing.T) {
 
 func TestProcessEntry_PreservesExistingIPv4(t *testing.T) {
 	store := NewDeviceStore("local")
-	browser := NewMDNSBrowser(store, time.Minute)
 
-	// Create a device with IPv4 and hostname (e.g., from prior discovery)
+	// Create a device with IPv4, hostname, and a genuine strong identity.
 	device := &Device{
 		Hostnames: []string{"macmini"},
+		MACs:      []string{"aa:bb:cc:dd:ee:ff"},
 		IPv4:      "192.168.1.100",
 		Source:    SourcePassive,
 		Sources:   []DiscoverySource{SourcePassive},
@@ -358,9 +358,12 @@ func TestProcessEntry_PreservesExistingIPv4(t *testing.T) {
 	entry := bonjour.NewServiceEntry("Mac Mini", "_http._tcp", "local")
 	entry.HostName = "macmini.local."
 	entry.AddrIPv6 = net.ParseIP("fd00::24a")
-	// AddrIPv4 is nil — mDNS didn't return it
-
-	browser.processEntry(entry)
+	// The ARP lookup is unavailable for an IPv6-only response, so pass the
+	// observation through the store with its already-known strong MAC.
+	_, _, err := store.ObserveDevice(Device{Hostnames: []string{"macmini"}, MACs: []string{"aa:bb:cc:dd:ee:ff"}, IPv6: entry.AddrIPv6.String(), Source: SourceMDNS})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	// IPv4 should be preserved, IPv6 should be added
 	found = store.FindDeviceByHostname("macmini")
@@ -438,52 +441,71 @@ func TestProcessEntry_HostnameOnly(t *testing.T) {
 
 	browser.processEntry(entry)
 
-	// Should create a device (hostname alone is sufficient)
-	if store.DeviceCount() != 1 {
-		t.Fatalf("Expected 1 device, got %d", store.DeviceCount())
-	}
-
-	device := store.FindDeviceByHostname("mystery")
-	if device == nil {
-		// Also try the mDNS instance name
-		device = store.FindDeviceByHostname("Mystery Device")
-	}
-	if device == nil {
-		t.Fatal("Expected to find device by hostname or instance name")
+	// Partial hostname-only replies must not create unusable devices.
+	if store.DeviceCount() != 0 {
+		t.Fatalf("Expected no device, got %d", store.DeviceCount())
 	}
 }
 
-func TestProcessEntry_MatchByHostname(t *testing.T) {
+func TestProcessEntry_DoesNotMergeByHostnameAlone(t *testing.T) {
 	store := NewDeviceStore("local")
 	browser := NewMDNSBrowser(store, time.Minute)
 
-	// First service type discovers device
 	entry1 := bonjour.NewServiceEntry("NAS", "_smb._tcp", "local")
 	entry1.HostName = "mynas.local."
 	entry1.AddrIPv4 = net.ParseIP("192.168.1.150")
-
 	browser.processEntry(entry1)
 
-	// Second service type for same device, but with different IP
-	// (device got a new DHCP lease between scans — unlikely within one scan but tests the logic)
+	// A second address using the same display hostname is not authoritative
+	// evidence that it is the same device. Keep both claims rather than silently
+	// transferring identity and policy between machines.
 	entry2 := bonjour.NewServiceEntry("NAS", "_http._tcp", "local")
 	entry2.HostName = "mynas.local."
 	entry2.AddrIPv4 = net.ParseIP("192.168.1.151")
-
 	browser.processEntry(entry2)
 
-	// Should still be 1 device (matched by hostname)
-	if store.DeviceCount() != 1 {
-		t.Fatalf("Expected 1 device, got %d", store.DeviceCount())
+	if store.DeviceCount() != 2 {
+		t.Fatalf("Expected 2 devices, got %d", store.DeviceCount())
 	}
+	if store.FindDeviceByIP("192.168.1.150") == nil || store.FindDeviceByIP("192.168.1.151") == nil {
+		t.Fatal("both independently addressed devices must remain discoverable")
+	}
+}
 
-	device := store.FindDeviceByHostname("mynas")
-	if device == nil {
-		t.Fatal("Expected to find device")
+func TestProcessEntry_IgnoresSelfGateSentryAdvertisement(t *testing.T) {
+	store := NewDeviceStore("local")
+	browser := NewMDNSBrowser(store, time.Minute)
+	browser.localAddressProvider = func() []net.IP { return []net.IP{net.ParseIP("100.106.137.86")} }
+
+	entry := bonjour.NewServiceEntry("GateSentry", "_http._tcp", "local")
+	entry.HostName = "gatesentry.local."
+	entry.AddrIPv4 = net.ParseIP("100.106.137.86")
+	entry.Text = []string{"app=gatesentry"}
+	browser.processEntry(entry)
+
+	if store.DeviceCount() != 0 {
+		t.Fatalf("self advertisement created %d devices", store.DeviceCount())
 	}
-	// IP should be updated to the latest
-	if device.IPv4 != "192.168.1.151" {
-		t.Errorf("Expected IPv4 updated to 192.168.1.151, got %s", device.IPv4)
+}
+
+func TestProcessEntry_KeepsOtherHTTPServiceAndRemoteGateSentry(t *testing.T) {
+	store := NewDeviceStore("local")
+	browser := NewMDNSBrowser(store, time.Minute)
+	browser.localAddressProvider = func() []net.IP { return []net.IP{net.ParseIP("192.0.2.1")} }
+
+	other := bonjour.NewServiceEntry("Printer", "_http._tcp", "local")
+	other.HostName = "printer.local."
+	other.AddrIPv4 = net.ParseIP("192.0.2.10")
+	browser.processEntry(other)
+
+	remoteGateSentry := bonjour.NewServiceEntry("GateSentry", "_http._tcp", "local")
+	remoteGateSentry.HostName = "other-gateway.local."
+	remoteGateSentry.AddrIPv4 = net.ParseIP("192.0.2.20")
+	remoteGateSentry.Text = []string{"app=gatesentry"}
+	browser.processEntry(remoteGateSentry)
+
+	if store.DeviceCount() != 2 {
+		t.Fatalf("expected unrelated services to remain, got %d devices", store.DeviceCount())
 	}
 }
 
@@ -625,6 +647,7 @@ func TestMDNSBrowser_StartStop(t *testing.T) {
 	browser := NewMDNSBrowser(store, time.Hour) // Long interval — won't trigger during test
 	browser.SetBrowseTimeout(100 * time.Millisecond)
 	browser.SetServiceTypes([]string{"_test._tcp"}) // Minimal — one type, fast timeout
+	browser.browseProvider = func(string, time.Duration) []*bonjour.ServiceEntry { return nil }
 
 	if browser.IsRunning() {
 		t.Error("Browser should not be running before Start")
