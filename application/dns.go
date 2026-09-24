@@ -21,6 +21,11 @@ func DNSServerThread(baseDir string, logger *gatesentry2logger.Log, c <-chan int
 		}
 	}()
 
+	// Policies are enforced by the proxy as well as DNS, so the policy
+	// service, device store, and category feeds start even when the DNS
+	// listener is disabled.
+	gatesentryDnsServer.StartPolicyEnforcement(baseDir, blocklists, settings, devices, info)
+
 	for {
 		select {
 		case msg := <-c:

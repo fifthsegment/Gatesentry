@@ -1,5 +1,6 @@
 import {
   Filter,
+  Locked,
   Home,
   LogoAnsibleCommunity,
   Catalog,
@@ -45,20 +46,26 @@ let menuItems = [
     icon: Devices,
   },
   {
+    type: "link",
+    text: "Policies",
+    href: "/rules",
+    icon: Rule,
+  },
+  {
+    type: "link",
+    text: "Services",
+    href: "/services",
+    icon: SwitchLayer_2,
+  },
+  {
     type: "menu",
-    text: "Filters",
-    icon: Filter,
+    text: "HTTPS inspection",
+    icon: Locked,
     children: [
       {
         type: "link",
-        text: "Keywords to Block",
+        text: "Blocked keywords",
         href: "/blockedkeywords",
-        icon: Filter,
-      },
-      {
-        type: "link",
-        text: "Block List",
-        href: "/blockedurls",
         icon: Filter,
       },
       {
@@ -69,29 +76,11 @@ let menuItems = [
       },
       {
         type: "link",
-        text: "Exception Hostnames",
+        text: "Sites not inspected",
         href: "/excludehosts",
         icon: Filter,
       },
-      // {
-      //   type: "link",
-      //   text: "Excluded URLs",
-      //   href: "/excludeurls",
-      //   icon: Filter,
-      // },
     ],
-  },
-  {
-    type: "link",
-    text: "Services",
-    href: "/services",
-    icon: SwitchLayer_2,
-  },
-  {
-    type: "link",
-    text: "Policies",
-    href: "/rules",
-    icon: Rule,
   },
   {
     type: "link",

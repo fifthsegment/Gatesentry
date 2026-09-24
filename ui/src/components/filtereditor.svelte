@@ -7,7 +7,6 @@
     Column,
     DataTable,
     Grid,
-    InlineNotification,
     Row,
     TextInput,
     Tile,
@@ -19,7 +18,6 @@
   import { store } from "../store/apistore";
   import { notificationstore } from "../store/notifications";
   import { _ } from "svelte-i18n";
-  import Toggle from "./toggle.svelte";
 
   let data = [];
 
@@ -119,29 +117,8 @@
   loadAPIdata();
   let filteredRowIds = [];
 
-  let enable_https_filtering = "";
 </script>
 
-<Toggle
-  bind:settingValue={enable_https_filtering}
-  settingName="enable_https_filtering"
-  hide={true}
-/>
-<Row>
-  <Column>
-    {#if enable_https_filtering == "false"}
-      <InlineNotification
-        style="width:100%;"
-        hideCloseButton
-        kind="warning"
-        title={$_("Important: ")}
-        subtitle={$_(
-          "For these filters to take effect, you must enable HTTPS Filtering from the Settings Menu.",
-        )}
-      />
-    {/if}
-  </Column>
-</Row>
 <Row>
   <Column>
     <DataTable

@@ -11,24 +11,47 @@
     Grid,
   } from "carbon-components-svelte";
   import ConnectedSettingInput from "../../components/connectedSettingInput.svelte";
+  import { InlineNotification } from "carbon-components-svelte";
+  import { onMount } from "svelte";
+  import { store } from "../../store/apistore";
 
-  // bVxTPTOXiqGRbhF
+  // These lists act on decrypted HTTPS traffic, so say plainly when
+  // inspection is off rather than let them look like they are working.
+  let inspectionOn: boolean | null = null;
+  onMount(async () => {
+    try {
+      const json = await $store.api.doCall("/settings/enable_https_filtering");
+      inspectionOn = json?.Value === "true";
+    } catch {
+      inspectionOn = null;
+    }
+  });
 </script>
 
 <Row>
   <Column>
     <Breadcrumb style="margin-bottom: 10px;">
       <BreadcrumbItem href="/">{$_("Dashboard")}</BreadcrumbItem>
-      <BreadcrumbItem>{$_("Filters")}</BreadcrumbItem>
+      <BreadcrumbItem>{$_("HTTPS inspection")}</BreadcrumbItem>
     </Breadcrumb>
   </Column>
 </Row>
 
+{#if type !== "excludehosts" && inspectionOn === false}
+  <InlineNotification
+    kind="warning"
+    lowContrast
+    hideCloseButton
+    title="HTTPS inspection is off."
+    subtitle="This list only applies to plain HTTP traffic until you turn on HTTPS filtering in Settings and install the GateSentry certificate on each device. To block whole sites, use Policies."
+  />
+{/if}
+
 {#if type == "blockedfiletypes"}
-  <h2>{$_("Blocked Content Types")}</h2>
+  <h2>{$_("Blocked content types")}</h2>
   <div class="description">
     {$_(
-      "Add MIME types to block here. For example to block .jpg files add image/jpeg, to block .webp files add image/webp.",
+      "Responses of these types are blocked on every device that uses the proxy. For example image/jpeg blocks .jpg files and video/ blocks all video. To block a type for one policy only, add it to a rule in Policies.",
     )}
   </div>
   <Filtereditor
@@ -36,7 +59,7 @@
     showColumns={["content", "actions"]}
   />
 {:else if type == "blockedkeywords"}
-  <h2>{$_("Blocked Keywords")}</h2>
+  <h2>{$_("Blocked keywords")}</h2>
   <div class="description">
     {$_(
       "Add/Update keywords to block here. The score is used to determine how bad the keyword is. The higher the score, the worse the keyword.",
@@ -69,15 +92,6 @@
       </Column>
     </Row>
   </div>
-{:else if type == "blockedurls"}
-  <h2>{$_("Block List")}</h2>
-  <div class="description">
-    {$_("Add Sites to block here.")}
-  </div>
-  <Filtereditor
-    filterId="bTXmTXgTuXpJuOZ"
-    showColumns={["content", "actions"]}
-  />
 {:else if type == "excludeurls"}
   <h2>{$_("Excluded URLs")}</h2>
   <div class="description">
@@ -88,10 +102,10 @@
     showColumns={["content", "actions"]}
   />
 {:else if type == "excludehosts"}
-  <h2>{$_("Excluded Hosts")}</h2>
+  <h2>{$_("Sites not inspected")}</h2>
   <div class="description">
     {$_(
-      "Add hostnames you want to exclude from filtering here. If SSL Bumping is enabled, these Hostnames will not be bumped.",
+      "HTTPS traffic to these hosts is passed through without decryption. Add apps and sites that break when inspected, such as banking apps or apps that pin their certificates. Policies still block these sites by domain.",
     )}
   </div>
   <Filtereditor
