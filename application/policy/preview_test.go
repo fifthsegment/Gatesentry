@@ -13,7 +13,7 @@ func TestPreviewMatchesLiveEvaluation(t *testing.T) {
 	resolver := &mapResolver{devices: map[string]string{"192.0.2.10": "device-1"}}
 	// Rebind the resolver so device-1 is known.
 	if err := svc.SaveGroups([]PolicyGroup{
-		{ID: "kids", Name: "Kids", Action: ActionBlock, Domains: []string{"*.games.example"}},
+		{ID: "kids", Name: "Kids", BlockedDomains: []string{"*.games.example"}},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +53,7 @@ func TestPreviewProposedPolicyComparison(t *testing.T) {
 	resolver := &mapResolver{devices: map[string]string{"192.0.2.10": "device-1"}}
 	svc.devices = resolver
 	if err := svc.SaveGroups([]PolicyGroup{
-		{ID: "kids", Name: "Kids", Action: ActionBlock, Domains: []string{"*.games.example"}},
+		{ID: "kids", Name: "Kids", BlockedDomains: []string{"*.games.example"}},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +78,7 @@ func TestPreviewProposedPolicyComparison(t *testing.T) {
 	// Proposed: move device-1 to an allow group that allows *.games.example.
 	proposed := &ProposedPolicy{
 		Groups: []PolicyGroup{
-			{ID: "unrestricted", Name: "Unrestricted", Action: ActionAllow, Domains: []string{"*.games.example"}},
+			{ID: "unrestricted", Name: "Unrestricted", AllowedDomains: []string{"*.games.example"}},
 		},
 		Assignments: []DeviceAssignment{{DeviceID: "device-1", GroupID: "unrestricted"}},
 	}
@@ -113,7 +113,7 @@ func TestPreviewShowsMatchedRulesTrail(t *testing.T) {
 	resolver := &mapResolver{devices: map[string]string{"192.0.2.10": "device-1"}}
 	svc.devices = resolver
 	if err := svc.SaveGroups([]PolicyGroup{
-		{ID: "kids", Name: "Kids", Action: ActionBlock, Domains: []string{"*.games.example"}},
+		{ID: "kids", Name: "Kids", BlockedDomains: []string{"*.games.example"}},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -125,37 +125,32 @@ func TestPreviewShowsMatchedRulesTrail(t *testing.T) {
 	}
 
 	result := svc.Preview(PreviewRequest{ClientIP: "192.0.2.10", Domain: "chess.games.example"})
-	names := make([]string, len(result.Active.Stages))
-	for i, s := range result.Active.Stages {
-		names[i] = s.Name
+	trace := result.Active.Trace
+	if len(trace) == 0 {
+		t.Fatal("preview returned no trace")
 	}
-	// Expect exception, group, schedule, pause, group_domain in order.
-	want := []string{"exception", "group", "schedule", "pause", "group_domain"}
-	for i, w := range want {
-		if i >= len(names) {
-			t.Fatalf("stage %d missing; have %v", i, names)
-		}
-		if names[i] != w {
-			t.Fatalf("stage %d = %s, want %s (trail=%v)", i, names[i], w, names)
-		}
+	last := trace[len(trace)-1]
+	if last.Stage != "blocked_domains" || !last.Applied || last.Detail != "*.games.example" {
+		t.Fatalf("deciding step = %+v, want the blocked domain pattern", last)
 	}
-	// The group_domain stage should be applied and carry the matched pattern.
-	gd := result.Active.Stages[4]
-	if !gd.Applied || gd.Detail != "*.games.example" {
-		t.Fatalf("group_domain stage = %+v, want applied with *.games.example", gd)
+	if result.Active.GroupName != "Kids" {
+		t.Fatalf("group name = %q, want Kids", result.Active.GroupName)
 	}
 }
 
-// TestPreviewSurfacesInapplicableAndUnevaluatedConditions verifies that DNS
-// inapplicable conditions are listed and that the proxy protocol surfaces them
-// as unevaluated (the policy service does not run URL/MIME/inspection).
-func TestPreviewSurfacesInapplicableAndUnevaluatedConditions(t *testing.T) {
+// TestPreviewProxyLayerTestsTheURL verifies that a proxy preview reports the
+// URL conditions of the rules that apply and whether the supplied URL matches,
+// while a DNS preview reports the same rule as decided by the proxy.
+func TestPreviewProxyLayerTestsTheURL(t *testing.T) {
 	svc := newTestService(t)
-	resolver := &mapResolver{devices: map[string]string{"192.0.2.10": "device-1"}}
-	svc.devices = resolver
-	if err := svc.SaveGroups([]PolicyGroup{
-		{ID: "kids", Name: "Kids", Action: ActionBlock, Domains: []string{"*.games.example"}},
-	}); err != nil {
+	svc.devices = &mapResolver{devices: map[string]string{"192.0.2.10": "device-1"}}
+	if err := svc.SaveGroups([]PolicyGroup{{
+		ID: "kids", Name: "Kids",
+		Rules: []GroupRule{{
+			ID: "shorts", Enabled: true, Action: ActionBlock,
+			Target: RuleTarget{Domains: []string{"youtube.com"}}, URLRegexes: []string{"/shorts/"},
+		}},
+	}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := svc.SetDeviceAssignment("device-1", "kids"); err != nil {
@@ -165,22 +160,18 @@ func TestPreviewSurfacesInapplicableAndUnevaluatedConditions(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// DNS: url_regex, content_type, mitm are inapplicable.
-	dnsResult := svc.Preview(PreviewRequest{ClientIP: "192.0.2.10", Domain: "chess.games.example", Protocol: "dns"})
-	if len(dnsResult.Active.InapplicableConditions) != 3 {
-		t.Fatalf("dns inapplicable = %v, want 3", dnsResult.Active.InapplicableConditions)
-	}
-	if len(dnsResult.Active.UnevaluatedConditions) != 0 {
-		t.Fatalf("dns unevaluated = %v, want 0", dnsResult.Active.UnevaluatedConditions)
+	dns := svc.Preview(PreviewRequest{ClientIP: "192.0.2.10", Domain: "www.youtube.com"})
+	if dns.Active.Action != ActionNone || len(dns.Active.ProxyOnly) != 1 {
+		t.Fatalf("dns preview = %+v, want no DNS block and one proxy-only condition", dns.Active)
 	}
 
-	// Proxy: the policy service does not evaluate URL/MIME/inspection.
-	proxyResult := svc.Preview(PreviewRequest{ClientIP: "192.0.2.10", Domain: "chess.games.example", Protocol: "proxy", URL: "/play", MIMEType: "text/html"})
-	if len(proxyResult.Active.InapplicableConditions) != 0 {
-		t.Fatalf("proxy inapplicable = %v, want 0", proxyResult.Active.InapplicableConditions)
+	blocked := svc.Preview(PreviewRequest{ClientIP: "192.0.2.10", Protocol: "proxy", URL: "https://www.youtube.com/shorts/abc"})
+	if !blocked.Active.URLBlocked || len(blocked.Active.BlockURLRegexes) != 1 {
+		t.Fatalf("proxy preview of a shorts URL = %+v, want the URL blocked", blocked.Active)
 	}
-	if len(proxyResult.Active.UnevaluatedConditions) != 3 {
-		t.Fatalf("proxy unevaluated = %v, want 3", proxyResult.Active.UnevaluatedConditions)
+	allowed := svc.Preview(PreviewRequest{ClientIP: "192.0.2.10", Protocol: "proxy", URL: "https://www.youtube.com/watch?v=abc"})
+	if allowed.Active.URLBlocked {
+		t.Fatalf("proxy preview of a watch URL = %+v, want it allowed", allowed.Active)
 	}
 }
 
@@ -191,7 +182,7 @@ func TestPreviewExceptionOverridesGroupBlock(t *testing.T) {
 	resolver := &mapResolver{devices: map[string]string{"192.0.2.10": "device-1"}}
 	svc.devices = resolver
 	if err := svc.SaveGroups([]PolicyGroup{
-		{ID: "kids", Name: "Kids", Action: ActionBlock, Domains: []string{"*.games.example"}},
+		{ID: "kids", Name: "Kids", BlockedDomains: []string{"*.games.example"}},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -213,8 +204,8 @@ func TestPreviewExceptionOverridesGroupBlock(t *testing.T) {
 	if result.Active.Action != ActionAllow {
 		t.Fatalf("active action = %s, want allow via exception", result.Active.Action)
 	}
-	if result.Active.Stages[0].Name != "exception" || !result.Active.Stages[0].Applied {
-		t.Fatalf("exception stage not applied: %+v", result.Active.Stages[0])
+	if result.Active.Trace[0].Stage != "exception" || !result.Active.Trace[0].Applied {
+		t.Fatalf("exception step not applied: %+v", result.Active.Trace)
 	}
 	_ = exc
 }
@@ -236,7 +227,7 @@ func TestPreviewScheduleInactiveRespectsTimeOverride(t *testing.T) {
 		Windows:  []TimeWindow{{From: "09:00", To: "17:00"}},
 	}
 	if err := svc.SaveGroups([]PolicyGroup{
-		{ID: "kids", Name: "Kids", Action: ActionBlock, Domains: []string{"*.games.example"}, Schedule: school},
+		scheduledBlock("kids", school, "games.example"),
 	}); err != nil {
 		t.Fatal(err)
 	}

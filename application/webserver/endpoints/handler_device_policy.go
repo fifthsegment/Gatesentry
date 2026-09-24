@@ -12,16 +12,18 @@ import (
 	"github.com/gorilla/mux"
 )
 
-// deviceGroupView is the enforcing subset of a policy group. It deliberately
-// excludes Users and UnknownDevicePolicy: those are configuration details,
-// while this view answers which domain rules this device's assignment gives it.
+// deviceGroupView is the enforcing subset of a policy. It deliberately excludes
+// Users: that is configuration, while this view answers what the device's
+// policy blocks and allows.
 type deviceGroupView struct {
-	ID                     string                        `json:"id"`
-	Name                   string                        `json:"name"`
-	Action                 gatesentryPolicy.PolicyAction `json:"action"`
-	Domains                []string                      `json:"domains"`
-	Priority               int                           `json:"priority"`
-	InapplicableConditions []string                      `json:"inapplicable_conditions"`
+	ID                string   `json:"id"`
+	Name              string   `json:"name"`
+	Default           bool     `json:"default"`
+	BlockedCategories []string `json:"blocked_categories"`
+	BlockedDomains    []string `json:"blocked_domains"`
+	AllowedDomains    []string `json:"allowed_domains"`
+	RuleCount         int      `json:"rule_count"`
+	SafeSearch        bool     `json:"safe_search"`
 }
 
 type deviceAddressView struct {
@@ -46,6 +48,7 @@ type deviceCoverageView struct {
 type devicePolicyResponse struct {
 	DeviceID              string                    `json:"device_id"`
 	Assignment            *deviceGroupView          `json:"assignment"`
+	EffectivePolicy       *deviceGroupView          `json:"effective_policy"`
 	Identity              gatesentryPolicy.Identity `json:"identity"`
 	LastSeen              time.Time                 `json:"last_seen"`
 	Addresses             []deviceAddressView       `json:"addresses"`
@@ -81,6 +84,16 @@ func GSApiDevicePolicyGet(w http.ResponseWriter, r *http.Request) {
 	var assignment *deviceGroupView
 	if group, ok := snapshot.Groups[groupID]; ok {
 		assignment = groupView(group)
+	}
+	// A device without an assignment is on the default policy, and its view
+	// says so instead of reporting no policy at all.
+	effectiveID := groupID
+	if assignment == nil {
+		effectiveID = gatesentryPolicy.DefaultGroupID
+	}
+	var effective *deviceGroupView
+	if group, ok := snapshot.Groups[effectiveID]; ok {
+		effective = groupView(group)
 	}
 
 	addressIPs := make([]string, 0, 2)
@@ -134,6 +147,7 @@ func GSApiDevicePolicyGet(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(devicePolicyResponse{
 		DeviceID:              id,
 		Assignment:            assignment,
+		EffectivePolicy:       effective,
 		Identity:              identity,
 		LastSeen:              device.LastSeen,
 		Addresses:             addresses,
@@ -145,19 +159,21 @@ func GSApiDevicePolicyGet(w http.ResponseWriter, r *http.Request) {
 
 func groupView(group gatesentryPolicy.PolicyGroup) *deviceGroupView {
 	return &deviceGroupView{
-		ID:                     group.ID,
-		Name:                   group.Name,
-		Action:                 group.Action,
-		Domains:                group.Domains,
-		Priority:               group.Priority,
-		InapplicableConditions: gatesentryPolicy.DNSInapplicableConditions(),
+		ID:                group.ID,
+		Name:              group.Name,
+		Default:           group.ID == gatesentryPolicy.DefaultGroupID,
+		BlockedCategories: group.BlockedCategories,
+		BlockedDomains:    group.BlockedDomains,
+		AllowedDomains:    group.AllowedDomains,
+		RuleCount:         len(group.Rules),
+		SafeSearch:        group.SafeSearch,
 	}
 }
 
 func coverageView(dnsResolved, shared, stale bool, groupID string) deviceCoverageView {
 	view := deviceCoverageView{
 		Caveats: []string{
-			"DNS policy covers domain rules only; URL, MIME, keyword, and HTTPS-inspection rules do not apply to DNS decisions.",
+			"DNS enforces domains, categories, schedules, and safe search; URL and response-type rules are enforced by the proxy.",
 			"A device is covered by DNS policy only while it uses GateSentry as its DNS resolver.",
 			"Explicit proxy policy applies only to clients explicitly configured to send traffic through GateSentry.",
 		},
@@ -166,16 +182,16 @@ func coverageView(dnsResolved, shared, stale bool, groupID string) deviceCoverag
 	switch {
 	case !dnsResolved && shared:
 		view.Confidence = "low"
-		view.Summary = "Another device shares this address, so requests from it use the default policy instead of this device's group."
+		view.Summary = "Another device shares this address, so requests from it use the default policy instead of this device's policy."
 	case !dnsResolved:
 		view.Confidence = "none"
-		view.Summary = "No current address resolves to this device, so its group assignment is not enforcing."
+		view.Summary = "No current address resolves to this device, so its policy is not enforcing."
 	case stale:
 		view.Confidence = "medium"
 		view.Summary = "DNS queries from this device use its assignment, but the observation is stale and proxy traffic uses the default policy."
 	default:
 		view.Confidence = "high"
-		view.Summary = "Current DNS queries from this device resolve to it and use its assigned group."
+		view.Summary = "Current DNS queries from this device resolve to it and use its policy."
 	}
 	if shared {
 		view.Caveats = append(view.Caveats, "A shared or NATed address can make device identity ambiguous.")
@@ -184,7 +200,7 @@ func coverageView(dnsResolved, shared, stale bool, groupID string) deviceCoverag
 		view.Caveats = append(view.Caveats, "A stale observation may reflect an address that DHCP has reassigned.")
 	}
 	if groupID == "" {
-		view.Caveats = append(view.Caveats, "No group is assigned; the gateway default policy applies.")
+		view.Caveats = append(view.Caveats, "No policy is assigned; the default policy applies.")
 	}
 	return view
 }

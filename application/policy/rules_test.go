@@ -6,8 +6,63 @@ import (
 	"time"
 )
 
-func groupWithRules(action PolicyAction, domains []string, rules ...GroupRule) PolicyGroup {
-	return PolicyGroup{ID: "g1", Name: "Group", Action: action, Domains: domains, Rules: rules}
+// evalFor evaluates one policy for one domain with no pause, no categories,
+// and a fixed noon clock, so a test states only the policy it is about.
+func evalFor(group PolicyGroup, domain string, layer DecisionLayer) groupOutcome {
+	return evaluateGroup(group, evalRequest{
+		domain: domain,
+		now:    time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC),
+		layer:  layer,
+	})
+}
+
+// scheduledBlock is a policy that blocks the given domains during a schedule,
+// which is how a time-limited block is written now that schedules belong to
+// rules.
+func scheduledBlock(id string, schedule *Schedule, domains ...string) PolicyGroup {
+	return PolicyGroup{ID: id, Name: id, Rules: []GroupRule{{
+		ID: id + "-schedule", Name: "Scheduled block", Enabled: true, Action: ActionBlock,
+		Target: RuleTarget{Domains: domains}, Schedule: schedule,
+	}}}
+}
+
+func TestMatchDomainPlainDomainCoversSubdomains(t *testing.T) {
+	cases := []struct {
+		pattern, domain string
+		want            bool
+	}{
+		{"tiktok.com", "tiktok.com", true},
+		{"tiktok.com", "www.tiktok.com", true},
+		{"tiktok.com", "a.b.tiktok.com", true},
+		{"tiktok.com", "nottiktok.com", false},
+		{"*.example.com", "example.com", false},
+		{"*.example.com", "www.example.com", true},
+		{"Example.COM", "WWW.example.com.", true},
+	}
+	for _, c := range cases {
+		if got := matchDomain(c.pattern, c.domain); got != c.want {
+			t.Errorf("matchDomain(%q, %q) = %v, want %v", c.pattern, c.domain, got, c.want)
+		}
+	}
+}
+
+func TestNormalizeDomainPatternStripsURLParts(t *testing.T) {
+	cases := map[string]string{
+		" https://WWW.Example.com/path?q=1 ": "www.example.com",
+		"example.com:443":                    "example.com",
+		"*.example.com.":                     "*.example.com",
+	}
+	for in, want := range cases {
+		got, err := NormalizeDomainPattern(in)
+		if err != nil || got != want {
+			t.Errorf("NormalizeDomainPattern(%q) = %q, %v; want %q", in, got, err, want)
+		}
+	}
+	for _, bad := range []string{"exa mple.com", "foo*.com", "*."} {
+		if _, err := NormalizeDomainPattern(bad); err == nil {
+			t.Errorf("NormalizeDomainPattern(%q) accepted a non-domain", bad)
+		}
+	}
 }
 
 func TestNormalizeGroupRulesAssignsIDsAndTrimsValues(t *testing.T) {
@@ -15,7 +70,7 @@ func TestNormalizeGroupRulesAssignsIDsAndTrimsValues(t *testing.T) {
 		Name:                "  Block video  ",
 		Enabled:             true,
 		Action:              ActionBlock,
-		MITMAction:          " enable ",
+		Target:              RuleTarget{Domains: []string{" Videos.Example "}},
 		URLRegexes:          []string{" ^/media/ ", ""},
 		BlockedContentTypes: []string{" VIDEO/ ", ""},
 		Users:               []string{" alice ", ""},
@@ -23,15 +78,12 @@ func TestNormalizeGroupRulesAssignsIDsAndTrimsValues(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(rules) != 1 {
-		t.Fatalf("rules = %d, want 1", len(rules))
-	}
 	rule := rules[0]
-	if rule.ID == "" {
-		t.Fatal("rule was stored without an id")
+	if rule.ID == "" || rule.Name != "Block video" {
+		t.Fatalf("rule = %+v", rule)
 	}
-	if rule.Name != "Block video" {
-		t.Fatalf("name = %q", rule.Name)
+	if len(rule.Target.Domains) != 1 || rule.Target.Domains[0] != "videos.example" {
+		t.Fatalf("target = %+v", rule.Target)
 	}
 	if len(rule.URLRegexes) != 1 || rule.URLRegexes[0] != "^/media/" {
 		t.Fatalf("url regexes = %v", rule.URLRegexes)
@@ -44,143 +96,248 @@ func TestNormalizeGroupRulesAssignsIDsAndTrimsValues(t *testing.T) {
 	}
 }
 
-func TestNormalizeGroupRulesKeepsStableIDs(t *testing.T) {
-	rules, err := NormalizeGroupRules([]GroupRule{{ID: "rule-1", Action: ActionBlock}})
+func TestNormalizeGroupRulesAllTrafficDropsLists(t *testing.T) {
+	rules, err := NormalizeGroupRules([]GroupRule{{
+		Enabled: true, Action: ActionBlock,
+		Target: RuleTarget{AllTraffic: true, Domains: []string{"x.example"}, Categories: []string{"social"}},
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rules[0].ID != "rule-1" {
-		t.Fatalf("id = %q, want rule-1", rules[0].ID)
+	if len(rules[0].Target.Domains) != 0 || len(rules[0].Target.Categories) != 0 {
+		t.Fatalf("target = %+v, want all traffic only", rules[0].Target)
 	}
 }
 
 func TestNormalizeGroupRulesRejectsMalformedRecords(t *testing.T) {
+	target := RuleTarget{Domains: []string{"example.com"}}
 	cases := map[string]GroupRule{
-		"no action":         {Name: "x"},
-		"bad action":        {Action: "deny"},
-		"bad mitm":          {Action: ActionBlock, MITMAction: "inspect"},
-		"bad regex":         {Action: ActionBlock, URLRegexes: []string{"(unclosed"}},
-		"bad schedule":      {Action: ActionBlock, Schedule: &Schedule{Windows: []TimeWindow{{From: "25:00", To: "07:00"}}}},
-		"allow with url":    {Action: ActionAllow, URLRegexes: []string{"^/a"}},
-		"allow with mime":   {Action: ActionAllow, BlockedContentTypes: []string{"video/"}},
-		"url with no mitm":  {Action: ActionBlock, MITMAction: MITMActionDisable, URLRegexes: []string{"^/a"}},
-		"mime with no mitm": {Action: ActionBlock, MITMAction: MITMActionDisable, BlockedContentTypes: []string{"video/"}},
+		"no action":            {Name: "x", Enabled: true, Target: target},
+		"bad action":           {Action: "deny", Enabled: true, Target: target},
+		"no target":            {Action: ActionBlock, Enabled: true},
+		"bad regex":            {Action: ActionBlock, Enabled: true, Target: target, URLRegexes: []string{"("}},
+		"allow with url":       {Action: ActionAllow, Enabled: true, Target: target, URLRegexes: []string{"^/x"}},
+		"allow with type":      {Action: ActionAllow, Enabled: true, Target: target, BlockedContentTypes: []string{"video/"}},
+		"unknown category":     {Action: ActionBlock, Enabled: true, Target: RuleTarget{Categories: []string{"nope"}}},
+		"address as user":      {Action: ActionBlock, Enabled: true, Target: target, Users: []string{"192.0.2.1"}},
+		"bad schedule":         {Action: ActionBlock, Enabled: true, Target: target, Schedule: &Schedule{Windows: []TimeWindow{{From: "25:00", To: "07:00"}}}},
+		"bad domain in target": {Action: ActionBlock, Enabled: true, Target: RuleTarget{Domains: []string{"not a domain"}}},
 	}
 	for name, rule := range cases {
-		t.Run(name, func(t *testing.T) {
-			if _, err := NormalizeGroupRules([]GroupRule{rule}); err == nil {
-				t.Fatal("expected a rejection, got none")
-			}
-		})
+		if _, err := NormalizeGroupRules([]GroupRule{rule}); err == nil {
+			t.Errorf("%s: expected a rejection", name)
+		}
 	}
 }
 
-func TestEnabledGroupRulesSortsByPriorityThenID(t *testing.T) {
-	rules := EnabledGroupRules(groupWithRules(ActionBlock, nil,
-		GroupRule{ID: "b", Enabled: true, Priority: 5, Action: ActionBlock},
-		GroupRule{ID: "a", Enabled: true, Priority: 5, Action: ActionBlock},
-		GroupRule{ID: "c", Enabled: true, Priority: 1, Action: ActionBlock},
-		GroupRule{ID: "d", Enabled: false, Priority: 0, Action: ActionBlock},
-	))
-	got := make([]string, 0, len(rules))
-	for _, rule := range rules {
-		got = append(got, rule.ID)
-	}
-	if strings.Join(got, ",") != "c,a,b" {
-		t.Fatalf("order = %v, want c,a,b", got)
+func TestNormalizeGroupRulesAcceptsADisabledRuleWithoutATarget(t *testing.T) {
+	// A half-written rule can be saved switched off and finished later.
+	if _, err := NormalizeGroupRules([]GroupRule{{Action: ActionBlock}}); err != nil {
+		t.Fatal(err)
 	}
 }
 
-func TestGroupRulesOverrideTheGroupAction(t *testing.T) {
-	now := time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC)
-	group := groupWithRules(ActionBlock, []string{"example.com"},
-		GroupRule{ID: "r1", Enabled: true, Action: ActionAllow, Users: []string{"alice"}},
-	)
-	if outcome := evaluateGroupRulesAt(group, "example.com", "", "alice", now, LayerDNS); outcome.Action != ActionAllow {
-		t.Fatalf("alice outcome = %+v, want allow", outcome)
+func TestPolicyListsDecideWithoutRules(t *testing.T) {
+	group := PolicyGroup{
+		ID:             "kids",
+		BlockedDomains: []string{"tiktok.com"},
+		AllowedDomains: []string{"school.tiktok.com"},
 	}
-	// The rule's user scope excludes everyone else, so the group action stands.
-	if outcome := evaluateGroupRulesAt(group, "example.com", "", "bob", now, LayerDNS); outcome.Action != ActionBlock {
-		t.Fatalf("bob outcome = %+v, want block", outcome)
+	if out := evalFor(group, "www.tiktok.com", LayerDNS); out.Action != ActionBlock {
+		t.Fatalf("subdomain of a blocked domain = %+v, want block", out)
 	}
-	if outcome := evaluateGroupRulesAt(group, "example.com", "", "", now, LayerDNS); outcome.Action != ActionBlock {
-		t.Fatalf("anonymous outcome = %+v, want block", outcome)
+	if out := evalFor(group, "school.tiktok.com", LayerDNS); out.Action != ActionAllow {
+		t.Fatalf("allowed domain inside a blocked one = %+v, want allow", out)
+	}
+	if out := evalFor(group, "example.com", LayerDNS); out.Action != ActionNone {
+		t.Fatalf("uncovered domain = %+v, want none", out)
 	}
 }
 
-func TestGroupRuleScheduleScopesTheRule(t *testing.T) {
-	group := groupWithRules(ActionBlock, []string{"example.com"},
-		GroupRule{ID: "r1", Enabled: true, Action: ActionAllow, Schedule: &Schedule{
-			Timezone: "UTC",
-			Windows:  []TimeWindow{{From: "09:00", To: "17:00"}},
+func TestAllowedDomainExemptsABlockedCategory(t *testing.T) {
+	index := NewCategoryIndex()
+	index.Replace("social", []string{"reddit.com"}, time.Now())
+	group := PolicyGroup{BlockedCategories: []string{"social"}, AllowedDomains: []string{"reddit.com"}}
+	out := evaluateGroup(group, evalRequest{domain: "old.reddit.com", layer: LayerDNS, index: index, now: time.Now()})
+	if out.Action != ActionAllow {
+		t.Fatalf("outcome = %+v, want the allowed domain to win over the category", out)
+	}
+}
+
+func TestAllowedDomainExemptsAGatewayCategory(t *testing.T) {
+	index := NewCategoryIndex()
+	index.Replace("ads", []string{"tracker.example"}, time.Now())
+	req := evalRequest{domain: "tracker.example", layer: LayerDNS, index: index, now: time.Now(), gatewayCategories: []string{"ads"}}
+	if out := evaluateGroup(PolicyGroup{}, req); out.Action != ActionBlock {
+		t.Fatalf("gateway category = %+v, want block for a policy that does not allow it", out)
+	}
+	if out := evaluateGroup(PolicyGroup{AllowedDomains: []string{"tracker.example"}}, req); out.Action != ActionAllow {
+		t.Fatalf("allowed domain = %+v, want allow over the gateway category", out)
+	}
+}
+
+func TestRuleTargetsItsOwnDomains(t *testing.T) {
+	// The bug this model fixes: a policy could only hold one action for one
+	// set of domains, so "block TikTok, allow YouTube" needed two policies and
+	// a device can only have one.
+	group := PolicyGroup{Rules: []GroupRule{
+		{ID: "a", Enabled: true, Action: ActionAllow, Target: RuleTarget{Domains: []string{"youtube.com"}}},
+		{ID: "b", Enabled: true, Action: ActionBlock, Target: RuleTarget{Domains: []string{"tiktok.com"}}},
+	}}
+	if out := evalFor(group, "www.youtube.com", LayerDNS); out.Action != ActionAllow || out.RuleID != "a" {
+		t.Fatalf("youtube = %+v", out)
+	}
+	if out := evalFor(group, "www.tiktok.com", LayerDNS); out.Action != ActionBlock || out.RuleID != "b" {
+		t.Fatalf("tiktok = %+v", out)
+	}
+	if out := evalFor(group, "example.com", LayerDNS); out.Action != ActionNone {
+		t.Fatalf("other = %+v", out)
+	}
+}
+
+func TestRulesAreFirstMatchInListOrder(t *testing.T) {
+	group := PolicyGroup{Rules: []GroupRule{
+		{ID: "allow-homework", Enabled: true, Action: ActionAllow, Target: RuleTarget{Domains: []string{"khanacademy.org"}}},
+		{ID: "no-internet", Enabled: true, Action: ActionBlock, Target: RuleTarget{AllTraffic: true}},
+	}}
+	if out := evalFor(group, "www.khanacademy.org", LayerDNS); out.Action != ActionAllow {
+		t.Fatalf("the earlier allow must win: %+v", out)
+	}
+	if out := evalFor(group, "example.com", LayerDNS); out.Action != ActionBlock || out.Matched != "*" {
+		t.Fatalf("all traffic = %+v", out)
+	}
+}
+
+func TestRulesComeBeforeTheLists(t *testing.T) {
+	group := PolicyGroup{
+		BlockedDomains: []string{"youtube.com"},
+		Rules: []GroupRule{{
+			ID: "weekend", Enabled: true, Action: ActionAllow,
+			Target: RuleTarget{Domains: []string{"youtube.com"}},
 		}},
-	)
-	inside := time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC)
-	outside := time.Date(2026, 9, 20, 20, 0, 0, 0, time.UTC)
-	if outcome := evaluateGroupRulesAt(group, "example.com", "", "", inside, LayerDNS); outcome.Action != ActionAllow {
-		t.Fatalf("inside outcome = %+v, want allow", outcome)
 	}
-	if outcome := evaluateGroupRulesAt(group, "example.com", "", "", outside, LayerDNS); outcome.Action != ActionBlock {
-		t.Fatalf("outside outcome = %+v, want block", outcome)
+	if out := evalFor(group, "www.youtube.com", LayerDNS); out.Action != ActionAllow {
+		t.Fatalf("outcome = %+v, want the rule to override the blocked list", out)
 	}
 }
 
-func TestDisabledGroupRuleIsIgnored(t *testing.T) {
-	now := time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC)
-	group := groupWithRules(ActionBlock, []string{"example.com"},
-		GroupRule{ID: "r1", Enabled: false, Action: ActionAllow},
-	)
-	outcome := evaluateGroupRulesAt(group, "example.com", "", "", now, LayerDNS)
-	if outcome.Action != ActionBlock || outcome.RuleID != "" {
-		t.Fatalf("outcome = %+v, want the group action with no rule", outcome)
+func TestDisabledRuleIsIgnored(t *testing.T) {
+	group := PolicyGroup{Rules: []GroupRule{{ID: "r", Enabled: false, Action: ActionBlock, Target: RuleTarget{AllTraffic: true}}}}
+	if out := evalFor(group, "example.com", LayerDNS); out.Action != ActionNone {
+		t.Fatalf("outcome = %+v", out)
 	}
 }
 
-func TestDNSReportsProxyOnlyConditionsAsUnresolved(t *testing.T) {
-	now := time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC)
-	group := groupWithRules(ActionNone, []string{"example.com"},
-		GroupRule{ID: "r1", Name: "No video", Enabled: true, Action: ActionBlock,
-			MITMAction: MITMActionEnable, URLRegexes: []string{"^/media/"}, BlockedContentTypes: []string{"video/"}},
-	)
-	outcome := evaluateGroupRulesAt(group, "example.com", "", "", now, LayerDNS)
-	if outcome.Action != ActionBlock {
-		t.Fatalf("action = %q, want block: DNS still blocks the domain", outcome.Action)
+func TestRuleScheduleScopesTheRule(t *testing.T) {
+	bedtime := &Schedule{Timezone: "UTC", Windows: []TimeWindow{{From: "20:00", To: "07:00"}}}
+	group := PolicyGroup{Rules: []GroupRule{{ID: "bed", Enabled: true, Action: ActionBlock, Target: RuleTarget{AllTraffic: true}, Schedule: bedtime}}}
+	req := evalRequest{domain: "example.com", layer: LayerDNS}
+	req.now = time.Date(2026, 9, 23, 21, 0, 0, 0, time.UTC)
+	if out := evaluateGroup(group, req); out.Action != ActionBlock {
+		t.Fatalf("inside the window = %+v, want block", out)
 	}
-	if strings.Join(outcome.Unresolved, ",") != "url_regex,content_type" {
-		t.Fatalf("unresolved = %v, want url_regex,content_type", outcome.Unresolved)
-	}
-	if outcome.Reason != "group rule No video" {
-		t.Fatalf("reason = %q", outcome.Reason)
-	}
-
-	proxy := evaluateGroupRulesAt(group, "example.com", "", "", now, LayerExplicitProxy)
-	if len(proxy.Unresolved) != 0 {
-		t.Fatalf("proxy unresolved = %v, want none", proxy.Unresolved)
-	}
-	if !proxy.ShouldMITM || len(proxy.BlockURLRegexes) != 1 || len(proxy.BlockContentTypes) != 1 {
-		t.Fatalf("proxy outcome = %+v, want inspection with both conditions", proxy)
+	req.now = time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC)
+	if out := evaluateGroup(group, req); out.Action != ActionNone {
+		t.Fatalf("outside the window = %+v, want none", out)
 	}
 }
 
-func TestProxyLayerHonorsDisableInspectionOnABlockRule(t *testing.T) {
-	now := time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC)
-	group := groupWithRules(ActionNone, []string{"example.com"},
-		GroupRule{ID: "r1", Enabled: true, Action: ActionBlock, MITMAction: MITMActionDisable},
-	)
-	outcome := evaluateGroupRulesAt(group, "example.com", "", "", now, LayerExplicitProxy)
-	if outcome.Action != ActionBlock || outcome.ShouldMITM {
-		t.Fatalf("outcome = %+v, want a block without inspection", outcome)
+func TestPauseLiftsRuleAndListBlocksButNotAllows(t *testing.T) {
+	// The bug this fixes: a pause only checked the old group-level action, so
+	// a policy that blocked through a rule kept blocking while "paused".
+	group := PolicyGroup{
+		BlockedDomains: []string{"games.example"},
+		AllowedDomains: []string{"school.example"},
+		Rules:          []GroupRule{{ID: "r", Enabled: true, Action: ActionBlock, Target: RuleTarget{Domains: []string{"tiktok.com"}}}},
+	}
+	for _, domain := range []string{"tiktok.com", "games.example"} {
+		out := evaluateGroup(group, evalRequest{domain: domain, layer: LayerDNS, paused: true, now: time.Now()})
+		if out.Action == ActionBlock {
+			t.Fatalf("%s paused = %+v, want no block", domain, out)
+		}
+	}
+	out := evaluateGroup(group, evalRequest{domain: "school.example", layer: LayerDNS, paused: true, now: time.Now()})
+	if out.Action != ActionAllow {
+		t.Fatalf("allow while paused = %+v, want allow", out)
 	}
 }
 
-func TestRuleReasonNamesTheCategory(t *testing.T) {
-	now := time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC)
-	group := groupWithRules(ActionNone, nil,
-		GroupRule{ID: "r1", Name: "No social", Enabled: true, Action: ActionBlock},
-	)
-	outcome := evaluateGroupRulesAt(group, "category:social", "social", "", now, LayerDNS)
-	if outcome.Reason != "group rule No social on category social" {
-		t.Fatalf("reason = %q", outcome.Reason)
+func TestDNSSkipsARuleNarrowedToURLs(t *testing.T) {
+	// The bug this fixes: a rule meant to block only youtube.com/shorts
+	// blocked the whole of YouTube on DNS, because DNS applied the rule's
+	// block to the domain and ignored the URL condition.
+	group := PolicyGroup{Rules: []GroupRule{{
+		ID: "shorts", Enabled: true, Action: ActionBlock,
+		Target:     RuleTarget{Domains: []string{"youtube.com"}},
+		URLRegexes: []string{"/shorts"},
+	}}}
+	out := evalFor(group, "www.youtube.com", LayerDNS)
+	if out.Action != ActionNone {
+		t.Fatalf("DNS outcome = %+v, want the domain left to the proxy", out)
+	}
+	if len(out.ProxyOnly) != 1 || out.ProxyOnly[0] != ConditionURL {
+		t.Fatalf("proxy-only = %v", out.ProxyOnly)
+	}
+}
+
+func TestDNSSkipsAUserScopedRule(t *testing.T) {
+	group := PolicyGroup{Rules: []GroupRule{{
+		ID: "alice", Enabled: true, Action: ActionBlock,
+		Target: RuleTarget{AllTraffic: true}, Users: []string{"alice"},
+	}}}
+	if out := evalFor(group, "example.com", LayerDNS); out.Action != ActionNone {
+		t.Fatalf("DNS outcome = %+v, want a user rule left to the proxy", out)
+	}
+}
+
+func TestProxyCollectsConditionsAndContinues(t *testing.T) {
+	group := PolicyGroup{
+		AllowedDomains: []string{"youtube.com"},
+		Rules: []GroupRule{{
+			ID: "shorts", Name: "No shorts", Enabled: true, Action: ActionBlock,
+			Target:     RuleTarget{Domains: []string{"youtube.com"}},
+			URLRegexes: []string{"/shorts"},
+		}},
+	}
+	out := evalFor(group, "www.youtube.com", LayerExplicitProxy)
+	if out.Action != ActionAllow {
+		t.Fatalf("decisive outcome = %+v, want the allowed domain", out)
+	}
+	if len(out.URLRegexes) != 1 || out.ConditionRuleID != "shorts" {
+		t.Fatalf("conditions = %+v", out)
+	}
+}
+
+func TestProxyAppliesUserScopedRuleOnlyToThatUser(t *testing.T) {
+	group := PolicyGroup{Rules: []GroupRule{{
+		ID: "alice", Enabled: true, Action: ActionBlock,
+		Target: RuleTarget{AllTraffic: true}, Users: []string{"alice"},
+	}}}
+	req := evalRequest{domain: "example.com", layer: LayerExplicitProxy, now: time.Now()}
+	req.user = "alice"
+	if out := evaluateGroup(group, req); out.Action != ActionBlock {
+		t.Fatalf("alice = %+v, want block", out)
+	}
+	req.user = "bob"
+	if out := evaluateGroup(group, req); out.Action != ActionNone {
+		t.Fatalf("bob = %+v, want none", out)
+	}
+}
+
+func TestTraceExplainsTheDecision(t *testing.T) {
+	group := PolicyGroup{
+		BlockedDomains: []string{"tiktok.com"},
+		Rules: []GroupRule{{
+			ID: "bed", Name: "Bedtime", Enabled: true, Action: ActionBlock, Target: RuleTarget{AllTraffic: true},
+			Schedule: &Schedule{Timezone: "UTC", Windows: []TimeWindow{{From: "20:00", To: "07:00"}}},
+		}},
+	}
+	out := evalFor(group, "tiktok.com", LayerDNS)
+	if len(out.Trace) != 2 {
+		t.Fatalf("trace = %+v, want the skipped rule and the deciding list", out.Trace)
+	}
+	if !strings.Contains(out.Trace[0].Detail, "outside its schedule") || out.Trace[1].Stage != "blocked_domains" || !out.Trace[1].Applied {
+		t.Fatalf("trace = %+v", out.Trace)
 	}
 }
 
@@ -214,31 +371,19 @@ func TestMigrateLegacyRulesCarriesEnforcementIntoAnUnassignedGroup(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(groups) != 1 {
-		t.Fatalf("groups = %d, want 1", len(groups))
-	}
 	group := groups[0]
-	if group.ID != "legacy-rule-r1" {
-		t.Fatalf("id = %q", group.ID)
-	}
-	if group.Action != ActionBlock || len(group.Domains) != 1 || group.Domains[0] != "*.games.example" {
+	if group.ID != "legacy-rule-r1" || len(group.Rules) != 1 {
 		t.Fatalf("group = %+v", group)
 	}
-	if len(group.Rules) != 1 {
-		t.Fatalf("rules = %d, want 1", len(group.Rules))
-	}
 	rule := group.Rules[0]
-	if !rule.Enabled || rule.Action != ActionBlock || rule.MITMAction != MITMActionEnable {
+	if !rule.Enabled || rule.Action != ActionBlock || len(rule.Target.Domains) != 1 || rule.Target.Domains[0] != "games.example" {
 		t.Fatalf("rule = %+v", rule)
 	}
-	if len(rule.URLRegexes) != 1 || len(rule.BlockedContentTypes) != 1 {
+	if len(rule.URLRegexes) != 1 || len(rule.BlockedContentTypes) != 1 || len(rule.Users) != 1 {
 		t.Fatalf("conditions = %+v", rule)
 	}
 	if rule.Schedule == nil || rule.Schedule.Timezone != "America/New_York" {
 		t.Fatalf("schedule = %+v", rule.Schedule)
-	}
-	if strings.Contains(group.Description, "could not be represented") {
-		t.Fatalf("description dropped a representable window: %q", group.Description)
 	}
 }
 
@@ -249,23 +394,12 @@ func TestMigrateLegacyRulesKeepsADisabledRuleFromEnforcing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	group := groups[0]
-	if group.Action != ActionNone {
-		t.Fatalf("group action = %q, want none", group.Action)
-	}
-	if group.Rules[0].Enabled {
-		t.Fatal("disabled rule imported enabled")
-	}
-	// The imported group must not enforce anything until it is edited.
-	if outcome := evaluateGroupRulesAt(group, "example.com", "", "", time.Now(), LayerDNS); outcome.Action != ActionNone {
-		t.Fatalf("outcome = %+v, want none", outcome)
+	if out := evalFor(groups[0], "example.com", LayerDNS); out.Action != ActionNone {
+		t.Fatalf("outcome = %+v, want none", out)
 	}
 }
 
 func TestMigrateLegacyRulesOnlyImportsConditionsTheOldEngineApplied(t *testing.T) {
-	// URL and media-type conditions only reached the proxy when the rule
-	// inspected TLS, and only for a block. Importing them otherwise would
-	// invent enforcement that never happened.
 	groups, err := MigrateLegacyRules([]LegacyRule{{
 		ID: "r1", Domain: "example.com", Action: "block", Enabled: true,
 		MITMAction: "disable", BlockType: "both",
@@ -277,8 +411,6 @@ func TestMigrateLegacyRulesOnlyImportsConditionsTheOldEngineApplied(t *testing.T
 	if rule := groups[0].Rules[0]; len(rule.URLRegexes) != 0 || len(rule.BlockedContentTypes) != 0 {
 		t.Fatalf("rule = %+v, want no conditions without inspection", rule)
 	}
-
-	// An allow rule kept its patterns but the old proxy never tested them.
 	groups, err = MigrateLegacyRules([]LegacyRule{{
 		ID: "r2", Domain: "example.com", Action: "allow", Enabled: true,
 		MITMAction: "enable", BlockType: "both",
@@ -314,63 +446,44 @@ func TestMigrateLegacyRulesRejectsARuleWithoutADomain(t *testing.T) {
 	}
 }
 
-func TestEvaluateProxyReturnsTheGroupsRuleConditions(t *testing.T) {
+func TestEvaluateProxyBlocksOnlyMatchingURLs(t *testing.T) {
 	svc := newTestService(t)
+	svc.devices = &mapResolver{devices: map[string]string{"192.0.2.10": "tablet"}}
 	if err := svc.SaveGroups([]PolicyGroup{{
-		ID: "kids", Name: "Kids", Action: ActionBlock,
-		Domains: []string{"videos.example"},
+		ID: "kids", Name: "Kids",
 		Rules: []GroupRule{{
-			ID: "r1", Name: "No video", Enabled: true, Action: ActionBlock,
-			MITMAction: MITMActionEnable, URLRegexes: []string{"^/watch/"},
-			BlockedContentTypes: []string{"video/"},
+			ID: "shorts", Name: "No shorts", Enabled: true, Action: ActionBlock,
+			Target:     RuleTarget{Domains: []string{"youtube.com"}},
+			URLRegexes: []string{"/shorts"},
 		}},
 	}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := svc.SaveAssignments([]DeviceAssignment{{DeviceID: "device-1", GroupID: "kids"}}); err != nil {
+	if err := svc.SetDeviceAssignment("tablet", "kids"); err != nil {
 		t.Fatal(err)
 	}
 	if err := svc.Reload(); err != nil {
 		t.Fatal(err)
 	}
-	svc.devices = &mapResolver{devices: map[string]string{"192.0.2.10": "device-1"}}
-	identity := svc.ResolveIdentity("192.0.2.10", "")
-
-	match := svc.EvaluateProxy(identity, "videos.example")
-	if !match.Matched || !match.ShouldBlock || match.RuleID != "r1" {
-		t.Fatalf("match = %+v", match)
+	match := svc.EvaluateProxy(svc.ResolveIdentity("192.0.2.10", ""), "www.youtube.com")
+	if !match.Matched || match.ShouldBlock || !match.ShouldMITM || len(match.BlockURLRegexes) != 1 || match.RuleID != "shorts" {
+		t.Fatalf("match = %+v, want inspection with the URL condition and no domain block", match)
 	}
-	if !match.ShouldMITM || len(match.BlockURLRegexes) != 1 || len(match.BlockContentTypes) != 1 {
-		t.Fatalf("match = %+v, want inspection with both conditions", match)
-	}
-
-	// Traffic the group does not cover keeps the gateway's own settings.
-	if outside := svc.EvaluateProxy(identity, "other.example"); outside.Matched {
-		t.Fatalf("uncovered domain matched: %+v", outside)
+	if dns := svc.EvaluateDNS(svc.ResolveIdentityForDNS("192.0.2.10", ""), "www.youtube.com"); dns.Action != ActionNone {
+		t.Fatalf("DNS = %+v, want the domain left resolvable", dns)
 	}
 }
 
-func TestEvaluateProxyTreatsAnAllowRuleAsAnException(t *testing.T) {
+func TestEvaluateProxyReportsAnAllowSoTheBlocklistIsExempt(t *testing.T) {
 	svc := newTestService(t)
-	if err := svc.SaveGroups([]PolicyGroup{{
-		ID: "kids", Name: "Kids", Action: ActionBlock,
-		Domains: []string{"example.com"},
-		Rules:   []GroupRule{{ID: "r1", Enabled: true, Action: ActionAllow, Users: []string{"alice"}}},
-	}}); err != nil {
-		t.Fatal(err)
-	}
-	if err := svc.SaveAssignments([]DeviceAssignment{{DeviceID: "device-1", GroupID: "kids"}}); err != nil {
+	if err := svc.UpdateGroup(DefaultGroupID, PolicyGroup{Name: "Default", AllowedDomains: []string{"bank.example"}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := svc.Reload(); err != nil {
 		t.Fatal(err)
 	}
-	svc.devices = &mapResolver{devices: map[string]string{"192.0.2.10": "device-1"}}
-
-	if match := svc.EvaluateProxy(svc.ResolveIdentity("192.0.2.10", "alice"), "example.com"); match.Matched {
-		t.Fatalf("allow rule did not exempt the request: %+v", match)
-	}
-	if match := svc.EvaluateProxy(svc.ResolveIdentity("192.0.2.10", ""), "example.com"); !match.Matched || !match.ShouldBlock {
-		t.Fatalf("group block did not apply to another user: %+v", match)
+	match := svc.EvaluateProxy(svc.ResolveIdentity("198.51.100.1", ""), "online.bank.example")
+	if !match.Matched || !match.Allowed || match.ShouldBlock || match.ShouldMITM {
+		t.Fatalf("match = %+v, want an allow that leaves inspection to the gateway", match)
 	}
 }

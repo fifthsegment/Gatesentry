@@ -27,3 +27,7 @@ __pycache__/
 *.pyc
 *.pyo
 .pytest_cache/
+.codex/
+.factory/
+.mcp.json
+code-factory-audit.html

@@ -44,8 +44,7 @@ func TestAccessRequestDoesNotGrantAccess(t *testing.T) {
 	svc.devices = &mapResolver{devices: map[string]string{"192.0.2.10": "device-1"}}
 
 	if err := svc.SaveGroups([]PolicyGroup{{
-		ID: "kids", Name: "Kids", Action: ActionBlock,
-		Domains: []string{"ads.example"},
+		ID: "kids", Name: "Kids", BlockedDomains: []string{"ads.example"},
 	}}); err != nil {
 		t.Fatal(err)
 	}
@@ -85,8 +84,7 @@ func TestAccessRequestApprovalCreatesException(t *testing.T) {
 	svc.devices = &mapResolver{devices: map[string]string{"192.0.2.10": "device-1"}}
 
 	if err := svc.SaveGroups([]PolicyGroup{{
-		ID: "kids", Name: "Kids", Action: ActionBlock,
-		Domains: []string{"ads.example"},
+		ID: "kids", Name: "Kids", BlockedDomains: []string{"ads.example"},
 	}}); err != nil {
 		t.Fatal(err)
 	}
@@ -135,8 +133,7 @@ func TestAccessRequestRejection(t *testing.T) {
 	svc.devices = &mapResolver{devices: map[string]string{"192.0.2.10": "device-1"}}
 
 	if err := svc.SaveGroups([]PolicyGroup{{
-		ID: "kids", Name: "Kids", Action: ActionBlock,
-		Domains: []string{"ads.example"},
+		ID: "kids", Name: "Kids", BlockedDomains: []string{"ads.example"},
 	}}); err != nil {
 		t.Fatal(err)
 	}

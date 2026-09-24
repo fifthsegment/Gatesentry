@@ -45,10 +45,9 @@ func devicePolicyTestSetup(t *testing.T) (func(), *gatesentryLogger.Log) {
 func seedDevicePolicyGroup(t *testing.T, svc *gatesentryPolicy.Service) {
 	t.Helper()
 	if err := svc.SaveGroups([]gatesentryPolicy.PolicyGroup{{
-		ID:      "kids",
-		Name:    "Kids",
-		Action:  gatesentryPolicy.ActionBlock,
-		Domains: []string{"*.games.example"},
+		ID:             "kids",
+		Name:           "Kids",
+		BlockedDomains: []string{"*.games.example"},
 	}}); err != nil {
 		t.Fatal(err)
 	}
@@ -90,10 +89,8 @@ func TestDevicePolicyViewReportsAssignmentAndCoverage(t *testing.T) {
 	var body struct {
 		DeviceID   string `json:"device_id"`
 		Assignment *struct {
-			ID                     string   `json:"id"`
-			Action                 string   `json:"action"`
-			Domains                []string `json:"domains"`
-			InapplicableConditions []string `json:"inapplicable_conditions"`
+			ID             string   `json:"id"`
+			BlockedDomains []string `json:"blocked_domains"`
 		} `json:"assignment"`
 		Identity struct {
 			DeviceID    string `json:"device_id"`
@@ -125,13 +122,9 @@ func TestDevicePolicyViewReportsAssignmentAndCoverage(t *testing.T) {
 	}
 	if body.Assignment == nil ||
 		body.Assignment.ID != "kids" ||
-		body.Assignment.Action != string(gatesentryPolicy.ActionBlock) ||
-		len(body.Assignment.Domains) != 1 ||
-		body.Assignment.Domains[0] != "*.games.example" {
+		len(body.Assignment.BlockedDomains) != 1 ||
+		body.Assignment.BlockedDomains[0] != "*.games.example" {
 		t.Fatalf("assignment = %+v", body.Assignment)
-	}
-	if len(body.Assignment.InapplicableConditions) != 3 {
-		t.Fatalf("inapplicable conditions = %v", body.Assignment.InapplicableConditions)
 	}
 	if body.Identity.DeviceID != "device-1" ||
 		body.Identity.GroupID != "kids" ||
@@ -178,6 +171,10 @@ func TestDevicePolicyViewWithoutAssignmentUsesDefault(t *testing.T) {
 		Assignment *struct {
 			ID string `json:"id"`
 		} `json:"assignment"`
+		EffectivePolicy *struct {
+			ID      string `json:"id"`
+			Default bool   `json:"default"`
+		} `json:"effective_policy"`
 		Coverage struct {
 			Confidence string   `json:"confidence"`
 			Caveats    []string `json:"caveats"`
@@ -189,12 +186,15 @@ func TestDevicePolicyViewWithoutAssignmentUsesDefault(t *testing.T) {
 	if body.Assignment != nil {
 		t.Fatalf("assignment = %+v, want null", body.Assignment)
 	}
+	if body.EffectivePolicy == nil || body.EffectivePolicy.ID != gatesentryPolicy.DefaultGroupID || !body.EffectivePolicy.Default {
+		t.Fatalf("effective policy = %+v, want the default policy", body.EffectivePolicy)
+	}
 	if body.Coverage.Confidence != "high" {
 		t.Fatalf("confidence = %q, want high (identity resolves; only the group is absent)", body.Coverage.Confidence)
 	}
 	found := false
 	for _, caveat := range body.Coverage.Caveats {
-		if caveat == "No group is assigned; the gateway default policy applies." {
+		if caveat == "No policy is assigned; the default policy applies." {
 			found = true
 		}
 	}

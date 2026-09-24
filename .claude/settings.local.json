@@ -1,7 +1,16 @@
 {
   "permissions": {
     "allow": [
-      "Bash(git pull:*)"
+      "Bash(git pull:*)",
+      "Bash(git rebase *)",
+      "Bash(git branch *)",
+      "Bash(git checkout *)",
+      "Bash(git cherry-pick *)",
+      "Bash(git rm *)",
+      "Bash(git add *)",
+      "Bash(go build *)",
+      "Bash(go test *)",
+      "Bash(npx vitest *)"
     ]
   }
 }

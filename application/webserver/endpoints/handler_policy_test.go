@@ -48,7 +48,7 @@ func TestPolicyGroupsRoundTrip(t *testing.T) {
 	_, cleanup := policyTestService(t)
 	defer cleanup()
 
-	body := `{"groups":[{"id":"kids","name":"Kids","action":"block","domains":["*.games.example"],"users":["dana"],"priority":1}]}`
+	body := `{"groups":[{"id":"kids","name":"Kids","blocked_domains":["games.example"],"users":["dana"],"priority":1}]}`
 	put := httptest.NewRequest(http.MethodPut, "/api/policy/groups", bytes.NewBufferString(body))
 	putRecorder := httptest.NewRecorder()
 	GSApiPolicyGroupsReplace(putRecorder, put)
@@ -61,7 +61,7 @@ func TestPolicyGroupsRoundTrip(t *testing.T) {
 	if err := json.Unmarshal(putRecorder.Body.Bytes(), &putBody); err != nil {
 		t.Fatal(err)
 	}
-	if len(putBody.Groups) != 1 || putBody.Groups[0].ID != "kids" {
+	if len(putBody.Groups) != 2 || putBody.Groups[0].ID != gatesentryPolicy.DefaultGroupID || putBody.Groups[1].ID != "kids" {
 		t.Fatalf("PUT body = %s", putRecorder.Body.String())
 	}
 
@@ -77,7 +77,7 @@ func TestPolicyGroupsRoundTrip(t *testing.T) {
 	if err := json.Unmarshal(getRecorder.Body.Bytes(), &getBody); err != nil {
 		t.Fatal(err)
 	}
-	if len(getBody.Groups) != 1 || getBody.Groups[0].Action != gatesentryPolicy.ActionBlock {
+	if len(getBody.Groups) != 2 || len(getBody.Groups[1].BlockedDomains) != 1 {
 		t.Fatalf("GET body = %s", getRecorder.Body.String())
 	}
 }
@@ -100,11 +100,11 @@ func TestPolicyPreviewReportsInapplicableConditions(t *testing.T) {
 	defer cleanup()
 
 	groups := httptest.NewRequest(http.MethodPut, "/api/policy/groups", bytes.NewBufferString(
-		`{"groups":[{"id":"kids","action":"block","domains":["*.games.example"]}]}`))
+		`{"groups":[{"id":"kids","name":"Kids","blocked_domains":["*.games.example"],"rules":[{"id":"shorts","enabled":true,"action":"block","target":{"domains":["video.example"]},"url_regexes":["/shorts"]}]}]}`))
 	groupsRecorder := httptest.NewRecorder()
 	GSApiPolicyGroupsReplace(groupsRecorder, groups)
 	if groupsRecorder.Code != http.StatusOK {
-		t.Fatalf("groups status = %d", groupsRecorder.Code)
+		t.Fatalf("groups status = %d, body = %s", groupsRecorder.Code, groupsRecorder.Body.String())
 	}
 	assignments := httptest.NewRequest(http.MethodPut, "/api/policy/assignments", bytes.NewBufferString(
 		`{"assignments":[{"device_id":"device-1","group_id":"kids"}]}`))
@@ -112,6 +112,14 @@ func TestPolicyPreviewReportsInapplicableConditions(t *testing.T) {
 	GSApiPolicyAssignmentsReplace(assignmentsRecorder, assignments)
 	if assignmentsRecorder.Code != http.StatusOK {
 		t.Fatalf("assignments status = %d", assignmentsRecorder.Code)
+	}
+
+	proxyOnly := httptest.NewRequest(http.MethodPost, "/api/policy/preview", bytes.NewBufferString(
+		`{"client_ip":"192.0.2.10","domain":"www.video.example"}`))
+	proxyOnlyRecorder := httptest.NewRecorder()
+	GSApiPolicyPreview(proxyOnlyRecorder, proxyOnly)
+	if !strings.Contains(proxyOnlyRecorder.Body.String(), `"proxy_only":["url_regex"]`) {
+		t.Fatalf("DNS preview of a URL rule = %s, want the URL condition reported as proxy-only", proxyOnlyRecorder.Body.String())
 	}
 
 	preview := httptest.NewRequest(http.MethodPost, "/api/policy/preview", bytes.NewBufferString(
@@ -124,21 +132,14 @@ func TestPolicyPreviewReportsInapplicableConditions(t *testing.T) {
 	var previewBody struct {
 		Identity gatesentryPolicy.Identity
 		Active   struct {
-			Action                 gatesentryPolicy.PolicyAction
-			GroupID                string   `json:"group_id"`
-			MatchedDomain          string   `json:"matched_domain"`
-			InapplicableConditions []string `json:"inapplicable_conditions"`
-			Reason                 string
-			Stages                 []struct {
-				Name    string
-				Applied bool
-				Action  gatesentryPolicy.PolicyAction
-				Detail  string
-			}
+			Action        gatesentryPolicy.PolicyAction
+			GroupID       string `json:"group_id"`
+			MatchedDomain string `json:"matched_domain"`
+			Reason        string
+			Trace         []gatesentryPolicy.TraceStep
 		}
 		Proposed struct {
-			Action                 gatesentryPolicy.PolicyAction
-			InapplicableConditions []string `json:"inapplicable_conditions"`
+			Action gatesentryPolicy.PolicyAction
 		}
 		Changed bool
 	}
@@ -154,9 +155,6 @@ func TestPolicyPreviewReportsInapplicableConditions(t *testing.T) {
 	if previewBody.Active.MatchedDomain != "*.games.example" {
 		t.Fatalf("preview matched domain = %s, want *.games.example", previewBody.Active.MatchedDomain)
 	}
-	if len(previewBody.Active.InapplicableConditions) != 3 {
-		t.Fatalf("inapplicable conditions = %v, want url_regex/content_type/mitm", previewBody.Active.InapplicableConditions)
-	}
 	// No proposed policy => proposed equals active and nothing changed.
 	if previewBody.Proposed.Action != gatesentryPolicy.ActionBlock {
 		t.Fatalf("preview proposed action = %s, want block", previewBody.Proposed.Action)
@@ -164,8 +162,8 @@ func TestPolicyPreviewReportsInapplicableConditions(t *testing.T) {
 	if previewBody.Changed {
 		t.Fatalf("preview changed = true, want false when no proposed policy is supplied")
 	}
-	if len(previewBody.Active.Stages) == 0 {
-		t.Fatalf("preview stages empty; expected a precedence trail")
+	if len(previewBody.Active.Trace) == 0 {
+		t.Fatalf("preview trace empty; expected the evaluator's explanation")
 	}
 }
 
@@ -177,7 +175,7 @@ func TestPolicyPreviewProposedComparison(t *testing.T) {
 	defer cleanup()
 
 	groups := httptest.NewRequest(http.MethodPut, "/api/policy/groups", bytes.NewBufferString(
-		`{"groups":[{"id":"kids","action":"block","domains":["*.games.example"]}]}`))
+		`{"groups":[{"id":"kids","name":"Kids","blocked_domains":["*.games.example"]}]}`))
 	groupsRecorder := httptest.NewRecorder()
 	GSApiPolicyGroupsReplace(groupsRecorder, groups)
 	if groupsRecorder.Code != http.StatusOK {
@@ -191,7 +189,7 @@ func TestPolicyPreviewProposedComparison(t *testing.T) {
 		t.Fatalf("assignments status = %d", assignmentsRecorder.Code)
 	}
 
-	body := `{"client_ip":"192.0.2.10","domain":"chess.games.example","proposed":{"groups":[{"id":"unrestricted","action":"allow","domains":["*.games.example"]}],"assignments":[{"device_id":"device-1","group_id":"unrestricted"}]}}`
+	body := `{"client_ip":"192.0.2.10","domain":"chess.games.example","proposed":{"groups":[{"id":"unrestricted","name":"Unrestricted","allowed_domains":["*.games.example"]}],"assignments":[{"device_id":"device-1","group_id":"unrestricted"}]}}`
 	preview := httptest.NewRequest(http.MethodPost, "/api/policy/preview", bytes.NewBufferString(body))
 	previewRecorder := httptest.NewRecorder()
 	GSApiPolicyPreview(previewRecorder, preview)
@@ -279,8 +277,8 @@ func TestPolicyTemplatesPreviewAndApply(t *testing.T) {
 	if err := json.Unmarshal(previewRecorder.Body.Bytes(), &previewBody); err != nil {
 		t.Fatal(err)
 	}
-	if len(previewBody.Templates) != 7 {
-		t.Fatalf("template count = %d, want 7", len(previewBody.Templates))
+	if len(previewBody.Templates) != len(gatesentryPolicy.PolicyTemplates()) {
+		t.Fatalf("template count = %d, want the catalog", len(previewBody.Templates))
 	}
 	if len(previewBody.SharedLimitations) == 0 {
 		t.Fatal("template preview omitted the shared limitations")
@@ -298,7 +296,7 @@ func TestPolicyTemplatesPreviewAndApply(t *testing.T) {
 	if applyRecorder.Code != http.StatusCreated {
 		t.Fatalf("template apply status = %d, body = %s", applyRecorder.Code, applyRecorder.Body.String())
 	}
-	if got := policySnapshotGroup(t, "template-child"); got.Name != "Child" {
+	if got := policySnapshotGroup(t, "template-child"); got.Name != "Young child" || len(got.Rules) != 1 || got.Rules[0].Schedule.Timezone == "" {
 		t.Fatalf("applied group = %+v", got)
 	}
 
@@ -323,7 +321,7 @@ func TestPolicyGroupCRUDPreservesCustomizedRecords(t *testing.T) {
 	service, cleanup := policyTestService(t)
 	defer cleanup()
 
-	create := httptest.NewRequest(http.MethodPost, "/api/policy/groups", strings.NewReader("{\"name\":\"Custom\",\"description\":\"review me\",\"action\":\"block\",\"domains\":[\"*.example.test\"]}"))
+	create := httptest.NewRequest(http.MethodPost, "/api/policy/groups", strings.NewReader("{\"name\":\"Custom\",\"description\":\"review me\",\"blocked_domains\":[\"*.example.test\"]}"))
 	createRecorder := httptest.NewRecorder()
 	GSApiPolicyGroupCreate(createRecorder, create)
 	if createRecorder.Code != http.StatusCreated {
@@ -339,7 +337,7 @@ func TestPolicyGroupCRUDPreservesCustomizedRecords(t *testing.T) {
 		t.Fatalf("created group = %+v", created.Group)
 	}
 
-	update := httptest.NewRequest(http.MethodPut, "/api/policy/groups/"+created.Group.ID, strings.NewReader("{\"name\":\"Custom edited\",\"description\":\"changed\",\"action\":\"allow\",\"domains\":[\"allowed.example.test\"]}"))
+	update := httptest.NewRequest(http.MethodPut, "/api/policy/groups/"+created.Group.ID, strings.NewReader("{\"name\":\"Custom edited\",\"description\":\"changed\",\"allowed_domains\":[\"allowed.example.test\"]}"))
 	update = mux.SetURLVars(update, map[string]string{"id": created.Group.ID})
 	updateRecorder := httptest.NewRecorder()
 	GSApiPolicyGroupUpdate(updateRecorder, update)
@@ -459,14 +457,14 @@ func TestPolicyGroupCategorySelectionIsValidatedAndNormalized(t *testing.T) {
 	_, cleanup := policyTestService(t)
 	defer cleanup()
 
-	unknown := httptest.NewRequest(http.MethodPost, "/api/policy/groups", strings.NewReader(`{"name":"Kids","action":"block","categories":["social","typo-category"]}`))
+	unknown := httptest.NewRequest(http.MethodPost, "/api/policy/groups", strings.NewReader(`{"name":"Kids","blocked_categories":["social","typo-category"]}`))
 	unknownRecorder := httptest.NewRecorder()
 	GSApiPolicyGroupCreate(unknownRecorder, unknown)
 	if unknownRecorder.Code != http.StatusBadRequest {
 		t.Fatalf("create with unknown category status = %d, body = %s", unknownRecorder.Code, unknownRecorder.Body.String())
 	}
 
-	replace := httptest.NewRequest(http.MethodPut, "/api/policy/groups", strings.NewReader(`{"groups":[{"id":"kids","name":"Kids","action":"block","categories":["typo-category"]}]}`))
+	replace := httptest.NewRequest(http.MethodPut, "/api/policy/groups", strings.NewReader(`{"groups":[{"id":"kids","name":"Kids","blocked_categories":["typo-category"]}]}`))
 	replaceRecorder := httptest.NewRecorder()
 	GSApiPolicyGroupsReplace(replaceRecorder, replace)
 	if replaceRecorder.Code != http.StatusBadRequest {
@@ -475,13 +473,40 @@ func TestPolicyGroupCategorySelectionIsValidatedAndNormalized(t *testing.T) {
 
 	// A selection that only differs by case must be stored normalized, or the
 	// rule would be persisted in a form that never matches the catalog.
-	valid := httptest.NewRequest(http.MethodPost, "/api/policy/groups", strings.NewReader(`{"id":"kids","name":"Kids","action":"block","categories":[" Social ", "social"]}`))
+	valid := httptest.NewRequest(http.MethodPost, "/api/policy/groups", strings.NewReader(`{"name":"Kids","blocked_categories":[" Social ", "social"]}`))
 	validRecorder := httptest.NewRecorder()
 	GSApiPolicyGroupCreate(validRecorder, valid)
 	if validRecorder.Code != http.StatusCreated {
 		t.Fatalf("valid create status = %d, body = %s", validRecorder.Code, validRecorder.Body.String())
 	}
-	if got := policySnapshotGroup(t, "kids").Categories; len(got) != 1 || got[0] != "social" {
+	var created struct {
+		Group gatesentryPolicy.PolicyGroup `json:"group"`
+	}
+	if err := json.Unmarshal(validRecorder.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	if got := policySnapshotGroup(t, created.Group.ID).BlockedCategories; len(got) != 1 || got[0] != "social" {
 		t.Fatalf("stored categories = %v, want [social]", got)
+	}
+}
+
+func TestPolicyGroupValidationErrorsAreReturnedToTheEditor(t *testing.T) {
+	_, cleanup := policyTestService(t)
+	defer cleanup()
+
+	create := httptest.NewRequest(http.MethodPost, "/api/policy/groups", strings.NewReader(
+		`{"name":"Kids","rules":[{"enabled":true,"action":"block","target":{"domains":["x.example"]},"url_regexes":["("]}]}`))
+	recorder := httptest.NewRecorder()
+	GSApiPolicyGroupCreate(recorder, create)
+	if recorder.Code != http.StatusBadRequest || !strings.Contains(recorder.Body.String(), "not a valid regular expression") {
+		t.Fatalf("status = %d, body = %s, want the validation message", recorder.Code, recorder.Body.String())
+	}
+
+	remove := httptest.NewRequest(http.MethodDelete, "/api/policy/groups/default", nil)
+	remove = mux.SetURLVars(remove, map[string]string{"id": gatesentryPolicy.DefaultGroupID})
+	removeRecorder := httptest.NewRecorder()
+	GSApiPolicyGroupDelete(removeRecorder, remove)
+	if removeRecorder.Code != http.StatusBadRequest {
+		t.Fatalf("delete default status = %d, want 400", removeRecorder.Code)
 	}
 }
