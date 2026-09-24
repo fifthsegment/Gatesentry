@@ -77,6 +77,12 @@ func CreateBackup(settings, devices *gatesentry2storage.MapStore, binaryVersion 
 	if err != nil {
 		return nil, fmt.Errorf("backup: snapshot devices: %w", err)
 	}
+	// A clean installation has no assignment key until persistence is first
+	// attached. Backups must still be self-validating and restorable, so encode
+	// the canonical empty document rather than emitting an unverifiable map.
+	if devicesSnapshot[deviceAssignmentsKey] == "" {
+		devicesSnapshot[deviceAssignmentsKey] = fmt.Sprintf(`{"version":%d,"assignments":{}}`, maxDeviceAssignmentsVersion)
+	}
 	keyPath, managed := gatesentry2storage.InstallationKeyPath()
 	keyData, keyErr := os.ReadFile(keyPath)
 	if keyErr != nil && !errors.Is(keyErr, os.ErrNotExist) {

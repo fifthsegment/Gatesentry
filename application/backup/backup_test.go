@@ -62,6 +62,26 @@ func seedStores(t *testing.T, settings, devices *gatesentry2storage.MapStore) {
 	}
 }
 
+func TestCreateBackupSeedsEmptyDeviceAssignments(t *testing.T) {
+	setupTestDir(t)
+	settings, devices := openStores(t)
+	if err := settings.Update("settings_schema_version", "1"); err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := CreateBackup(settings, devices, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	archive, err := ValidateArchive(data)
+	if err != nil {
+		t.Fatalf("clean-install backup is not restorable: %v", err)
+	}
+	if got := archive.Devices[deviceAssignmentsKey]; got != `{"version":2,"assignments":{}}` {
+		t.Fatalf("assignments = %q", got)
+	}
+}
+
 // TestBackupRoundTrip verifies that a backup created from a configured
 // installation can be restored to a clean install and all data matches.
 func TestBackupRoundTrip(t *testing.T) {
