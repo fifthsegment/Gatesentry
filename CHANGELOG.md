@@ -1,4 +1,57 @@
 # CHANGELOG
+## v2.0.0 (24 September 2026)
+
+**Breaking:** the policy document format changes from version 1 to version 2. Existing policies upgrade automatically on first read and keep enforcing what they enforced before; the next policy write persists the new format. The v1 API fields (`action`, `domains`, `categories` on a group, and `mitm_action` on a rule) are replaced by the fields below.
+
+### Policy model
+
+- **One policy per request:** every request resolves to the signed-in proxy user's policy, then the device's assigned policy, then an undeletable Default policy — so unassigned, unknown, and NATed clients always have a policy instead of falling through to nothing
+- **Blocked and allowed lists:** a policy has `blocked_categories`, `blocked_domains`, and `allowed_domains` (which win over the blocked lists and the gateway-wide categories)
+- **Targeted rules:** each rule names its own target (all traffic, specific domains, or specific categories) and can carry a schedule, a user scope, URL patterns, and response-type conditions — so "block TikTok but allow YouTube" or "no internet at bedtime" is one policy instead of two
+- **First-match evaluation:** rules run top to bottom before the lists; the first active rule whose target covers the request decides
+- **Safe search:** DNS-enforced safe search for Google (all country domains), Bing, DuckDuckGo, and YouTube restricted mode, using the providers' documented restricted-mode endpoints; fails closed on lookup error
+- **Short block TTL:** DNS block answers use a 60-second TTL so schedules and pauses take effect within a minute
+- **Proxy user over device:** a signed-in proxy user's policy wins over the device's, because the login is the more specific identity; the device stays recorded for logs and drilldown
+- **User conflict detection:** a proxy user listed on two policies is rejected at save time
+- **Default policy protection:** the default policy cannot be deleted or given proxy users
+
+### DNS
+
+- Safe search rewrites search engine and YouTube host names to their restricted-mode endpoints via CNAME + upstream resolution
+- Gateway-wide categories are now evaluated inside the policy evaluator, so a policy's allowed domains can exempt a category hit on DNS the same way they do on the proxy
+
+### Proxy
+
+- Typed `PolicyDecision` replaces the reflection-based `interface{}` contract between the policy service and the proxy
+- URL patterns are tested before the request leaves the gateway, not after fetching the response
+- URL patterns skip CONNECT tunnels (which carry only host:port) and are tested per-request inside the decrypted connection instead
+- A policy allow skips the gateway-wide URL blocklist and content-type rules
+- The block page names the deciding policy and rule
+- Transparent HTTP connections are handled by the full proxy handler (with block pages) instead of being silently dropped
+- Transparent proxy connections feed the device inventory so per-device policies work on routed deployments where DNS bypasses GateSentry
+
+### Templates
+
+- Starters are useful out of the box: Young child and Teen block categories, force safe search, and add a bedtime rule; Guest blocks adult content and malware; Focused work blocks social media during working hours
+- Schedule presets add a rule (block all traffic during the window) instead of setting a removed group-level schedule field
+
+### UI
+
+- Policies page rebuilt: each policy card shows its blocked categories, domains, rules as sentences, assigned devices with add/remove, and safe search status
+- Device assignment lives on the policy card with an "Add a device" picker; removing a device tag moves it to the default policy
+- "Test a site" panel: pick a device, type a domain or URL, choose DNS or proxy path, and see the verdict, the deciding rule, the evaluator trace, and safe-search status — uses the live evaluator and changes nothing
+- Policy editor: blocked categories, blocked domains, always-allowed domains, safe search toggle, proxy users, and ordered rules with their own target (all traffic / categories / domains), schedule, user scope, and collapsible URL/response-type conditions with a proxy-only warning
+- Domain input accepts pasted URLs and strips them to the domain
+- Device detail shows the effective policy (including the default) instead of reporting no policy when unassigned
+- `/policies` registered as a server-side SPA route (fixes 404 on reload)
+
+### Upgrade notes
+
+- The policy document upgrades from v1 to v2 on first read; the old `action`/`domains`/`categories` fields become `blocked_domains`/`blocked_categories`/`allowed_domains` and rules get explicit targets
+- A v1 group with a schedule becomes a v2 group with a scheduled rule
+- The per-rule TLS inspection setting (`mitm_action`) is removed; URL and response-type conditions turn inspection on by themselves
+- API consumers using `action`, `domains`, or `categories` on a policy group must switch to the new fields
+
 
 ## v1.27.0 (20 September 2026)
 

@@ -669,11 +669,13 @@ func RegisterEndpointsStartServer(
 	internalServer.Get("/users", baseIndexHandler)
 	internalServer.Get("/dns", baseIndexHandler)
 	internalServer.Get("/settings", baseIndexHandler)
+	// /rules is the old address of /policies; the app redirects it, so an
+	// old bookmark still lands on the page.
+	internalServer.Get("/policies", baseIndexHandler)
 	internalServer.Get("/rules", baseIndexHandler)
 	internalServer.Get("/logs", baseIndexHandler)
 	internalServer.Get("/blockedkeywords", baseIndexHandler)
 	internalServer.Get("/blockedfiletypes", baseIndexHandler)
-	internalServer.Get("/excludeurls", baseIndexHandler)
 	internalServer.Get("/blockedurls", baseIndexHandler)
 	internalServer.Get("/excludehosts", baseIndexHandler)
 	internalServer.Get("/services", baseIndexHandler)

@@ -313,9 +313,12 @@ func TestApplyPresetUnknownID(t *testing.T) {
 func scheduleTestHelper(t *testing.T, svc *Service, groupID string, schedule *Schedule, now time.Time, domain string) DNSDecision {
 	t.Helper()
 	svc.SetClock(now)
-	groups := svc.Snapshot().Groups
-	g := groups[groupID]
-	g.Schedule = schedule
+	g := svc.Snapshot().Groups[groupID]
+	g.Rules = []GroupRule{{
+		ID: "scheduled", Enabled: true, Action: ActionBlock,
+		Target: RuleTarget{Domains: g.BlockedDomains}, Schedule: schedule,
+	}}
+	g.BlockedDomains = nil
 	if err := svc.SaveGroups([]PolicyGroup{g}); err != nil {
 		t.Fatal(err)
 	}
@@ -329,7 +332,7 @@ func scheduleTestHelper(t *testing.T, svc *Service, groupID string, schedule *Sc
 func TestScheduleInactiveSuppressesBlock(t *testing.T) {
 	svc := newTestService(t)
 	if err := svc.SaveGroups([]PolicyGroup{
-		{ID: "kids", Action: ActionBlock, Domains: []string{"*.games.example"}},
+		{ID: "kids", BlockedDomains: []string{"*.games.example"}},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -346,15 +349,15 @@ func TestScheduleInactiveSuppressesBlock(t *testing.T) {
 	if decision.Action != ActionNone {
 		t.Fatalf("decision = %+v, want none (schedule inactive)", decision)
 	}
-	if decision.Reason != "group schedule inactive" {
-		t.Fatalf("reason = %q, want schedule inactive", decision.Reason)
+	if decision.RuleID != "" {
+		t.Fatalf("decision = %+v, want no rule deciding outside its schedule", decision)
 	}
 }
 
 func TestScheduleActiveAppliesBlock(t *testing.T) {
 	svc := newTestService(t)
 	if err := svc.SaveGroups([]PolicyGroup{
-		{ID: "kids", Action: ActionBlock, Domains: []string{"*.games.example"}},
+		{ID: "kids", BlockedDomains: []string{"*.games.example"}},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -381,7 +384,7 @@ func TestScheduleRestartDuringActivePeriod(t *testing.T) {
 		Windows:  []TimeWindow{{From: "09:00", To: "17:00"}},
 	}
 	if err := svc.SaveGroups([]PolicyGroup{
-		{ID: "kids", Action: ActionBlock, Domains: []string{"*.games.example"}, Schedule: sc},
+		scheduledBlock("kids", sc, "games.example"),
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -408,28 +411,32 @@ func TestScheduleRestartDuringActivePeriod(t *testing.T) {
 	}
 }
 
-func TestScheduleDoesNotAffectAllowGroups(t *testing.T) {
+func TestScheduledAllowOnlyAppliesInsideItsWindow(t *testing.T) {
 	svc := newTestService(t)
 	loc, _ := time.LoadLocation("America/New_York")
-	sc := &Schedule{
+	homework := &Schedule{
 		Timezone: "America/New_York",
-		Windows:  []TimeWindow{{From: "09:00", To: "17:00"}},
+		Windows:  []TimeWindow{{From: "16:00", To: "18:00"}},
 	}
-	if err := svc.SaveGroups([]PolicyGroup{
-		{ID: "adults", Action: ActionAllow, Domains: []string{"tracker.example"}, Schedule: sc},
-	}); err != nil {
+	if err := svc.SaveGroups([]PolicyGroup{{
+		ID: "kids", Name: "Kids", BlockedDomains: []string{"youtube.com"},
+		Rules: []GroupRule{{
+			ID: "after-school", Enabled: true, Action: ActionAllow,
+			Target: RuleTarget{Domains: []string{"youtube.com"}}, Schedule: homework,
+		}},
+	}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := svc.Reload(); err != nil {
 		t.Fatal(err)
 	}
-	// Even when schedule is inactive, an allow group falls through to
-	// ActionNone (it does not block). The schedule only gates whether the
-	// group expresses its action.
+	identity := Identity{GroupID: "kids", Source: SourceDevice, DeviceID: "device-1"}
+	svc.SetClock(mustTime(loc, "2026-03-16 17:00:00"))
+	if decision := svc.EvaluateDNS(identity, "www.youtube.com"); decision.Action != ActionAllow {
+		t.Fatalf("inside the window = %+v, want allow", decision)
+	}
 	svc.SetClock(mustTime(loc, "2026-03-16 20:00:00"))
-	identity := Identity{GroupID: "adults", Source: SourceAuthUser}
-	decision := svc.EvaluateDNS(identity, "tracker.example")
-	if decision.Action != ActionNone {
-		t.Fatalf("decision = %+v, want none (allow group with inactive schedule falls through)", decision)
+	if decision := svc.EvaluateDNS(identity, "www.youtube.com"); decision.Action != ActionBlock {
+		t.Fatalf("outside the window = %+v, want the blocked list", decision)
 	}
 }

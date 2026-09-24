@@ -14,13 +14,12 @@ import (
 	gatesentryTypes "bitbucket.org/abdullah_irfan/gatesentryf/types"
 )
 
-func InitializeFilters(blockedDomains *map[string]bool, blockedLists *[]string, internalRecords *map[string]string, exceptionDomains *map[string]bool, mutex *sync.RWMutex, settings *gatesentry2storage.MapStore, dnsinfo *gatesentryTypes.DnsServerInfo, categories *gatesentryPolicy.CategoryIndex, referencedCategories func() []string) {
+func InitializeFilters(blockedDomains *map[string]bool, blockedLists *[]string, internalRecords *map[string]string, mutex *sync.RWMutex, settings *gatesentry2storage.MapStore, dnsinfo *gatesentryTypes.DnsServerInfo, categories *gatesentryPolicy.CategoryIndex, referencedCategories func() []string) {
 	// Hold write lock while replacing the maps to prevent race with readers
 	mutex.Lock()
 	*blockedDomains = make(map[string]bool)
 	*blockedLists = []string{}
 	*internalRecords = make(map[string]string)
-	*exceptionDomains = make(map[string]bool)
 	mutex.Unlock()
 
 	dnsinfo.NumberDomainsBlocked = 0
@@ -55,7 +54,6 @@ func InitializeFilters(blockedDomains *map[string]bool, blockedLists *[]string, 
 	// Category feeds are downloaded on the same refresh as the blocklists so a
 	// category rule cannot serve data older than the global blocklist.
 	InitializeCategories(settings, categories, referencedCategories)
-	InitializeExceptionDomains(exceptionDomains, mutex)
 }
 
 func InitializeBlockedDomains(blockedDomains *map[string]bool, blocklists *[]string, mutex *sync.RWMutex, dnsinfo *gatesentryTypes.DnsServerInfo) {

@@ -1,5 +1,7 @@
 package policy
 
+import "time"
+
 // PolicyTemplate describes a safe starting point for an ordinary policy
 // group. Templates are catalog data, not a second policy store: applying one
 // creates a normal PolicyGroup that can be edited or deleted independently.
@@ -11,24 +13,25 @@ package policy
 // Gatesentry release, but a category is never age verification, device
 // classification, or a review of what a household actually uses.
 type PolicyTemplate struct {
-	ID          string       `json:"id"`
-	Name        string       `json:"name"`
-	GroupName   string       `json:"group_name"`
-	Description string       `json:"description"`
-	Limitations []string     `json:"limitations"`
-	Action      PolicyAction `json:"action"`
-	Domains     []string     `json:"domains"`
-	Categories  []string     `json:"categories"`
-	GroupID     string       `json:"group_id"`
-	Available   bool         `json:"available"`
+	ID          string   `json:"id"`
+	Name        string   `json:"name"`
+	GroupName   string   `json:"group_name"`
+	Description string   `json:"description"`
+	Limitations []string `json:"limitations"`
+	// Categories are the categories the starter blocks, listed so the catalog
+	// can show them before the policy is created.
+	Categories []string    `json:"categories"`
+	SafeSearch bool        `json:"safe_search"`
+	Rules      []GroupRule `json:"rules,omitempty"`
+	GroupID    string      `json:"group_id"`
+	Available  bool        `json:"available"`
 }
 
-// Every starter is enforced by the DNS server for assigned devices, and DNS
-// decides by domain only. These hold for the whole catalog, so they are stated
-// once instead of inside every template.
+// Every starter is enforced for the devices assigned to it. These hold for the
+// whole catalog, so they are stated once instead of inside every template.
 var templateSharedLimitations = []string{
-	"Enforced by the DNS server: only devices that use Gatesentry for DNS are covered, and only after you assign them to the group.",
-	"DNS decides by domain: URL and response-type conditions need a block rule with TLS inspection, which the proxy enforces.",
+	"A starter applies only to the devices and proxy users you assign to it; everyone else stays on the default policy.",
+	"DNS enforces domains and categories for devices that use GateSentry for DNS. URL and response-type rules need the proxy.",
 }
 
 // TemplateSharedLimitations returns a copy of the caveats that apply to every
@@ -37,64 +40,82 @@ func TemplateSharedLimitations() []string {
 	return append([]string(nil), templateSharedLimitations...)
 }
 
+// bedtimeRule blocks all traffic overnight on school nights. The time zone is
+// filled in when the starter is applied, so the window follows the gateway's
+// own clock.
+func bedtimeRule() GroupRule {
+	preset := PresetByID("bedtime")
+	return GroupRule{
+		ID:      "bedtime",
+		Name:    "Bedtime",
+		Enabled: true,
+		Action:  ActionBlock,
+		Target:  RuleTarget{AllTraffic: true},
+		Schedule: &Schedule{
+			Weekdays: append([]time.Weekday(nil), preset.Weekdays...),
+			Windows:  append([]TimeWindow(nil), preset.Windows...),
+			Preset:   preset.ID,
+		},
+	}
+}
+
 var builtInTemplates = []PolicyTemplate{
 	{
-		ID: "child", Name: "Child starter", GroupName: "Child",
-		Description: "Blocks the categories below for a younger child's device.",
+		ID: "child", Name: "Young child", GroupName: "Young child",
+		Description: "Blocks adult, gambling, social media, piracy, and malware; forces safe search; no internet at bedtime on school nights.",
 		Limitations: []string{
 			"Categories are shared upstream feeds, not age verification.",
 		},
-		Action: ActionBlock, Categories: []string{"adult", "gambling", "malware", "piracy"},
-		GroupID: "template-child", Available: true,
+		Categories: []string{"adult", "gambling", "social", "piracy", "malware"},
+		SafeSearch: true,
+		Rules:      []GroupRule{bedtimeRule()},
+		GroupID:    "template-child", Available: true,
 	},
 	{
-		ID: "teen", Name: "Teen starter", GroupName: "Teen",
-		Description: "Blocks the categories below for a teenager's device, with room to add domains.",
+		ID: "teen", Name: "Teen", GroupName: "Teen",
+		Description: "Blocks adult, gambling, and malware; forces safe search; no internet at bedtime on school nights.",
 		Limitations: []string{
-			"Categories are shared upstream feeds, not age verification.",
+			"Social media stays reachable; add the Social media category to block it.",
 		},
-		Action: ActionBlock, Categories: []string{"adult", "gambling", "malware"},
-		GroupID: "template-teen", Available: true,
+		Categories: []string{"adult", "gambling", "malware"},
+		SafeSearch: true,
+		Rules:      []GroupRule{bedtimeRule()},
+		GroupID:    "template-teen", Available: true,
 	},
 	{
-		ID: "adult-default", Name: "Adult / default starter", GroupName: "Adult / default",
-		Description: "For an adult or general household device. Adds no rules of its own.",
-		Limitations: []string{
-			"Blocks nothing by itself. Add categories or domains before you assign it.",
-		},
-		Action: ActionNone, GroupID: "template-adult-default", Available: true,
-	},
-	{
-		ID: "guest", Name: "Guest starter", GroupName: "Guest",
-		Description: "For visitor devices. Keeps the gateway default policy until you add rules.",
+		ID: "guest", Name: "Guest", GroupName: "Guest",
+		Description: "Blocks adult content, malware, and piracy for visitor devices.",
 		Limitations: []string{
 			"Does not isolate guests or create a separate network; use network controls for that.",
 		},
-		Action: ActionNone, GroupID: "template-guest", Available: true,
+		Categories: []string{"adult", "malware", "piracy"},
+		GroupID:    "template-guest", Available: true,
 	},
 	{
-		ID: "work", Name: "Work starter", GroupName: "Work",
-		Description: "For a work device. Starts empty so you can review every rule you add.",
+		ID: "work", Name: "Focused work", GroupName: "Focused work",
+		Description: "Blocks social media, ads, and malware during weekday working hours only.",
 		Limitations: []string{
-			"Does not classify business traffic or guarantee that a service stays reachable.",
+			"Working hours are 09:00-17:00 Monday to Friday; edit the rule to change them.",
 		},
-		Action: ActionNone, GroupID: "template-work", Available: true,
+		Categories: []string{"malware"},
+		Rules: []GroupRule{{
+			ID: "work-hours", Name: "Working hours", Enabled: true, Action: ActionBlock,
+			Target: RuleTarget{Categories: []string{"social", "ads"}},
+			Schedule: &Schedule{
+				Weekdays: []time.Weekday{time.Monday, time.Tuesday, time.Wednesday, time.Thursday, time.Friday},
+				Windows:  []TimeWindow{{From: "09:00", To: "17:00"}},
+			},
+		}},
+		GroupID: "template-work", Available: true,
 	},
 	{
-		ID: "iot", Name: "IoT starter", GroupName: "IoT",
-		Description: "For an appliance or smart device. Add the service domains it needs.",
+		ID: "iot", Name: "Smart devices", GroupName: "Smart devices",
+		Description: "Blocks ads, trackers, and malware for TVs, speakers, and appliances.",
 		Limitations: []string{
 			"Does not identify IoT devices or replace network segmentation.",
 		},
-		Action: ActionNone, GroupID: "template-iot", Available: true,
-	},
-	{
-		ID: "unrestricted", Name: "Unrestricted starter", GroupName: "Unrestricted",
-		Description: "For a device that should get no group rules.",
-		Limitations: []string{
-			"Does not bypass the global blocklist or the gateway default policy.",
-		},
-		Action: ActionNone, GroupID: "template-unrestricted", Available: true,
+		Categories: []string{"ads", "malware"},
+		GroupID:    "template-iot", Available: true,
 	},
 }
 
@@ -103,10 +124,7 @@ var builtInTemplates = []PolicyTemplate{
 func PolicyTemplates() []PolicyTemplate {
 	result := make([]PolicyTemplate, len(builtInTemplates))
 	for i, template := range builtInTemplates {
-		result[i] = template
-		result[i].Limitations = append([]string(nil), template.Limitations...)
-		result[i].Domains = append([]string(nil), template.Domains...)
-		result[i].Categories = append([]string(nil), template.Categories...)
+		result[i] = template.copy()
 	}
 	return result
 }
@@ -115,22 +133,56 @@ func PolicyTemplates() []PolicyTemplate {
 func GetPolicyTemplate(id string) (PolicyTemplate, bool) {
 	for _, template := range builtInTemplates {
 		if template.ID == id {
-			copy := template
-			copy.Limitations = append([]string(nil), template.Limitations...)
-			copy.Domains = append([]string(nil), template.Domains...)
-			copy.Categories = append([]string(nil), template.Categories...)
-			return copy, true
+			return template.copy(), true
 		}
 	}
 	return PolicyTemplate{}, false
 }
 
+func (template PolicyTemplate) copy() PolicyTemplate {
+	out := template
+	out.Limitations = append([]string(nil), template.Limitations...)
+	out.Categories = append([]string(nil), template.Categories...)
+	out.Rules = copyRules(template.Rules)
+	return out
+}
+
+func copyRules(rules []GroupRule) []GroupRule {
+	if rules == nil {
+		return nil
+	}
+	out := make([]GroupRule, len(rules))
+	for i, rule := range rules {
+		out[i] = rule
+		out[i].Target.Domains = append([]string(nil), rule.Target.Domains...)
+		out[i].Target.Categories = append([]string(nil), rule.Target.Categories...)
+		out[i].URLRegexes = append([]string(nil), rule.URLRegexes...)
+		out[i].BlockedContentTypes = append([]string(nil), rule.BlockedContentTypes...)
+		out[i].Users = append([]string(nil), rule.Users...)
+		if rule.Schedule != nil {
+			schedule := *rule.Schedule
+			schedule.Weekdays = append([]time.Weekday(nil), rule.Schedule.Weekdays...)
+			schedule.Windows = append([]TimeWindow(nil), rule.Schedule.Windows...)
+			out[i].Schedule = &schedule
+		}
+	}
+	return out
+}
+
 // Group returns the ordinary editable policy record produced by this
-// template. It intentionally carries no template-only field or behavior.
-func (template PolicyTemplate) Group() PolicyGroup {
+// template, with every schedule set to the gateway's time zone. It carries no
+// template-only field or behavior.
+func (template PolicyTemplate) Group(timezone string) PolicyGroup {
+	rules := copyRules(template.Rules)
+	for i := range rules {
+		if rules[i].Schedule != nil {
+			rules[i].Schedule.Timezone = timezone
+		}
+	}
 	return PolicyGroup{
 		ID: template.GroupID, Name: template.GroupName, Description: template.Description,
-		Domains: append([]string(nil), template.Domains...), Action: template.Action,
-		Categories: append([]string(nil), template.Categories...),
+		BlockedCategories: append([]string(nil), template.Categories...),
+		SafeSearch:        template.SafeSearch,
+		Rules:             rules,
 	}
 }

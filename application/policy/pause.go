@@ -205,16 +205,26 @@ func (s *Service) loadPauses() error {
 // PauseSnapshot returns a point-in-time copy of active (non-expired,
 // non-revoked) pauses for evaluation. Adapters call this per request.
 func (s *Service) PauseSnapshot() PauseSnapshot {
-	s.pa.mu.RLock()
-	defer s.pa.mu.RUnlock()
-	now := s.now()
-	active := make([]Pause, 0, len(s.pa.snapshot.Pauses))
-	for _, p := range s.pa.snapshot.Pauses {
+	return pausesActiveAt(s.pa.all(), s.now())
+}
+
+// all returns a copy of every stored pause and the snapshot time.
+func (p *pauseStorage) all() PauseSnapshot {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return PauseSnapshot{Pauses: append([]Pause(nil), p.snapshot.Pauses...), UpdatedAt: p.snapshot.UpdatedAt}
+}
+
+// pausesActiveAt keeps the pauses that are in force at an instant, so live
+// enforcement and a preview at another time filter the same way.
+func pausesActiveAt(snap PauseSnapshot, now time.Time) PauseSnapshot {
+	active := make([]Pause, 0, len(snap.Pauses))
+	for _, p := range snap.Pauses {
 		if p.Active && now.Before(p.Until) {
 			active = append(active, p)
 		}
 	}
-	return PauseSnapshot{Pauses: active, UpdatedAt: s.pa.snapshot.UpdatedAt}
+	return PauseSnapshot{Pauses: active, UpdatedAt: snap.UpdatedAt}
 }
 
 // AllPauses returns all pauses including expired and revoked ones, for the

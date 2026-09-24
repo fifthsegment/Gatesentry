@@ -55,21 +55,19 @@ func DecodeLegacyRules(raw string) ([]LegacyRule, error) {
 }
 
 // MigrateLegacyRules carries the retired rule records into policy groups. Each
-// legacy rule becomes one group covering the domain it named, because a group
-// owns the domains and a rule refines them; a rule cannot stand alone without
-// a group to apply it to. The groups are created unassigned, so importing them
-// changes no device's filtering until an administrator assigns one.
+// legacy rule becomes one policy holding one rule that targets the domain it
+// named. The policies are created unassigned, so importing them changes no
+// device's filtering until an administrator assigns one.
 //
 // The conversion keeps what the old engine enforced: the action, the
-// authenticated-user scope, the time window (in the gateway's time zone), the
-// TLS inspection setting, and the URL and media-type conditions that only
-// apply after inspection. A disabled rule imports disabled, and its group
-// carries no action, so a rule that enforced nothing cannot start enforcing by
-// being imported.
+// authenticated-user scope, the time window (in the gateway's time zone), and
+// the URL and media-type conditions that only applied after inspection. A
+// disabled rule imports disabled, so a rule that enforced nothing cannot start
+// enforcing by being imported.
 func MigrateLegacyRules(rules []LegacyRule, timezone string) ([]PolicyGroup, error) {
 	groups := make([]PolicyGroup, 0, len(rules))
 	for i, rule := range rules {
-		domain := strings.TrimSpace(rule.Domain)
+		domain := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(rule.Domain)), "*.")
 		if domain == "" {
 			return nil, fmt.Errorf("legacy rule %d has no domain", i+1)
 		}
@@ -96,39 +94,27 @@ func MigrateLegacyRules(rules []LegacyRule, timezone string) ([]PolicyGroup, err
 		if strings.TrimSpace(rule.Description) != "" {
 			description += " " + strings.TrimSpace(rule.Description)
 		}
-		groupAction := action
-		if !rule.Enabled {
-			// A disabled rule enforced nothing, so its group must not enforce
-			// the rule's action for the whole domain either.
-			groupAction = ActionNone
-		}
 		group := PolicyGroup{
 			ID:          groupID,
 			Name:        name,
 			Description: description,
-			Domains:     []string{domain},
-			Action:      groupAction,
-			Users:       append([]string(nil), rule.Users...),
-			Priority:    rule.Priority,
 			Rules: []GroupRule{{
 				ID:                  rule.ID,
 				Name:                name,
 				Enabled:             rule.Enabled,
 				Action:              action,
-				MITMAction:          legacyMITMAction(rule.MITMAction),
+				Target:              RuleTarget{Domains: []string{domain}},
 				URLRegexes:          conditions.urls,
 				BlockedContentTypes: conditions.contentTypes,
 				Schedule:            schedule,
 				Users:               append([]string(nil), rule.Users...),
-				Priority:            rule.Priority,
 			}},
 		}
-		normalized, err := NormalizeGroupRules(group.Rules)
+		normalized, err := NormalizeGroup(group)
 		if err != nil {
 			return nil, fmt.Errorf("legacy rule %d: %w", i+1, err)
 		}
-		group.Rules = normalized
-		groups = append(groups, group)
+		groups = append(groups, normalized)
 	}
 	return groups, nil
 }
@@ -143,7 +129,7 @@ type legacyConditions struct {
 // and only to a block action: an allow rule kept its URL patterns but the
 // proxy never tested them, so importing them would invent enforcement.
 func legacyRuleConditions(rule LegacyRule) legacyConditions {
-	if strings.TrimSpace(rule.MITMAction) != MITMActionEnable {
+	if strings.TrimSpace(rule.MITMAction) != MITMActionEnableV1 {
 		return legacyConditions{}
 	}
 	if PolicyAction(strings.TrimSpace(rule.Action)) != ActionBlock {
@@ -174,18 +160,6 @@ func legacyRuleConditions(rule LegacyRule) legacyConditions {
 	}
 	conditions.urls = urls
 	return conditions
-}
-
-// legacyMITMAction maps the old inspection setting onto the group rule's
-// setting. An empty value means the gateway's own setting, which is what the
-// old "default" did.
-func legacyMITMAction(value string) string {
-	switch strings.TrimSpace(value) {
-	case MITMActionEnable, MITMActionDisable:
-		return strings.TrimSpace(value)
-	default:
-		return MITMActionDefault
-	}
 }
 
 // legacySchedule converts the old single window into a group rule schedule.

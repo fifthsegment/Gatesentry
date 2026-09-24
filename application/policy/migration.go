@@ -62,7 +62,6 @@ func MigrateLegacyDevices(devices map[string]LegacyDevice) ([]PolicyGroup, []Dev
 				ID:          groupID,
 				Name:        label,
 				Description: "Migrated from legacy device " + kind + " metadata; edit before relying on it.",
-				Action:      ActionNone,
 				UpdatedAt:   now,
 				CreatedAt:   now,
 			}

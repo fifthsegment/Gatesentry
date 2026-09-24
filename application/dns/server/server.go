@@ -61,19 +61,18 @@ var (
 	listenAddr       = "0.0.0.0"
 	listenPort       = "53"
 	// RWMutex allows concurrent reads while blocking writes.
-	// Use RLock() for reading blockedDomains/exceptionDomains/internalRecords
+	// Use RLock() for reading blockedDomains/internalRecords
 	// Use Lock() when updating these maps (in scheduler/filter initialization)
-	mutex            sync.RWMutex
-	blockedDomains   = make(map[string]bool)
-	exceptionDomains = make(map[string]bool)
-	internalRecords  = make(map[string]string)
-	localIp, _       = gatesentryDnsUtils.GetLocalIP()
-	queryLogs        = make(map[string][]QueryLog)
-	logMutex         sync.Mutex
-	logsFile         *os.File
-	fileMutex        sync.Mutex
-	logsPath         = "dns_logs.txt"
-	logger           *gatesentryLogger.Log
+	mutex           sync.RWMutex
+	blockedDomains  = make(map[string]bool)
+	internalRecords = make(map[string]string)
+	localIp, _      = gatesentryDnsUtils.GetLocalIP()
+	queryLogs       = make(map[string][]QueryLog)
+	logMutex        sync.Mutex
+	logsFile        *os.File
+	fileMutex       sync.Mutex
+	logsPath        = "dns_logs.txt"
+	logger          *gatesentryLogger.Log
 )
 
 func init() {
@@ -389,7 +388,6 @@ func StartDNSServer(basePath string, ilogger *gatesentryLogger.Log, blockedLists
 		&blockedDomains,
 		&blockedLists,
 		&internalRecords,
-		&exceptionDomains,
 		&mutex,
 		settings,
 		dnsinfo,
@@ -499,7 +497,14 @@ func policyMatchLabel(decision gatesentryPolicy.DNSDecision) string {
 	if id, ok := strings.CutPrefix(matched, "category:"); ok {
 		matched = categoryMatchLabel(id)
 	}
-	return "policy group " + decision.GroupID + ": " + matched
+	if matched == "*" {
+		matched = "all traffic"
+	}
+	label := "policy " + decision.GroupID + ": " + matched
+	if decision.RuleID != "" {
+		label += " (rule " + decision.RuleID + ")"
+	}
+	return label
 }
 
 // categoryMatchLabel names a category for logs and explanations. The ID alone
@@ -602,38 +607,23 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 			}
 		}
 
-		// --- 2. Legacy path: exception / internal / blocked ---
+		// --- 2. Legacy path: internal / blocked ---
 		// Use read lock — allows concurrent DNS queries while blocking filter updates
 		mutex.RLock()
 		internalRecordsLen := len(internalRecords)
-		isException := exceptionDomains[domain]
 		internalIP, isInternal := internalRecords[domain]
 		isBlocked := blockedDomains[domain]
 		mutex.RUnlock()
 
-		// Gateway-wide categories are the default policy for every client, and
-		// their feeds list registrable domains, so a category that contains
-		// "facebook.com" has to cover "www.facebook.com". The blocklist map is an
-		// exact-match lookup and cannot answer that, so the category index covers
-		// the queries the map misses. A policy group allow still exempts the
-		// domain in the precedence stage below.
+		// Gateway-wide categories are evaluated with the client's policy below,
+		// so a policy's allowed domains can exempt a category hit the same way
+		// they exempt the blocklist, on DNS and on the proxy alike.
 		blockLabel := "blocklist"
 		blockReason := "global blocklist"
-		if !isBlocked && policyService != nil {
-			if categoryID, matched := policyService.EnabledCategoryMatch(domain); matched {
-				isBlocked = true
-				blockLabel = categoryMatchLabel(categoryID)
-				blockReason = "gateway category " + categoryID
-			}
-		}
 
 		log.Println("[DNS] Domain requested:", domain, " Length of internal records = ", internalRecordsLen)
 
-		if isException {
-			log.Println("Domain is exception : ", domain)
-			logger.LogDecision(dnsDecision(gatesentryPolicy.ActionDecisionBypass,
-				domain, clientIP, "exception", "exception", "exception domain", dnsIdentity, policyRevision))
-		} else if isInternal {
+		if isInternal {
 			log.Println("Domain is internal : ", domain, " - ", internalIP)
 			response := new(dns.Msg)
 			response.SetRcode(r, dns.RcodeSuccess)
@@ -647,37 +637,36 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 			return
 		}
 
-		// --- 2.5 Policy-group enforcement ---
-		// Precedence after internal/exception records: policy group → global
-		// blocklist. Group "allow" explicitly exempts a domain from the global
-		// blocklist; group "block" is a stronger decision and takes effect
-		// here. URL, MIME, and MITM conditions are reported as inapplicable
-		// because DNS cannot evaluate them.
+		// --- 2.5 Policy enforcement ---
+		// Every client resolves to a policy (its own or the default). The
+		// policy's rules and lists decide first; a policy allow exempts the
+		// domain from the global blocklist, a policy block answers with a block,
+		// and no opinion leaves the global blocklist in charge. Rules the proxy
+		// has to decide (URL, response type, proxy user) never decide here.
 		policyDecision := gatesentryPolicy.DNSDecision{}
 		if policyService != nil {
 			policyDecision = policyService.EvaluateDNS(dnsIdentity, domain)
 			if policyDecision.Action == gatesentryPolicy.ActionBlock {
-				log.Printf("[DNS] Domain blocked by policy group %s: %s (conditions not enforceable in DNS: %v)",
-					policyDecision.GroupID, domain, policyDecision.InapplicableConditions)
+				log.Printf("[DNS] Domain blocked by policy %s: %s (%s)", policyDecision.GroupID, domain, policyDecision.Reason)
 				logger.LogDecision(dnsDecision(gatesentryPolicy.ActionDecisionBlock,
 					domain, clientIP, "blocked",
 					policyMatchLabel(policyDecision),
-					"group policy block", dnsIdentity, policyRevision))
+					policyDecision.Reason, dnsIdentity, policyRevision))
 				response := new(dns.Msg)
 				response.SetRcode(r, dns.RcodeNameError)
 				response.Answer = append(response.Answer, &dns.CNAME{
-					Hdr:    dns.RR_Header{Name: domain + ".", Rrtype: dns.TypeCNAME, Class: dns.ClassINET, Ttl: 3600},
+					Hdr:    dns.RR_Header{Name: domain + ".", Rrtype: dns.TypeCNAME, Class: dns.ClassINET, Ttl: blockedAnswerTTL},
 					Target: "blocked.local.",
 				})
 				w.WriteMsg(response)
 				return
 			}
 			if policyDecision.Action == gatesentryPolicy.ActionAllow && isBlocked {
-				log.Printf("[DNS] Domain allowed by policy group %s: %s", policyDecision.GroupID, domain)
+				log.Printf("[DNS] Domain allowed by policy %s: %s", policyDecision.GroupID, domain)
 				logger.LogDecision(dnsDecision(gatesentryPolicy.ActionDecisionBypass,
 					domain, clientIP, "exception",
 					policyMatchLabel(policyDecision),
-					"group policy allow exempts blocklist", dnsIdentity, policyRevision))
+					policyDecision.Reason+" exempts the blocklist", dnsIdentity, policyRevision))
 			}
 		}
 		if policyDecision.Action != gatesentryPolicy.ActionAllow && isBlocked {
@@ -685,13 +674,35 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 			response := new(dns.Msg)
 			response.SetRcode(r, dns.RcodeNameError)
 			response.Answer = append(response.Answer, &dns.CNAME{
-				Hdr:    dns.RR_Header{Name: domain + ".", Rrtype: dns.TypeCNAME, Class: dns.ClassINET, Ttl: 3600},
+				Hdr:    dns.RR_Header{Name: domain + ".", Rrtype: dns.TypeCNAME, Class: dns.ClassINET, Ttl: blockedAnswerTTL},
 				Target: "blocked.local.",
 			})
 			logger.LogDecision(dnsDecision(gatesentryPolicy.ActionDecisionBlock,
 				domain, clientIP, "blocked", blockLabel, blockReason, dnsIdentity, policyRevision))
 			w.WriteMsg(response)
 			return
+		}
+
+		// --- 2.6 Safe search ---
+		// A policy with safe search answers the search engines' host names
+		// with their restricted-mode endpoints. The target is resolved
+		// upstream, so the answer follows the provider's current addresses.
+		if policyDecision.SafeSearch {
+			if target := gatesentryPolicy.SafeSearchTarget(domain); target != "" {
+				response, err := safeSearchResponse(r, q, target)
+				if err != nil {
+					// Failing closed: answering with the unrestricted address
+					// would silently turn safe search off.
+					log.Printf("[DNS] Safe search lookup for %s failed: %v", target, err)
+					response = new(dns.Msg)
+					response.SetRcode(r, dns.RcodeServerFailure)
+				} else {
+					logger.LogDecision(dnsDecision(gatesentryPolicy.ActionDecisionAllow,
+						domain, clientIP, "safesearch", "safe search", "rewritten to "+target, dnsIdentity, policyRevision))
+				}
+				w.WriteMsg(response)
+				return
+			}
 		}
 		logger.LogDecision(dnsDecision(gatesentryPolicy.ActionDecisionAllow,
 			domain, clientIP, "forward", "", "no matching rule", dnsIdentity, policyRevision))
@@ -716,6 +727,36 @@ func handleDNSRequest(w dns.ResponseWriter, r *dns.Msg) {
 		}
 	}
 	w.WriteMsg(m)
+}
+
+// blockedAnswerTTL is the lifetime of a block answer. A short TTL is what lets
+// a schedule or a pause take effect within a minute instead of whenever the
+// client's cache expires.
+const blockedAnswerTTL = 60
+
+// safeSearchResponse answers a query for a search engine host with the
+// provider's restricted-mode endpoint: a CNAME to the target followed by the
+// target's own records, resolved upstream so they are always current.
+func safeSearchResponse(r *dns.Msg, q dns.Question, target string) (*dns.Msg, error) {
+	lookup := new(dns.Msg)
+	lookup.SetQuestion(dns.Fqdn(target), q.Qtype)
+	lookup.RecursionDesired = true
+	upstream, err := forwardDNSRequest(lookup, false)
+	if err != nil {
+		return nil, err
+	}
+	if upstream.Rcode != dns.RcodeSuccess {
+		return nil, fmt.Errorf("upstream answered %s", dns.RcodeToString[upstream.Rcode])
+	}
+	response := new(dns.Msg)
+	response.SetReply(r)
+	response.RecursionAvailable = true
+	response.Answer = append(response.Answer, &dns.CNAME{
+		Hdr:    dns.RR_Header{Name: q.Name, Rrtype: dns.TypeCNAME, Class: dns.ClassINET, Ttl: 300},
+		Target: dns.Fqdn(target),
+	})
+	response.Answer = append(response.Answer, upstream.Answer...)
+	return response, nil
 }
 
 // isReverseDomain returns true if the domain is a PTR reverse-lookup name.

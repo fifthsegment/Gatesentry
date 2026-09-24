@@ -16,7 +16,6 @@ type InitializerType func(*map[string]bool, *[]string, *sync.RWMutex)
 func RunScheduler(blockedDomains *map[string]bool,
 	blockedLists *[]string,
 	internalRecords *map[string]string,
-	exceptionDomains *map[string]bool,
 	mutex *sync.RWMutex,
 	settings *gatesentry2storage.MapStore, dnsinfo *gatesentryTypes.DnsServerInfo,
 	categories *gatesentryPolicy.CategoryIndex,
@@ -32,11 +31,11 @@ func RunScheduler(blockedDomains *map[string]bool,
 		select {
 		case <-restartChan:
 			log.Println("Restarting scheduler...")
-			doInitialize(blockedDomains, blockedLists, internalRecords, exceptionDomains, mutex, settings, dnsinfo, categories, referencedCategories, updateIntervalHourly, restartChan)
+			doInitialize(blockedDomains, blockedLists, internalRecords, mutex, settings, dnsinfo, categories, referencedCategories, updateIntervalHourly, restartChan)
 			// Here you would re-initialize anything necessary for a restart
 		case <-ticker.C:
 			log.Println("Running scheduler...")
-			doInitialize(blockedDomains, blockedLists, internalRecords, exceptionDomains, mutex, settings, dnsinfo, categories, referencedCategories, updateIntervalHourly, restartChan)
+			doInitialize(blockedDomains, blockedLists, internalRecords, mutex, settings, dnsinfo, categories, referencedCategories, updateIntervalHourly, restartChan)
 		}
 	}
 
@@ -45,13 +44,12 @@ func RunScheduler(blockedDomains *map[string]bool,
 func doInitialize(blockedDomains *map[string]bool,
 	blockedLists *[]string,
 	internalRecords *map[string]string,
-	exceptionDomains *map[string]bool,
 	mutex *sync.RWMutex,
 	settings *gatesentry2storage.MapStore, dnsinfo *gatesentryTypes.DnsServerInfo,
 	categories *gatesentryPolicy.CategoryIndex,
 	referencedCategories func() []string,
 	updateIntervalHourly int,
 	restartChan chan bool) {
-	gatesentryDnsFilter.InitializeFilters(blockedDomains, blockedLists, internalRecords, exceptionDomains, mutex, settings, dnsinfo, categories, referencedCategories)
+	gatesentryDnsFilter.InitializeFilters(blockedDomains, blockedLists, internalRecords, mutex, settings, dnsinfo, categories, referencedCategories)
 	dnsinfo.NextUpdate = int(time.Now().Add(time.Hour * time.Duration(updateIntervalHourly)).Unix())
 }

@@ -49,8 +49,7 @@ func TestDNSPolicyGroupBlocksForAssignedDevice(t *testing.T) {
 		t.Fatalf("devices = %d", len(devices))
 	}
 	if err := svc.SaveGroups([]gatesentryPolicy.PolicyGroup{{
-		ID: "kids", Name: "Kids", Action: gatesentryPolicy.ActionBlock,
-		Domains: []string{"*.games.example"},
+		ID: "kids", Name: "Kids", BlockedDomains: []string{"*.games.example"},
 	}}); err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +76,7 @@ func TestDNSPolicyAllowExemptsGlobalBlocklist(t *testing.T) {
 	deviceStore.UpsertDevice(&discovery.Device{Hostnames: []string{"adult-pc"}, IPv4: "192.0.2.20"})
 	devices := deviceStore.GetAllDevices()
 	if err := svc.SaveGroups([]gatesentryPolicy.PolicyGroup{{
-		ID: "adults", Action: gatesentryPolicy.ActionAllow, Domains: []string{"ads.example"},
+		ID: "adults", AllowedDomains: []string{"ads.example"},
 	}}); err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +104,7 @@ func TestDNSPolicyUnknownClientKeepsGlobalBehavior(t *testing.T) {
 	defer cleanup()
 
 	if err := svc.SaveGroups([]gatesentryPolicy.PolicyGroup{{
-		ID: "kids", Action: gatesentryPolicy.ActionBlock, Domains: []string{"games.example"},
+		ID: "kids", BlockedDomains: []string{"games.example"},
 	}}); err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +133,7 @@ func TestDNSPolicyAmbiguousIPDoesNotBorrowGroupPolicy(t *testing.T) {
 		t.Fatalf("devices = %d", len(devices))
 	}
 	if err := svc.SaveGroups([]gatesentryPolicy.PolicyGroup{{
-		ID: "kids", Action: gatesentryPolicy.ActionBlock, Domains: []string{"games.example"},
+		ID: "kids", BlockedDomains: []string{"games.example"},
 	}}); err != nil {
 		t.Fatal(err)
 	}
@@ -172,7 +171,7 @@ func TestDNSPolicyStaleDeviceStillResolvedForLiveQuery(t *testing.T) {
 	stale.LastSeen = time.Now().Add(-2 * time.Hour)
 	deviceStore.UpsertDevice(&stale)
 	if err := svc.SaveGroups([]gatesentryPolicy.PolicyGroup{{
-		ID: "kids", Action: gatesentryPolicy.ActionBlock, Domains: []string{"games.example"},
+		ID: "kids", BlockedDomains: []string{"games.example"},
 	}}); err != nil {
 		t.Fatal(err)
 	}
@@ -215,11 +214,11 @@ func TestMigrateLegacyDevicePolicyRunsOnlyOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	snap := svc.Snapshot()
-	if len(snap.Groups) != 1 {
-		t.Fatalf("groups after first migration = %d, want 1", len(snap.Groups))
+	if len(snap.Groups) != 2 {
+		t.Fatalf("groups after first migration = %d, want the migrated one and the default policy", len(snap.Groups))
 	}
 	// Simulate an API edit after migration.
-	if err := svc.SaveGroups([]gatesentryPolicy.PolicyGroup{{ID: "edited", Action: gatesentryPolicy.ActionBlock, Domains: []string{"x.example"}}}); err != nil {
+	if err := svc.SaveGroups([]gatesentryPolicy.PolicyGroup{{ID: "edited", BlockedDomains: []string{"x.example"}}}); err != nil {
 		t.Fatal(err)
 	}
 	// Re-running migration must not clobber the edit.
@@ -267,27 +266,26 @@ func TestMigrateLegacyRulesBecomesUnassignedGroups(t *testing.T) {
 	}
 
 	snapshot := svc.Snapshot()
-	if len(snapshot.Groups) != 1 {
-		t.Fatalf("groups after rule migration = %d, want 1", len(snapshot.Groups))
+	if len(snapshot.Groups) != 2 {
+		t.Fatalf("groups after rule migration = %d, want the imported one and the default policy", len(snapshot.Groups))
 	}
 	var imported gatesentryPolicy.PolicyGroup
 	for _, group := range snapshot.Groups {
-		imported = group
+		if group.ID != gatesentryPolicy.DefaultGroupID {
+			imported = group
+		}
 	}
 	if len(snapshot.Assignments) != 0 {
 		t.Fatalf("imported rules were assigned: %+v", snapshot.Assignments)
 	}
-	if imported.Name != "No games" || len(imported.Domains) != 1 || imported.Domains[0] != "games.example" {
+	if imported.Name != "No games" {
 		t.Fatalf("imported group = %+v", imported)
-	}
-	if imported.Action != gatesentryPolicy.ActionBlock {
-		t.Fatalf("imported group action = %q, want block", imported.Action)
 	}
 	if len(imported.Rules) != 1 {
 		t.Fatalf("imported rules = %d, want 1", len(imported.Rules))
 	}
 	rule := imported.Rules[0]
-	if rule.Action != gatesentryPolicy.ActionBlock || rule.MITMAction != gatesentryPolicy.MITMActionEnable {
+	if rule.Action != gatesentryPolicy.ActionBlock || len(rule.Target.Domains) != 1 || rule.Target.Domains[0] != "games.example" {
 		t.Fatalf("imported rule = %+v", rule)
 	}
 	if len(rule.URLRegexes) != 1 || rule.URLRegexes[0] != "/play" {
@@ -306,8 +304,8 @@ func TestMigrateLegacyRulesBecomesUnassignedGroups(t *testing.T) {
 	if err := svc.Reload(); err != nil {
 		t.Fatal(err)
 	}
-	if count := len(svc.Snapshot().Groups); count != 1 {
-		t.Fatalf("groups after repeated migration = %d, want 1", count)
+	if count := len(svc.Snapshot().Groups); count != 2 {
+		t.Fatalf("groups after repeated migration = %d, want the imported one and the default policy", count)
 	}
 }
 
@@ -373,7 +371,7 @@ func TestDNSPolicyGroupAllowExemptsGatewayCategory(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := svc.SaveGroups([]gatesentryPolicy.PolicyGroup{{
-		ID: "adults", Action: gatesentryPolicy.ActionAllow, Categories: []string{"social"},
+		ID: "adults", Name: "Adults", AllowedDomains: []string{"facebook.com"},
 	}}); err != nil {
 		t.Fatal(err)
 	}
@@ -392,5 +390,83 @@ func TestDNSPolicyGroupAllowExemptsGatewayCategory(t *testing.T) {
 	// not override the explicit assignment.
 	if w.msg != nil && w.msg.Rcode == dns.RcodeNameError {
 		t.Fatal("group allow must exempt a gateway-wide category")
+	}
+}
+
+// startFakeUpstream serves A answers for the safe-search endpoints so the
+// rewrite can be tested without the network.
+func startFakeUpstream(t *testing.T) {
+	t.Helper()
+	mux := dns.NewServeMux()
+	mux.HandleFunc(".", func(w dns.ResponseWriter, r *dns.Msg) {
+		m := new(dns.Msg)
+		m.SetReply(r)
+		if r.Question[0].Name == "restrict.youtube.com." {
+			rr, _ := dns.NewRR("restrict.youtube.com. 300 IN A 216.239.38.120")
+			m.Answer = append(m.Answer, rr)
+		}
+		w.WriteMsg(m)
+	})
+	server := &dns.Server{Addr: "127.0.0.1:0", Net: "udp", Handler: mux}
+	ready := make(chan struct{})
+	server.NotifyStartedFunc = func() { close(ready) }
+	go server.ListenAndServe()
+	<-ready
+	previous := externalResolver
+	externalResolver = server.PacketConn.LocalAddr().String()
+	t.Cleanup(func() {
+		externalResolver = previous
+		server.Shutdown()
+	})
+}
+
+func TestDNSDefaultPolicyBlocksUnassignedClients(t *testing.T) {
+	svc, cleanup := setupTestPolicyServer(t)
+	defer cleanup()
+	if err := svc.UpdateGroup(gatesentryPolicy.DefaultGroupID, gatesentryPolicy.PolicyGroup{
+		Name: "Default", BlockedDomains: []string{"tiktok.com"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Reload(); err != nil {
+		t.Fatal(err)
+	}
+	req := new(dns.Msg)
+	req.SetQuestion("www.tiktok.com.", dns.TypeA)
+	w := newMockResponseWriter("198.51.100.44")
+	handleDNSRequest(w, req)
+	if w.msg == nil || w.msg.Rcode != dns.RcodeNameError {
+		t.Fatalf("expected the default policy to block an unknown client, got %+v", w.msg)
+	}
+	if ttl := w.msg.Answer[0].Header().Ttl; ttl > 60 {
+		t.Fatalf("block answer TTL = %d, want a short TTL so schedules apply promptly", ttl)
+	}
+}
+
+func TestDNSSafeSearchRewritesYouTube(t *testing.T) {
+	svc, cleanup := setupTestPolicyServer(t)
+	defer cleanup()
+	startFakeUpstream(t)
+	if err := svc.UpdateGroup(gatesentryPolicy.DefaultGroupID, gatesentryPolicy.PolicyGroup{
+		Name: "Default", SafeSearch: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Reload(); err != nil {
+		t.Fatal(err)
+	}
+	req := new(dns.Msg)
+	req.SetQuestion("www.youtube.com.", dns.TypeA)
+	w := newMockResponseWriter("198.51.100.44")
+	handleDNSRequest(w, req)
+	if w.msg == nil || len(w.msg.Answer) < 2 {
+		t.Fatalf("answer = %+v, want a CNAME and the target's address", w.msg)
+	}
+	cname, ok := w.msg.Answer[0].(*dns.CNAME)
+	if !ok || cname.Target != "restrict.youtube.com." {
+		t.Fatalf("first answer = %v, want a CNAME to restrict.youtube.com", w.msg.Answer[0])
+	}
+	if a, ok := w.msg.Answer[1].(*dns.A); !ok || a.A.String() != "216.239.38.120" {
+		t.Fatalf("second answer = %v, want the restricted endpoint's address", w.msg.Answer[1])
 	}
 }

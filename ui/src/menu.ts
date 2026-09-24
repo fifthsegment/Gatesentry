@@ -73,12 +73,6 @@ let menuItems = [
         href: "/excludehosts",
         icon: Filter,
       },
-      // {
-      //   type: "link",
-      //   text: "Excluded URLs",
-      //   href: "/excludeurls",
-      //   icon: Filter,
-      // },
     ],
   },
   {
@@ -90,7 +84,7 @@ let menuItems = [
   {
     type: "link",
     text: "Policies",
-    href: "/rules",
+    href: "/policies",
     icon: Rule,
   },
   {

@@ -133,7 +133,7 @@ func categoryService(t *testing.T, group PolicyGroup, categories map[string][]st
 
 func TestGroupCategoryRuleBlocksAssignedDevice(t *testing.T) {
 	svc, identity := categoryService(t,
-		PolicyGroup{ID: "kids", Name: "Kids", Action: ActionBlock, Categories: []string{"social"}},
+		PolicyGroup{ID: "kids", Name: "Kids", BlockedCategories: []string{"social"}},
 		map[string][]string{"social": {"facebook.com", "tiktok.com"}},
 	)
 
@@ -160,7 +160,9 @@ func TestGroupCategoryRuleBlocksAssignedDevice(t *testing.T) {
 
 func TestGroupCategoryAllowExemptsAssignedDevice(t *testing.T) {
 	svc, identity := categoryService(t,
-		PolicyGroup{ID: "work", Name: "Work", Action: ActionAllow, Categories: []string{"social"}},
+		PolicyGroup{ID: "work", Name: "Work", Rules: []GroupRule{{
+			ID: "social", Enabled: true, Action: ActionAllow, Target: RuleTarget{Categories: []string{"social"}},
+		}}},
 		map[string][]string{"social": {"facebook.com"}},
 	)
 
@@ -178,7 +180,7 @@ func TestGroupCategoryRuleNeedsAnAssignment(t *testing.T) {
 	index.Replace("social", []string{"facebook.com"}, time.Now())
 	svc.SetCategoryIndex(index)
 	if err := svc.SaveGroups([]PolicyGroup{{
-		ID: "kids", Name: "Kids", Action: ActionBlock, Categories: []string{"social"},
+		ID: "kids", Name: "Kids", BlockedCategories: []string{"social"},
 	}}); err != nil {
 		t.Fatal(err)
 	}
@@ -187,10 +189,10 @@ func TestGroupCategoryRuleNeedsAnAssignment(t *testing.T) {
 	}
 	svc.devices = &mapResolver{devices: map[string]string{"192.0.2.10": "device-1"}}
 
-	// An unassigned device must not inherit the category rule.
+	// An unassigned device is on the default policy, not the kids policy.
 	identity := svc.ResolveIdentity("192.0.2.10", "")
-	if identity.GroupID != "" {
-		t.Fatalf("unassigned identity group = %q, want empty", identity.GroupID)
+	if identity.GroupID != DefaultGroupID {
+		t.Fatalf("unassigned identity group = %q, want the default policy", identity.GroupID)
 	}
 	if got := svc.EvaluateDNS(identity, "www.facebook.com").Action; got != ActionNone {
 		t.Fatalf("action = %s, want none without an assignment", got)
@@ -200,8 +202,7 @@ func TestGroupCategoryRuleNeedsAnAssignment(t *testing.T) {
 func TestExplicitDomainPatternIsNamedBeforeCategory(t *testing.T) {
 	svc, identity := categoryService(t,
 		PolicyGroup{
-			ID: "kids", Name: "Kids", Action: ActionBlock,
-			Domains: []string{"facebook.com"}, Categories: []string{"social"},
+			ID: "kids", Name: "Kids", BlockedDomains: []string{"facebook.com"}, BlockedCategories: []string{"social"},
 		},
 		map[string][]string{"social": {"facebook.com", "tiktok.com"}},
 	)
@@ -220,7 +221,7 @@ func TestCategoryRuleMatchesNothingWithoutDownloadedFeeds(t *testing.T) {
 	// refresh looks like. A category rule must then express no opinion instead
 	// of blocking or allowing by accident.
 	svc, identity := categoryService(t,
-		PolicyGroup{ID: "kids", Name: "Kids", Action: ActionBlock, Categories: []string{"social"}},
+		PolicyGroup{ID: "kids", Name: "Kids", BlockedCategories: []string{"social"}},
 		nil,
 	)
 
@@ -287,9 +288,14 @@ func TestTemplatesOnlyReferenceCatalogCategories(t *testing.T) {
 		if _, err := NormalizeCategories(template.Categories); err != nil {
 			t.Fatalf("template %s references %v: %v", template.ID, template.Categories, err)
 		}
-		group := template.Group()
-		if len(group.Categories) != len(template.Categories) {
-			t.Fatalf("template %s group categories = %v, want %v", template.ID, group.Categories, template.Categories)
+		group := template.Group("UTC")
+		if len(group.BlockedCategories) != len(template.Categories) {
+			t.Fatalf("template %s group categories = %v, want %v", template.ID, group.BlockedCategories, template.Categories)
+		}
+		for _, rule := range group.Rules {
+			if _, err := NormalizeCategories(rule.Target.Categories); err != nil {
+				t.Fatalf("template %s rule references %v: %v", template.ID, rule.Target.Categories, err)
+			}
 		}
 	}
 
@@ -300,15 +306,11 @@ func TestTemplatesOnlyReferenceCatalogCategories(t *testing.T) {
 		if !ok {
 			t.Fatalf("template %s missing", id)
 		}
-		if template.Action != ActionBlock {
-			t.Fatalf("template %s action = %s, want block", id, template.Action)
-		}
 		if len(template.Categories) == 0 {
 			t.Fatalf("template %s blocks no category", id)
 		}
-		group := template.Group()
-		if group.Action != ActionBlock {
-			t.Fatalf("template %s group action = %s, want block", id, group.Action)
+		if !template.SafeSearch {
+			t.Fatalf("template %s does not force safe search", id)
 		}
 	}
 
@@ -361,9 +363,9 @@ func TestReferencedCategoriesReportsEveryGroupSelection(t *testing.T) {
 	}
 
 	groups := []PolicyGroup{
-		{ID: "kids", Name: "Kids", Action: ActionBlock, Categories: []string{"social", "adult"}},
-		{ID: "work", Name: "Work", Action: ActionAllow, Categories: []string{"social"}},
-		{ID: "plain", Name: "Plain", Action: ActionNone},
+		{ID: "kids", Name: "Kids", BlockedCategories: []string{"social", "adult"}},
+		{ID: "work", Name: "Work", Rules: []GroupRule{{ID: "r", Enabled: true, Action: ActionAllow, Target: RuleTarget{Categories: []string{"social"}}}}},
+		{ID: "plain", Name: "Plain"},
 	}
 	if err := svc.SaveGroups(groups); err != nil {
 		t.Fatal(err)

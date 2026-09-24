@@ -11,14 +11,22 @@ import (
 	"github.com/gorilla/mux"
 )
 
+// writePolicyGroupError maps a service error to a response. Validation errors
+// are the administrator's to fix, so their text is returned as written; only
+// an unexpected storage failure hides its detail.
 func writePolicyGroupError(w http.ResponseWriter, err error) {
+	var validation *gatesentryPolicy.ValidationError
 	switch {
 	case errors.Is(err, gatesentryPolicy.ErrGroupExists):
-		writePolicyJSONError(w, http.StatusConflict, "Policy group already exists; edit the existing group instead of applying the template again")
+		writePolicyJSONError(w, http.StatusConflict, "Policy already exists; edit the existing policy instead of applying the template again")
 	case errors.Is(err, gatesentryPolicy.ErrGroupNotFound):
-		writePolicyJSONError(w, http.StatusNotFound, "Policy group not found")
+		writePolicyJSONError(w, http.StatusNotFound, "Policy not found")
+	case errors.Is(err, gatesentryPolicy.ErrDefaultGroup):
+		writePolicyJSONError(w, http.StatusBadRequest, err.Error())
+	case errors.Is(err, gatesentryPolicy.ErrUserConflict), errors.As(err, &validation):
+		writePolicyJSONError(w, http.StatusBadRequest, err.Error())
 	default:
-		writePolicyJSONError(w, http.StatusInternalServerError, "Unable to persist policy group")
+		writePolicyJSONError(w, http.StatusInternalServerError, "Unable to persist policy")
 	}
 }
 
@@ -56,7 +64,7 @@ func ensureCategoryFeeds(groups ...gatesentryPolicy.PolicyGroup) {
 		return
 	}
 	for _, group := range groups {
-		for _, categoryID := range group.Categories {
+		for _, categoryID := range gatesentryPolicy.GroupCategories(group) {
 			if index.UpdatedAt(categoryID).IsZero() {
 				gatesentryDnsServer.RequestBlocklistRefresh()
 				return
@@ -125,13 +133,8 @@ func GSApiPolicyGroupsGet(w http.ResponseWriter, r *http.Request) {
 	if svc == nil {
 		return
 	}
-	snapshot := svc.Snapshot()
-	groups := make([]gatesentryPolicy.PolicyGroup, 0, len(snapshot.Groups))
-	for _, group := range snapshot.Groups {
-		groups = append(groups, group)
-	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"groups": groups})
+	json.NewEncoder(w).Encode(map[string]interface{}{"groups": svc.OrderedGroups()})
 }
 
 // GSApiPolicyTemplatesGet returns the built-in starter catalog with the
@@ -163,7 +166,7 @@ func GSApiPolicyTemplateApply(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Policy template not found", http.StatusNotFound)
 		return
 	}
-	group := template.Group()
+	group := template.Group(svc.Timezone())
 	if err := svc.CreateGroup(group); err != nil {
 		writePolicyGroupError(w, err)
 		return
@@ -178,36 +181,13 @@ func GSApiPolicyTemplateApply(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{"template": template, "group": group})
 }
 
+// decodePolicyGroup reads a policy from a request body. Validation happens in
+// the policy service, so every write path applies the same rules.
 func decodePolicyGroup(r *http.Request) (gatesentryPolicy.PolicyGroup, error) {
 	var group gatesentryPolicy.PolicyGroup
 	if err := json.NewDecoder(r.Body).Decode(&group); err != nil {
 		return group, errors.New("invalid JSON body")
 	}
-	if group.Name == "" {
-		return group, errors.New("policy group needs a name")
-	}
-	switch group.Action {
-	case gatesentryPolicy.ActionNone, gatesentryPolicy.ActionAllow, gatesentryPolicy.ActionBlock:
-	default:
-		return group, errors.New("invalid policy action")
-	}
-	// Category selections are validated against the shipped catalog so a typo
-	// cannot be stored as a rule that silently never matches. The normalized
-	// result is stored because category matching is case-sensitive against the
-	// catalog IDs.
-	normalized, err := gatesentryPolicy.NormalizeCategories(group.Categories)
-	if err != nil {
-		return group, err
-	}
-	group.Categories = normalized
-	// Rules are validated and canonicalized here so a malformed rule is
-	// rejected at the API boundary instead of being stored as a record that
-	// silently matches nothing.
-	rules, err := gatesentryPolicy.NormalizeGroupRules(group.Rules)
-	if err != nil {
-		return group, err
-	}
-	group.Rules = rules
 	return group, nil
 }
 
@@ -224,6 +204,7 @@ func GSApiPolicyGroupCreate(w http.ResponseWriter, r *http.Request) {
 		writePolicyJSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	group.ID = ""
 	gatesentryPolicy.EnsureGroupID(&group)
 	if err := svc.CreateGroup(group); err != nil {
 		writePolicyGroupError(w, err)
@@ -296,35 +277,11 @@ func GSApiPolicyGroupsReplace(w http.ResponseWriter, r *http.Request) {
 		Groups []gatesentryPolicy.PolicyGroup `json:"groups"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		http.Error(w, `{"error":"Invalid JSON body"}`, http.StatusBadRequest)
+		writePolicyJSONError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
 	}
-	for i := range body.Groups {
-		if body.Groups[i].ID == "" {
-			http.Error(w, `{"error":"Every policy group needs a stable id"}`, http.StatusBadRequest)
-			return
-		}
-		switch body.Groups[i].Action {
-		case gatesentryPolicy.ActionNone, gatesentryPolicy.ActionAllow, gatesentryPolicy.ActionBlock:
-		default:
-			http.Error(w, `{"error":"Invalid policy action"}`, http.StatusBadRequest)
-			return
-		}
-		normalized, err := gatesentryPolicy.NormalizeCategories(body.Groups[i].Categories)
-		if err != nil {
-			http.Error(w, `{"error":"Unknown policy category in group "`+body.Groups[i].ID+`"}`, http.StatusBadRequest)
-			return
-		}
-		body.Groups[i].Categories = normalized
-		rules, err := gatesentryPolicy.NormalizeGroupRules(body.Groups[i].Rules)
-		if err != nil {
-			http.Error(w, `{"error":"Invalid rule in group "`+body.Groups[i].ID+`"}`, http.StatusBadRequest)
-			return
-		}
-		body.Groups[i].Rules = rules
-	}
 	if err := svc.SaveGroups(body.Groups); err != nil {
-		http.Error(w, `{"error":"Unable to persist policy groups"}`, http.StatusInternalServerError)
+		writePolicyGroupError(w, err)
 		return
 	}
 	if err := svc.Reload(); err != nil {
@@ -405,8 +362,8 @@ func GSApiPolicyPreview(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"Invalid JSON body"}`, http.StatusBadRequest)
 		return
 	}
-	if strings.TrimSpace(body.Domain) == "" {
-		http.Error(w, `{"error":"domain is required"}`, http.StatusBadRequest)
+	if strings.TrimSpace(body.Domain) == "" && strings.TrimSpace(body.URL) == "" {
+		writePolicyJSONError(w, http.StatusBadRequest, "domain or url is required")
 		return
 	}
 	result := svc.Preview(body)

@@ -19,7 +19,7 @@ func TestPauseCreateListRevoke(t *testing.T) {
 
 	// Create a block group so the pause has something to suppress.
 	if err := svc.SaveGroups([]gatesentryPolicy.PolicyGroup{
-		{ID: "kids", Name: "Kids", Action: gatesentryPolicy.ActionBlock, Domains: []string{"*.games.example"}},
+		{ID: "kids", Name: "Kids", BlockedDomains: []string{"*.games.example"}},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -151,7 +151,7 @@ func TestSchedulePresetApply(t *testing.T) {
 
 	// Create a group to apply the preset to.
 	if err := svc.SaveGroups([]gatesentryPolicy.PolicyGroup{
-		{ID: "kids", Name: "Kids", Action: gatesentryPolicy.ActionBlock, Domains: []string{"*.games.example"}},
+		{ID: "kids", Name: "Kids", BlockedDomains: []string{"*.games.example"}},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -179,14 +179,14 @@ func TestSchedulePresetApply(t *testing.T) {
 		t.Fatalf("preset = %v, want bedtime", schedule["preset"])
 	}
 
-	// Verify the schedule was persisted on the group.
-	snap := svc.Snapshot()
-	group := snap.Groups["kids"]
-	if group.Schedule == nil {
-		t.Fatal("group schedule not set after apply")
+	// Applying a preset adds a rule that blocks all traffic in its window.
+	group := svc.Snapshot().Groups["kids"]
+	if len(group.Rules) != 1 {
+		t.Fatalf("rules after apply = %+v, want one scheduled rule", group.Rules)
 	}
-	if group.Schedule.Preset != "bedtime" {
-		t.Fatalf("group schedule preset = %q, want bedtime", group.Schedule.Preset)
+	rule := group.Rules[0]
+	if !rule.Target.AllTraffic || rule.Action != gatesentryPolicy.ActionBlock || rule.Schedule == nil || rule.Schedule.Preset != "bedtime" {
+		t.Fatalf("rule = %+v, want an all-traffic block on the bedtime schedule", rule)
 	}
 }
 
@@ -212,7 +212,7 @@ func TestSchedulePresetApplyUnknownPreset(t *testing.T) {
 	defer cleanup()
 
 	if err := svc.SaveGroups([]gatesentryPolicy.PolicyGroup{
-		{ID: "kids", Name: "Kids", Action: gatesentryPolicy.ActionBlock, Domains: []string{"*.games.example"}},
+		{ID: "kids", Name: "Kids", BlockedDomains: []string{"*.games.example"}},
 	}); err != nil {
 		t.Fatal(err)
 	}

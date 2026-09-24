@@ -5,14 +5,14 @@ import deviceDetailSource from "../../routes/devices/devicedetail.svelte?raw";
 // whitespace so assertions on user-facing strings stay stable.
 const source = deviceDetailSource.replace(/\s+/g, " ");
 
-test("device detail assigns policy groups explicitly", () => {
+test("device detail assigns a policy explicitly", () => {
   expect(source).toContain('"/api/policy"');
   expect(source).toContain('POLICY_BASE + "/groups"');
   expect(source).toContain("/assignment");
-  expect(source).toContain("No group (default policy)");
+  expect(source).toContain("Default policy");
   expect(source).toContain("group_id: selectedGroup");
   expect(source).toContain(
-    "Only an explicit group assignment changes filtering for this device.",
+    "A device without a policy of its own uses the default policy.",
   );
 });
 
@@ -20,9 +20,9 @@ test("device detail shows effective protection without overclaiming", () => {
   expect(source).toContain("/policy");
   expect(source).toContain("confidence");
   expect(source).toContain("coverage?.summary");
-  expect(source).toContain("Not enforceable by DNS policy:");
+  expect(source).toContain("effective_policy");
   expect(source).toContain("coverage?.caveats");
-  expect(source).toContain("the gateway default policy applies");
+  expect(source).toContain("so the default policy applies");
   expect(source).toContain("shared address");
   expect(source).toContain("stale observation");
 });
