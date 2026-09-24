@@ -252,7 +252,7 @@
   }
 </script>
 
-<ComposedModal {open} on:close={close} size="lg">
+<ComposedModal {open} on:close={close} on:submit={save} size="lg">
   <ModalHeader
     title="Device Details"
     label={device?.display_name || "Unknown Device"}
@@ -594,7 +594,6 @@
     primaryButtonText={saving ? "Saving..." : "Save"}
     primaryButtonDisabled={saving}
     secondaryButtonText="Cancel"
-    on:click:button--primary={save}
   />
 </ComposedModal>
 
