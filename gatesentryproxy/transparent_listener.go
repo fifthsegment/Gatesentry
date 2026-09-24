@@ -135,26 +135,9 @@ func (l *TransparentProxyListener) handleTransparentHTTP(conn net.Conn, original
 		req.Host = originalDst
 	}
 
-	// Check proxy rules before processing
-	host, _, _ := net.SplitHostPort(originalDst)
-	if host == "" {
-		host = originalDst
-	}
-	user := ""
-	clientIP := ""
-	if host, _, err := net.SplitHostPort(conn.RemoteAddr().String()); err == nil {
-		clientIP = host
-	}
-
-	shouldBlock, _, _ := CheckProxyRules(host, user, clientIP)
-	if shouldBlock {
-		if DebugLogging {
-			log.Printf("[Transparent] Blocking HTTP request to %s by rule", originalDst)
-		}
-		LogProxyAction(req.URL.String(), user, ProxyActionBlockedUrl, clientIP, "transparent_proxy")
-		conn.Close()
-		return
-	}
+	// Plain HTTP is decided by the proxy handler below, which sees the full
+	// URL, resolves the policy for the client address, and shows a block page
+	// instead of dropping the connection.
 
 	respWriter := &connResponseWriter{
 		conn:   conn,
@@ -170,7 +153,10 @@ func (l *TransparentProxyListener) handleTransparentHTTP(conn net.Conn, original
 		log.Printf("[Transparent] Authentication is enabled but may not work in transparent mode")
 	}
 
-	l.ProxyHandler.ServeHTTP(respWriter, req)
+	handler := l.ProxyHandler
+	handler.transparent = true
+	req.RemoteAddr = conn.RemoteAddr().String()
+	handler.ServeHTTP(respWriter, req)
 
 	if f, ok := respWriter.writer.(*bufio.Writer); ok {
 		f.Flush()
@@ -237,21 +223,19 @@ func (l *TransparentProxyListener) handleTransparentHTTPS(conn net.Conn, origina
 	}
 
 	// Check proxy rules using the domain name (SNI) instead of IP
-	shouldBlock, ruleMatch, ruleShouldMitm := CheckProxyRules(ruleMatchHost, user, clientIP)
+	policy := CheckProxyRules(ruleMatchHost, user, clientIP)
 
-	if shouldBlock {
+	if policy != nil && policy.Block {
 		logUrl := "https://" + serverAddr
 		if serverName != "" {
 			logUrl = "https://" + serverName
 		}
-		LogProxyAction(logUrl, user, ProxyActionBlockedUrl, clientIP, "transparent_proxy")
+		logProxyActionWithReason(logUrl, user, ProxyActionBlockedUrl, clientIP, "transparent_proxy", policy.Reason)
 		conn.Close()
 		return
 	}
 
-	if ruleMatch != nil {
-		passthru.UserData = ruleMatch
-	}
+	passthru.Policy = policy
 
 	shouldMitm := false
 	if IProxy != nil && IProxy.DoMitm != nil {
@@ -262,8 +246,8 @@ func (l *TransparentProxyListener) handleTransparentHTTPS(conn net.Conn, origina
 		shouldMitm = IProxy.DoMitm(mitmCheckHost)
 	}
 
-	if ruleMatch != nil {
-		shouldMitm = ruleShouldMitm
+	if policy != nil && policy.Inspect {
+		shouldMitm = true
 	}
 
 	// Log with domain name if available

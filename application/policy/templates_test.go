@@ -26,7 +26,7 @@ func templateTestService(t *testing.T) (*Service, *gatesentry2storage.MapStore) 
 
 func TestPolicyTemplatesDescribeSupportedBehavior(t *testing.T) {
 	templates := PolicyTemplates()
-	wantIDs := []string{"child", "teen", "adult-default", "guest", "work", "iot", "unrestricted"}
+	wantIDs := []string{"child", "teen", "guest", "work", "iot"}
 	if len(templates) != len(wantIDs) {
 		t.Fatalf("templates = %d, want %d", len(templates), len(wantIDs))
 	}
@@ -38,8 +38,20 @@ func TestPolicyTemplatesDescribeSupportedBehavior(t *testing.T) {
 			t.Fatalf("template %s lacks a limitation", templates[i].ID)
 		}
 	}
-	if templates[0].Group().ID != "template-child" || templates[0].Group().Name != "Child" {
-		t.Fatalf("child group = %+v", templates[0].Group())
+	child := templates[0].Group("Europe/Oslo")
+	if child.ID != "template-child" || child.Name != "Young child" || !child.SafeSearch {
+		t.Fatalf("child group = %+v", child)
+	}
+	if len(child.Rules) != 1 || child.Rules[0].Schedule == nil || child.Rules[0].Schedule.Timezone != "Europe/Oslo" {
+		t.Fatalf("child bedtime rule = %+v, want a schedule in the gateway's zone", child.Rules)
+	}
+	if _, err := NormalizeGroup(child); err != nil {
+		t.Fatalf("child starter is not a valid policy: %v", err)
+	}
+	for _, template := range templates {
+		if _, err := NormalizeGroup(template.Group("UTC")); err != nil {
+			t.Fatalf("template %s is not a valid policy: %v", template.ID, err)
+		}
 	}
 	if templates[0].Description == "" || templates[1].Description == "" {
 		t.Fatal("template is missing a description")
@@ -78,7 +90,7 @@ func TestTemplateGroupLifecyclePreservesEditsAndAssignments(t *testing.T) {
 	if !ok {
 		t.Fatal("child template not found")
 	}
-	group := template.Group()
+	group := template.Group("UTC")
 	if err := service.CreateGroup(group); err != nil {
 		t.Fatal(err)
 	}
@@ -90,8 +102,7 @@ func TestTemplateGroupLifecyclePreservesEditsAndAssignments(t *testing.T) {
 	}
 
 	group.Description = "Customized child policy"
-	group.Domains = []string{"*.games.example"}
-	group.Action = ActionBlock
+	group.BlockedDomains = []string{"games.example"}
 	if err := service.UpdateGroup(group.ID, group); err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +110,7 @@ func TestTemplateGroupLifecyclePreservesEditsAndAssignments(t *testing.T) {
 		t.Fatal(err)
 	}
 	stored := service.Snapshot().Groups[group.ID]
-	if stored.Description != group.Description || stored.Action != ActionBlock || len(stored.Domains) != 1 {
+	if stored.Description != group.Description || len(stored.BlockedDomains) != 1 {
 		t.Fatalf("stored customized group = %+v", stored)
 	}
 
@@ -135,7 +146,7 @@ func TestPolicyGroupUpdateDoesNotOverwriteOtherGroups(t *testing.T) {
 	if err := service.Reload(); err != nil {
 		t.Fatal(err)
 	}
-	if err := service.UpdateGroup("one", PolicyGroup{Name: "Edited One", Action: ActionAllow}); err != nil {
+	if err := service.UpdateGroup("one", PolicyGroup{Name: "Edited One", AllowedDomains: []string{"x.example"}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := service.Reload(); err != nil {

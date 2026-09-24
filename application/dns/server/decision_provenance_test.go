@@ -42,8 +42,7 @@ func TestDNSDecisionProvenanceBlock(t *testing.T) {
 	})
 	devices := deviceStore.GetAllDevices()
 	if err := svc.SaveGroups([]gatesentryPolicy.PolicyGroup{{
-		ID: "kids", Name: "Kids", Action: gatesentryPolicy.ActionBlock,
-		Domains: []string{"*.games.example"},
+		ID: "kids", Name: "Kids", BlockedDomains: []string{"*.games.example"},
 	}}); err != nil {
 		t.Fatal(err)
 	}

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"html"
 	"flag"
 	"log"
 	"net"
@@ -113,28 +114,55 @@ func domainFromURL(rawURL string) string {
 }
 
 // policyProxyDecision returns the proxy enforcement decision for a request
-// context. The policy service owns every policy decision: a group, its rules,
-// scoped exceptions, and pauses all live in one evaluator, so there is no
-// second rule engine to fall through to. A nil result means no group decided
-// the request and the gateway's own settings stay in charge.
-func policyProxyDecision(clientIP, user, domain string) interface{} {
+// context. The policy service owns every policy decision: a policy's rules and
+// lists, scoped exceptions, and pauses all live in one evaluator that DNS
+// shares. A nil result means no policy decided the request and the gateway's
+// own settings stay in charge.
+func policyProxyDecision(clientIP, user, domain string) *gatesentryproxy.PolicyDecision {
 	policyService := gatesentryDnsServer.GetPolicyService()
 	if policyService == nil {
 		return nil
 	}
 	identity := policyService.ResolveIdentity(clientIP, user)
-	match := policyService.EvaluateProxy(identity, domain)
+	return proxyDecisionFromMatch(policyService.EvaluateProxy(identity, domain))
+}
+
+// proxyDecisionFromMatch translates the policy service's answer into the
+// proxy's own vocabulary.
+func proxyDecisionFromMatch(match gatesentryPolicy.ProxyMatch) *gatesentryproxy.PolicyDecision {
 	if !match.Matched {
 		return nil
 	}
-	return match
+	return &gatesentryproxy.PolicyDecision{
+		Block:             match.ShouldBlock,
+		Allow:             match.Allowed,
+		Inspect:           match.ShouldMITM,
+		BlockURLRegexes:   match.BlockURLRegexes,
+		BlockContentTypes: match.BlockContentTypes,
+		Reason:            policyReason(match),
+	}
+}
+
+// policyReason names the policy and rule behind a proxy decision in words an
+// administrator can match to the policies page.
+func policyReason(match gatesentryPolicy.ProxyMatch) string {
+	name := match.GroupID
+	if svc := gatesentryDnsServer.GetPolicyService(); svc != nil {
+		if group, ok := svc.Snapshot().Groups[match.GroupID]; ok {
+			name = group.Name
+		}
+	}
+	if match.Reason == "" {
+		return "policy " + name
+	}
+	return "policy " + name + ": " + match.Reason
 }
 
 var GSPROXYPORT = "10413"
 var GSWEBADMINPORT = "10786"
 var GSBASEDIR = ""
 var Baseendpointv2 = "https://www.gatesentryfilter.com/api/"
-var GATESENTRY_VERSION = "1.27.0"
+var GATESENTRY_VERSION = "2.0.0"
 var GS_BOUND_ADDRESS = ":"
 var R *application.GSRuntime
 
@@ -512,6 +540,12 @@ func runGateSentry(startup chan<- error) (returnErr error) {
 		decision.ClientIP = gafd.ClientIP
 		decision.ResponseType = string(gafd.Action)
 		decision.MatchedRule, decision.Reason = proxyActionProvenance(gafd.Action)
+		if gafd.Reason != "" {
+			// A policy block names its own rule; the generic label for the
+			// proxy action would hide which rule to edit.
+			decision.MatchedRule = "policy"
+			decision.Reason = gafd.Reason
+		}
 		// Resolve identity for device/group provenance. ClientIP is a
 		// lookup key only; the authenticated user is kept distinct.
 		policySvc := gatesentryDnsServer.GetPolicyService()
@@ -522,7 +556,11 @@ func runGateSentry(startup chan<- error) (returnErr error) {
 		R.Logger.LogDecision(decision)
 	}
 
-	ngp.RuleMatchHandler = func(domain string, user string, clientIP string) interface{} {
+	ngp.PolicyBlockPage = func(reason string) []byte {
+		return []byte(gresponder.BuildGeneralResponsePage([]string{"This site is blocked by your network's " + html.EscapeString(reason) + "."}, -1))
+	}
+
+	ngp.RuleMatchHandler = func(domain string, user string, clientIP string) *gatesentryproxy.PolicyDecision {
 		// Policy groups and their rules are the only rule source. clientIP is
 		// only a device lookup key, never an identity.
 		return policyProxyDecision(clientIP, user, domain)

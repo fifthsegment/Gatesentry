@@ -40,7 +40,7 @@ func TestCreatePauseValidateRejectsBadInput(t *testing.T) {
 func TestPauseSuppressesGroupBlock(t *testing.T) {
 	svc := newTestService(t)
 	if err := svc.SaveGroups([]PolicyGroup{
-		{ID: "kids", Action: ActionBlock, Domains: []string{"*.games.example"}},
+		{ID: "kids", BlockedDomains: []string{"*.games.example"}},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +76,7 @@ func TestPauseSuppressesGroupBlock(t *testing.T) {
 func TestPauseDoesNotSuppressAllowGroup(t *testing.T) {
 	svc := newTestService(t)
 	if err := svc.SaveGroups([]PolicyGroup{
-		{ID: "adults", Action: ActionAllow, Domains: []string{"tracker.example"}, Users: []string{"dana"}},
+		{ID: "adults", AllowedDomains: []string{"tracker.example"}, Users: []string{"dana"}},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +100,7 @@ func TestPauseDoesNotSuppressAllowGroup(t *testing.T) {
 func TestPauseScopeIsolation(t *testing.T) {
 	svc := newTestService(t)
 	if err := svc.SaveGroups([]PolicyGroup{
-		{ID: "kids", Action: ActionBlock, Domains: []string{"*.games.example"}},
+		{ID: "kids", BlockedDomains: []string{"*.games.example"}},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +128,7 @@ func TestPauseScopeIsolation(t *testing.T) {
 func TestPauseScopeGroup(t *testing.T) {
 	svc := newTestService(t)
 	if err := svc.SaveGroups([]PolicyGroup{
-		{ID: "kids", Action: ActionBlock, Domains: []string{"*.games.example"}},
+		{ID: "kids", BlockedDomains: []string{"*.games.example"}},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -156,8 +156,8 @@ func TestPauseScopeGroup(t *testing.T) {
 func TestPauseScopeInstallation(t *testing.T) {
 	svc := newTestService(t)
 	if err := svc.SaveGroups([]PolicyGroup{
-		{ID: "kids", Action: ActionBlock, Domains: []string{"*.games.example"}},
-		{ID: "teens", Action: ActionBlock, Domains: []string{"*.social.example"}},
+		{ID: "kids", BlockedDomains: []string{"*.games.example"}},
+		{ID: "teens", BlockedDomains: []string{"*.social.example"}},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -184,7 +184,7 @@ func TestPauseScopeInstallation(t *testing.T) {
 func TestPausePrecedenceDeviceOverGroupOverInstallation(t *testing.T) {
 	svc := newTestService(t)
 	if err := svc.SaveGroups([]PolicyGroup{
-		{ID: "kids", Action: ActionBlock, Domains: []string{"*.games.example"}},
+		{ID: "kids", BlockedDomains: []string{"*.games.example"}},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -231,7 +231,7 @@ func TestPausePrecedenceDeviceOverGroupOverInstallation(t *testing.T) {
 func TestPauseExpiry(t *testing.T) {
 	svc := newTestService(t)
 	if err := svc.SaveGroups([]PolicyGroup{
-		{ID: "kids", Action: ActionBlock, Domains: []string{"*.games.example"}},
+		{ID: "kids", BlockedDomains: []string{"*.games.example"}},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -260,7 +260,7 @@ func TestPauseExpiry(t *testing.T) {
 func TestPauseExpiryBoundary(t *testing.T) {
 	svc := newTestService(t)
 	if err := svc.SaveGroups([]PolicyGroup{
-		{ID: "kids", Action: ActionBlock, Domains: []string{"*.games.example"}},
+		{ID: "kids", BlockedDomains: []string{"*.games.example"}},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -289,7 +289,7 @@ func TestPauseExpiryBoundary(t *testing.T) {
 func TestPauseRevoke(t *testing.T) {
 	svc := newTestService(t)
 	if err := svc.SaveGroups([]PolicyGroup{
-		{ID: "kids", Action: ActionBlock, Domains: []string{"*.games.example"}},
+		{ID: "kids", BlockedDomains: []string{"*.games.example"}},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -333,7 +333,7 @@ func TestPauseSurvivesRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := first.SaveGroups([]PolicyGroup{
-		{ID: "kids", Action: ActionBlock, Domains: []string{"*.games.example"}},
+		{ID: "kids", BlockedDomains: []string{"*.games.example"}},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -363,7 +363,7 @@ func TestPauseSurvivesRestart(t *testing.T) {
 func TestPauseAllPausesIncludesRevoked(t *testing.T) {
 	svc := newTestService(t)
 	if err := svc.SaveGroups([]PolicyGroup{
-		{ID: "kids", Action: ActionBlock, Domains: []string{"*.games.example"}},
+		{ID: "kids", BlockedDomains: []string{"*.games.example"}},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -400,7 +400,7 @@ func TestPauseAllPausesIncludesRevoked(t *testing.T) {
 func TestPauseUnknownGroupRejected(t *testing.T) {
 	svc := newTestService(t)
 	if err := svc.SaveGroups([]PolicyGroup{
-		{ID: "kids", Action: ActionBlock, Domains: []string{"*.games.example"}},
+		{ID: "kids", BlockedDomains: []string{"*.games.example"}},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -420,7 +420,7 @@ func TestPauseUnknownGroupRejected(t *testing.T) {
 func TestPauseDomainEvaluationPath(t *testing.T) {
 	svc := newTestService(t)
 	if err := svc.SaveGroups([]PolicyGroup{
-		{ID: "kids", Action: ActionBlock, Domains: []string{"*.games.example"}},
+		{ID: "kids", BlockedDomains: []string{"*.games.example"}},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -452,7 +452,7 @@ func TestPauseAndScheduleInteraction(t *testing.T) {
 		Windows:  []TimeWindow{{From: "09:00", To: "17:00"}},
 	}
 	if err := svc.SaveGroups([]PolicyGroup{
-		{ID: "kids", Action: ActionBlock, Domains: []string{"*.games.example"}, Schedule: sc},
+		scheduledBlock("kids", sc, "games.example"),
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -476,15 +476,15 @@ func TestPauseAndScheduleInteraction(t *testing.T) {
 	if d := svc.EvaluateDNS(identity, "chess.games.example"); d.Action != ActionNone {
 		t.Fatalf("inactive schedule + pause: decision = %+v, want none (schedule inactive)", d)
 	}
-	if d := svc.EvaluateDNS(identity, "chess.games.example"); d.Reason != "group schedule inactive" {
-		t.Fatalf("inactive schedule + pause: reason = %q, want schedule inactive (schedule checked first)", d.Reason)
+	if d := svc.EvaluateDNS(identity, "chess.games.example"); d.RuleID != "" {
+		t.Fatalf("inactive schedule + pause: decision = %+v, want no rule deciding", d)
 	}
 }
 
 func TestPausePruneExpired(t *testing.T) {
 	svc := newTestService(t)
 	if err := svc.SaveGroups([]PolicyGroup{
-		{ID: "kids", Action: ActionBlock, Domains: []string{"*.games.example"}},
+		{ID: "kids", BlockedDomains: []string{"*.games.example"}},
 	}); err != nil {
 		t.Fatal(err)
 	}

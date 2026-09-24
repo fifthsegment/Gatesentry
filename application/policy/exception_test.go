@@ -12,8 +12,7 @@ func TestExceptionDeviceScopeOverridesGroupBlock(t *testing.T) {
 	svc.devices = &mapResolver{devices: map[string]string{"192.0.2.10": "device-1"}}
 
 	if err := svc.SaveGroups([]PolicyGroup{{
-		ID: "kids", Name: "Kids", Action: ActionBlock,
-		Domains: []string{"*.games.example"},
+		ID: "kids", Name: "Kids", BlockedDomains: []string{"*.games.example"},
 	}}); err != nil {
 		t.Fatal(err)
 	}
@@ -66,8 +65,7 @@ func TestExceptionScopeIsolation(t *testing.T) {
 	}}
 
 	if err := svc.SaveGroups([]PolicyGroup{{
-		ID: "kids", Name: "Kids", Action: ActionBlock,
-		Domains: []string{"*.games.example"},
+		ID: "kids", Name: "Kids", BlockedDomains: []string{"*.games.example"},
 	}}); err != nil {
 		t.Fatal(err)
 	}
@@ -114,8 +112,7 @@ func TestExceptionGroupScopeOverridesGroupBlock(t *testing.T) {
 	}}
 
 	if err := svc.SaveGroups([]PolicyGroup{{
-		ID: "kids", Name: "Kids", Action: ActionBlock,
-		Domains: []string{"*.games.example"},
+		ID: "kids", Name: "Kids", BlockedDomains: []string{"*.games.example"},
 	}}); err != nil {
 		t.Fatal(err)
 	}
@@ -153,8 +150,7 @@ func TestExceptionInstallationScopeOverridesGroupBlock(t *testing.T) {
 	svc.devices = &mapResolver{devices: map[string]string{"192.0.2.10": "device-1"}}
 
 	if err := svc.SaveGroups([]PolicyGroup{{
-		ID: "kids", Name: "Kids", Action: ActionBlock,
-		Domains: []string{"ads.example"},
+		ID: "kids", Name: "Kids", BlockedDomains: []string{"ads.example"},
 	}}); err != nil {
 		t.Fatal(err)
 	}
@@ -187,8 +183,7 @@ func TestExceptionExpiry(t *testing.T) {
 	svc.devices = &mapResolver{devices: map[string]string{"192.0.2.10": "device-1"}}
 
 	if err := svc.SaveGroups([]PolicyGroup{{
-		ID: "kids", Name: "Kids", Action: ActionBlock,
-		Domains: []string{"ads.example"},
+		ID: "kids", Name: "Kids", BlockedDomains: []string{"ads.example"},
 	}}); err != nil {
 		t.Fatal(err)
 	}
@@ -229,8 +224,7 @@ func TestExceptionRevocation(t *testing.T) {
 	svc.devices = &mapResolver{devices: map[string]string{"192.0.2.10": "device-1"}}
 
 	if err := svc.SaveGroups([]PolicyGroup{{
-		ID: "kids", Name: "Kids", Action: ActionBlock,
-		Domains: []string{"ads.example"},
+		ID: "kids", Name: "Kids", BlockedDomains: []string{"ads.example"},
 	}}); err != nil {
 		t.Fatal(err)
 	}
@@ -277,8 +271,7 @@ func TestExceptionRestartRecovery(t *testing.T) {
 	svc.devices = &mapResolver{devices: map[string]string{"192.0.2.10": "device-1"}}
 
 	if err := svc.SaveGroups([]PolicyGroup{{
-		ID: "kids", Name: "Kids", Action: ActionBlock,
-		Domains: []string{"ads.example"},
+		ID: "kids", Name: "Kids", BlockedDomains: []string{"ads.example"},
 	}}); err != nil {
 		t.Fatal(err)
 	}
@@ -316,8 +309,7 @@ func TestExceptionPrecedenceDeviceOverGroup(t *testing.T) {
 	svc.devices = &mapResolver{devices: map[string]string{"192.0.2.10": "device-1"}}
 
 	if err := svc.SaveGroups([]PolicyGroup{{
-		ID: "kids", Name: "Kids", Action: ActionBlock,
-		Domains: []string{"ads.example"},
+		ID: "kids", Name: "Kids", BlockedDomains: []string{"ads.example"},
 	}}); err != nil {
 		t.Fatal(err)
 	}

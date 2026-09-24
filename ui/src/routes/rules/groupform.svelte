@@ -14,7 +14,8 @@
   } from "carbon-components-svelte";
   import { ChevronDown, ChevronUp } from "carbon-icons-svelte";
   import Categoryselect from "./categoryselect.svelte";
-  import { MITM_DEFAULT, SCHEDULE_PRESET_CUSTOM, WEEKDAYS, emptyRule, scheduleLabel } from "./policymodel";
+  import Domainlist from "./domainlist.svelte";
+  import { DEFAULT_GROUP_ID, SCHEDULE_PRESET_CUSTOM, WEEKDAYS, emptyRule, needsProxy, scheduleLabel } from "./policymodel";
   import type { CategoryStatus, GroupRule, PolicyGroup, SchedulePreset } from "./policymodel";
 
   // The draft is the page's object, mutated in place: the page reads it back
@@ -32,23 +33,12 @@
   // pattern accepts 12-hour input only.
   const TIME_PATTERN = "([01][0-9]|2[0-3]):[0-5][0-9]";
 
-  let draftDomain = "";
+  $: isDefault = draft.id === DEFAULT_GROUP_ID;
 
   // Svelte re-renders an each block when the array it reads is reassigned, and
   // the rule objects keep their identity, so the page still sees every edit.
   function touchRules() {
     draft.rules = [...draft.rules];
-  }
-
-  function addDomain() {
-    const domain = draftDomain.trim();
-    if (!domain) return;
-    draft.domains = [...draft.domains, domain];
-    draftDomain = "";
-  }
-
-  function removeDomain(domain: string) {
-    draft.domains = draft.domains.filter((candidate) => candidate !== domain);
   }
 
   function addRule() {
@@ -69,37 +59,29 @@
     draft.rules = next;
   }
 
-  // URL and response-type conditions are tested inside a decrypted request, so
-  // only a block rule that keeps inspection on can carry them. The API rejects
-  // the other combinations, and the form turns these fields off rather than
-  // letting an administrator write a rule the gateway would refuse.
+  // URL and response-type conditions narrow a block to part of a site, so an
+  // allow rule cannot carry them. The API rejects the combination, and the
+  // form turns the fields off rather than letting an administrator write it.
   function conditionsAllowed(rule: GroupRule): boolean {
-    return rule.action === "block" && rule.mitm_action !== "disable";
+    return rule.action === "block";
   }
 
-  function addUrlPattern(rule: GroupRule) {
-    const pattern = rule.url_draft.trim();
-    if (!pattern) return;
-    rule.url_regexes = [...rule.url_regexes, pattern];
-    rule.url_draft = "";
+  function setTargetKind(rule: GroupRule, event: Event) {
+    rule.target.all_traffic = (event.target as HTMLSelectElement).value === "all";
     touchRules();
   }
 
-  function removeUrlPattern(rule: GroupRule, pattern: string) {
-    rule.url_regexes = rule.url_regexes.filter((candidate) => candidate !== pattern);
+  function addListEntry(rule: GroupRule, field: "url_regexes" | "blocked_content_types", draftField: "url_draft" | "content_type_draft", lower = false) {
+    let value = rule[draftField].trim();
+    if (lower) value = value.toLowerCase();
+    if (!value || rule[field].includes(value)) return;
+    rule[field] = [...rule[field], value];
+    rule[draftField] = "";
     touchRules();
   }
 
-  function addContentType(rule: GroupRule) {
-    const contentType = rule.content_type_draft.trim().toLowerCase();
-    if (!contentType) return;
-    rule.blocked_content_types = [...rule.blocked_content_types, contentType];
-    rule.content_type_draft = "";
-    touchRules();
-  }
-
-  function removeContentType(rule: GroupRule, contentType: string) {
-    rule.blocked_content_types = rule.blocked_content_types.filter((candidate) => candidate !== contentType);
+  function removeListEntry(rule: GroupRule, field: "url_regexes" | "blocked_content_types", value: string) {
+    rule[field] = rule[field].filter((candidate) => candidate !== value);
     touchRules();
   }
 
@@ -149,12 +131,6 @@
     touchRules();
   }
 
-  function setWindowTime(rule: GroupRule, key: "from" | "to", value: string) {
-    if (!rule.schedule?.windows?.length) return;
-    rule.schedule.windows[0][key] = value;
-    touchRules();
-  }
-
   // The controls report a DOM event, and Svelte's template parser does not
   // accept a type assertion inside an inline handler, so each one reads its
   // value through a named function.
@@ -163,13 +139,19 @@
   }
 
   function onWindowTimeChange(rule: GroupRule, key: "from" | "to", event: Event) {
-    setWindowTime(rule, key, (event.target as HTMLInputElement).value);
+    if (!rule.schedule?.windows?.length) return;
+    rule.schedule.windows[0][key] = (event.target as HTMLInputElement).value;
+    touchRules();
   }
 
   function presetLabel(preset: SchedulePreset): string {
     const window = preset.windows[0];
     if (!window) return preset.name;
     return preset.name + " (" + window.from + "-" + window.to + ")";
+  }
+
+  function setGroupUsers(selected: (string | number)[]) {
+    draft.users = selected.map(String);
   }
 </script>
 
@@ -178,50 +160,73 @@
     <TextInput labelText="Name" bind:value={draft.name} />
   </Column>
   <Column sm={4} md={8} lg={8}>
-    <Select labelText="Action on the selected categories and domains" bind:selected={draft.action}>
-      <SelectItem value="" text="No action of its own" />
-      <SelectItem value="block" text="Block" />
-      <SelectItem value="allow" text="Allow" />
-    </Select>
+    <TextArea labelText="Description" rows={1} bind:value={draft.description} />
   </Column>
 </Row>
+
+<fieldset class="field">
+  <legend class="field-label">Blocked categories</legend>
+  <p class="field-note">Self-updating domain lists. A category also covers every subdomain of the sites it lists.</p>
+  <Categoryselect
+    {categories}
+    selection={draft.blocked_categories}
+    on:change={(event) => (draft.blocked_categories = event.detail)}
+  />
+</fieldset>
+
 <Row>
-  <Column sm={4} md={8} lg={16}>
-    <TextArea labelText="Description" rows={2} bind:value={draft.description} />
+  <Column sm={4} md={8} lg={8}>
+    <fieldset class="field">
+      <legend class="field-label">Blocked domains</legend>
+      <Domainlist
+        label="Block a domain"
+        entries={draft.blocked_domains}
+        tagType="red"
+        on:change={(event) => (draft.blocked_domains = event.detail)}
+      />
+    </fieldset>
+  </Column>
+  <Column sm={4} md={8} lg={8}>
+    <fieldset class="field">
+      <legend class="field-label">Always allowed domains</legend>
+      <Domainlist
+        label="Allow a domain"
+        entries={draft.allowed_domains}
+        tagType="green"
+        on:change={(event) => (draft.allowed_domains = event.detail)}
+      />
+      <p class="field-note">Wins over blocked categories, blocked domains, and the gateway blocklist.</p>
+    </fieldset>
   </Column>
 </Row>
 
-<fieldset class="field">
-  <legend class="field-label">Categories</legend>
-  <Categoryselect {categories} selection={draft.categories} on:change={(event) => (draft.categories = event.detail)} />
-</fieldset>
+<div class="field">
+  <Toggle
+    labelText="Safe search"
+    labelA="Off"
+    labelB="Google, Bing, DuckDuckGo, and YouTube restricted mode"
+    bind:toggled={draft.safe_search}
+  />
+</div>
 
-<fieldset class="field">
-  <legend class="field-label">Domains</legend>
-  <div class="list-entry">
-    <TextInput
-      labelText="Add a domain pattern"
-      placeholder="example.com or *.example.com"
-      bind:value={draftDomain}
-      on:keydown={(event) => event.key === "Enter" && addDomain()}
+{#if !isDefault && users.length}
+  <div class="field">
+    <MultiSelect
+      titleText="Proxy users on this policy"
+      label="Only devices assigned to it"
+      items={users.map((user) => ({ id: user, text: user }))}
+      selectedIds={draft.users}
+      on:select={(event) => setGroupUsers(event.detail.selectedIds)}
     />
-    <Button size="small" kind="tertiary" on:click={addDomain}>Add domain</Button>
+    <p class="field-note">A signed-in proxy user gets this policy on any device.</p>
   </div>
-  {#if draft.domains.length}
-    <div class="tags">
-      {#each draft.domains as domain (domain)}
-        <Tag filter size="sm" on:close={() => removeDomain(domain)}>{domain}</Tag>
-      {/each}
-    </div>
-  {/if}
-</fieldset>
+{/if}
 
 <fieldset class="field">
   <legend class="field-label">Rules</legend>
   <p class="field-note">
-    Rules run top to bottom and the first match decides. URL and response-type
-    conditions only narrow a block rule and need TLS inspection, so they are off
-    for every other rule.
+    Rules run before the lists above, top to bottom, and the first match decides. Use them for time limits
+    ("block all traffic at bedtime"), exceptions ("allow YouTube after school"), or blocking part of a site.
   </p>
 
   {#each draft.rules as rule, index (index)}
@@ -229,7 +234,7 @@
       <div class="rule-head">
         <h5>Rule {index + 1}</h5>
         <div class="rule-head-controls">
-          <Toggle size="sm" labelText="Enabled" bind:toggled={rule.enabled} />
+          <Toggle size="sm" labelText="Enabled" hideLabel bind:toggled={rule.enabled} />
           <Button
             size="small"
             kind="ghost"
@@ -251,78 +256,58 @@
       </div>
 
       <Row>
-        <Column sm={4} md={8} lg={6}>
-          <TextInput labelText="Name" placeholder="Bedtime social block" bind:value={rule.name} />
+        <Column sm={4} md={4} lg={5}>
+          <TextInput labelText="Name" placeholder="Bedtime" bind:value={rule.name} />
         </Column>
         <Column sm={4} md={4} lg={5}>
-          <Select labelText="Rule action" bind:selected={rule.action}>
+          <Select labelText="Action" bind:selected={rule.action} on:change={touchRules}>
             <SelectItem value="block" text="Block" />
-            <SelectItem value="allow" text="Allow (exception)" />
+            <SelectItem value="allow" text="Allow" />
           </Select>
         </Column>
-        <Column sm={4} md={4} lg={5}>
-          <Select labelText="TLS inspection" bind:selected={rule.mitm_action}>
-            <SelectItem value={MITM_DEFAULT} text="Gateway setting" />
-            <SelectItem value="enable" text="Inspect this rule's traffic" />
-            <SelectItem value="disable" text="Never inspect it" />
+        <Column sm={4} md={8} lg={6}>
+          <Select
+            labelText="Applies to"
+            selected={rule.target.all_traffic ? "all" : "listed"}
+            on:change={(event) => setTargetKind(rule, event)}
+          >
+            <SelectItem value="listed" text="Selected categories and domains" />
+            <SelectItem value="all" text="All traffic" />
           </Select>
         </Column>
       </Row>
 
-      <Row>
-        <Column sm={4} md={8} lg={8}>
-          <div class="list-entry">
-            <TextInput
-              labelText="URL pattern"
-              placeholder="/watch"
-              disabled={!conditionsAllowed(rule)}
-              bind:value={rule.url_draft}
-              on:keydown={(event) => event.key === "Enter" && addUrlPattern(rule)}
-            />
-            <Button size="small" kind="tertiary" disabled={!conditionsAllowed(rule)} on:click={() => addUrlPattern(rule)}>
-              Add pattern
-            </Button>
-          </div>
-          {#if rule.url_regexes.length}
-            <div class="tags">
-              {#each rule.url_regexes as pattern (pattern)}
-                <Tag filter size="sm" on:close={() => removeUrlPattern(rule, pattern)}>{pattern}</Tag>
-              {/each}
-            </div>
-          {/if}
-        </Column>
-        <Column sm={4} md={8} lg={8}>
-          <div class="list-entry">
-            <TextInput
-              labelText="Response type"
-              placeholder="video/"
-              disabled={!conditionsAllowed(rule)}
-              bind:value={rule.content_type_draft}
-              on:keydown={(event) => event.key === "Enter" && addContentType(rule)}
-            />
-            <Button size="small" kind="tertiary" disabled={!conditionsAllowed(rule)} on:click={() => addContentType(rule)}>
-              Add type
-            </Button>
-          </div>
-          {#if rule.blocked_content_types.length}
-            <div class="tags">
-              {#each rule.blocked_content_types as contentType (contentType)}
-                <Tag filter size="sm" on:close={() => removeContentType(rule, contentType)}>{contentType}</Tag>
-              {/each}
-            </div>
-          {/if}
-        </Column>
-      </Row>
+      {#if !rule.target.all_traffic}
+        <div class="rule-target">
+          <Categoryselect
+            {categories}
+            compact
+            selection={rule.target.categories}
+            on:change={(event) => {
+              rule.target.categories = event.detail;
+              touchRules();
+            }}
+          />
+          <Domainlist
+            label="Domain"
+            entries={rule.target.domains}
+            on:change={(event) => {
+              rule.target.domains = event.detail;
+              touchRules();
+            }}
+          />
+        </div>
+      {/if}
 
       <Row>
         <Column sm={4} md={8} lg={8}>
           <Select
-            labelText="Active hours"
+            labelText="When"
             selected={scheduleChoice(rule)}
-            helperText={rule.schedule ? scheduleLabel(rule.schedule) : ""}
+            helperText={rule.schedule ? scheduleLabel(rule.schedule) + " (" + (rule.schedule.timezone || "UTC") + ")" : ""}
             on:change={(event) => onScheduleChange(rule, event)}
           >
-            <SelectItem value="" text="Always active" />
+            <SelectItem value="" text="Always" />
             {#each schedulePresets as preset (preset.id)}
               <SelectItem value={preset.id} text={presetLabel(preset)} />
             {/each}
@@ -359,8 +344,8 @@
         <Column sm={4} md={8} lg={8}>
           {#if users.length}
             <MultiSelect
-              titleText="Applies to users"
-              label="Any user in this group"
+              titleText="Only for proxy users"
+              label="Everyone on this policy"
               items={users.map((user) => ({ id: user, text: user }))}
               selectedIds={rule.users}
               on:select={(event) => setRuleUsers(rule, event.detail.selectedIds)}
@@ -368,6 +353,68 @@
           {/if}
         </Column>
       </Row>
+
+      {#if conditionsAllowed(rule)}
+        <details class="advanced" open={rule.url_regexes.length > 0 || rule.blocked_content_types.length > 0}>
+          <summary>Block only part of the site</summary>
+          <Row>
+            <Column sm={4} md={8} lg={8}>
+              <div class="list-entry">
+                <TextInput
+                  labelText="URL pattern (regular expression)"
+                  placeholder="/shorts/"
+                  bind:value={rule.url_draft}
+                  on:keydown={(event) => event.key === "Enter" && addListEntry(rule, "url_regexes", "url_draft")}
+                />
+                <Button size="small" kind="tertiary" on:click={() => addListEntry(rule, "url_regexes", "url_draft")}>
+                  Add pattern
+                </Button>
+              </div>
+              {#if rule.url_regexes.length}
+                <div class="tags">
+                  {#each rule.url_regexes as pattern (pattern)}
+                    <Tag filter size="sm" on:close={() => removeListEntry(rule, "url_regexes", pattern)}>{pattern}</Tag>
+                  {/each}
+                </div>
+              {/if}
+            </Column>
+            <Column sm={4} md={8} lg={8}>
+              <div class="list-entry">
+                <TextInput
+                  labelText="Response type"
+                  placeholder="video/"
+                  bind:value={rule.content_type_draft}
+                  on:keydown={(event) =>
+                    event.key === "Enter" && addListEntry(rule, "blocked_content_types", "content_type_draft", true)}
+                />
+                <Button
+                  size="small"
+                  kind="tertiary"
+                  on:click={() => addListEntry(rule, "blocked_content_types", "content_type_draft", true)}
+                >
+                  Add type
+                </Button>
+              </div>
+              {#if rule.blocked_content_types.length}
+                <div class="tags">
+                  {#each rule.blocked_content_types as contentType (contentType)}
+                    <Tag filter size="sm" on:close={() => removeListEntry(rule, "blocked_content_types", contentType)}
+                      >{contentType}</Tag
+                    >
+                  {/each}
+                </div>
+              {/if}
+            </Column>
+          </Row>
+        </details>
+      {/if}
+
+      {#if needsProxy(rule)}
+        <p class="field-note proxy-note">
+          DNS cannot see URLs, response types, or proxy logins, so this rule is enforced by the proxy only. Devices
+          that use GateSentry for DNS alone are not affected by it.
+        </p>
+      {/if}
     </div>
   {/each}
 
@@ -375,27 +422,20 @@
 </fieldset>
 
 <div class="group-actions">
-  <Button size="small" disabled={saving} on:click={onSave}>Save group</Button>
+  <Button size="small" disabled={saving} on:click={onSave}>Save policy</Button>
   <Button size="small" kind="ghost" on:click={onCancel}>Cancel</Button>
 </div>
 
 <style>
   /* Carbon v10's compiled g10 theme exposes literal colors rather than --cds-*
      custom properties: #161616 text-01, #525252 text-02, and #f4f4f4 for the
-     nested rule surface under a white tile. Nothing here draws a border or a
-     shadow of its own. */
-  h5,
-  p {
-    margin-top: 0;
-  }
+     nested rule surface under a white tile. */
   h5 {
     margin: 0;
     font-size: 1rem;
     font-weight: 600;
     line-height: 1.375rem;
   }
-  /* A fieldset names a repeated control the way Carbon's own form groups do:
-     the legend is styled as a field label, not as a heading. */
   .field {
     margin: 1.5rem 0 0;
     padding: 0;
@@ -410,7 +450,7 @@
     line-height: 1rem;
   }
   .field-note {
-    margin: 0 0 0.75rem;
+    margin: 0.25rem 0 0.75rem;
     color: #525252;
     font-size: 0.75rem;
     line-height: 1.125rem;
@@ -432,8 +472,22 @@
     align-items: center;
     gap: 0.5rem;
   }
-  /* The entry field and its Add button share one line, and the button lines up
-     with the input rather than with its label. */
+  .rule-target {
+    margin: 0.5rem 0 1rem;
+  }
+  .advanced {
+    margin-top: 0.75rem;
+  }
+  .advanced summary {
+    margin-bottom: 0.5rem;
+    color: #0f62fe;
+    cursor: pointer;
+    font-size: 0.875rem;
+  }
+  .proxy-note {
+    margin-top: 0.75rem;
+    margin-bottom: 0;
+  }
   .list-entry {
     display: flex;
     align-items: flex-end;
