@@ -1,204 +1,139 @@
 # Gatesentry
 
-HTTP/HTTPS proxy with SSL interception (MITM), content filtering, and a built-in DNS sinkhole. Ships with a web admin dashboard.
+Filtering proxy and DNS server for home and small networks, with a web dashboard.
 
 [![Codecov](https://codecov.io/gh/fifthsegment/Gatesentry/branch/master/graph/badge.svg)](https://codecov.io/gh/fifthsegment/Gatesentry)
 [![Release](https://img.shields.io/github/v/release/fifthsegment/Gatesentry)](https://github.com/fifthsegment/Gatesentry/releases/latest)
 
-[Security policy and vulnerability reporting](SECURITY.md) · [Privacy, AI data handling, backups, and filtering limits](SECURITY.md#local-data-and-privacy)
-
-## What it does
-
-Runs as a local proxy on your machine or network. Clients route traffic through it and Gatesentry can:
-
-- Inspect and filter HTTPS traffic when advanced MITM is enabled, routed, and configured with a trusted CA certificate
-- Block domains via DNS (runs its own DNS server, pulls blocklists from external sources)
-- Match URLs and content against keyword, MIME, and domain rules
-- Apply time-based and per-user access schedules
-- Log DNS and proxy decisions and display stats in the web UI
-
-Useful as a network-wide content filter, a privacy guard, a parental control layer, or a sinkhole for known-bad domains.
+[Security policy](SECURITY.md) · [Privacy and data handling](SECURITY.md#local-data-and-privacy) · [Filtering limits](SECURITY.md#filtering-coverage-limits) · [Changelog](CHANGELOG.md)
 
 ![gatesentry-repo](https://github.com/fifthsegment/Gatesentry/assets/5513549/5ab836ab-7362-4916-9f7c-655e67e4deab)
 
+## Features
+
+- **DNS filtering** for the whole network, using downloadable blocklist categories
+- **Policies per device or proxy user.** Each policy has blocked categories, blocked domains and always-allowed domains, an optional safe search setting, and ordered rules. Devices with no assigned policy use the Default policy.
+- **Rules** apply to all traffic, specific domains, or categories. A rule can have a schedule (for example, no internet at bedtime) and can apply only to certain users.
+- **Safe search** for Google, Bing, DuckDuckGo, and YouTube restricted mode, enforced through DNS
+- **HTTP/HTTPS proxy** (explicit on port 10413, transparent on Linux). With HTTPS inspection enabled and the CA certificate installed on clients, rules can also match URL paths and response content types.
+- **Keyword and content filters**, plus optional AI image filtering (off by default; see [SECURITY.md](SECURITY.md#optional-ai-image-filtering))
+- **Exceptions and pauses** that lift a block for a set time
+- **Test a site** from the policies page to see which rule decides a request
+- **Logs, stats, device inventory, backup and restore**
+
+DNS filtering works on domains only. URL, keyword, and content rules need traffic to pass through the proxy. See the [filtering coverage limits](SECURITY.md#filtering-coverage-limits).
+
 ## Getting started
 
-There are 2 ways to run Gatesentry, either using the docker image or using the single file binary directly.
+Fresh installations have no default credentials. Open the dashboard and create the administrator on the setup screen. Until setup is complete, anyone who can reach the dashboard can claim the admin account, so finish setup before exposing the port. See [Secure first-run administration](docs/secure-first-run.md).
 
-Fresh installations require one-time administrator setup. See [Secure first-run administration](docs/secure-first-run.md) before exposing the dashboard or configuring unattended Docker startup.
+### Docker
 
-### Method 1: Using Docker
-
-GateSentry runs on a Linux Docker host and publishes `linux/amd64` and `linux/arm64` images. The verified quickstart builds from a repository checkout so you run the exact source you pinned:
+Images are published for `linux/amd64` and `linux/arm64`.
 
 ```bash
 git clone https://github.com/fifthsegment/Gatesentry.git
 cd Gatesentry
 docker compose up -d --build
-docker compose ps   # wait for the gateway to report (healthy)
+docker compose ps   # wait for (healthy)
 ```
 
-The dashboard is at `http://127.0.0.1:10786` on the Docker host. Fresh installations have no default credentials; create the administrator on the one-time setup screen.
+To use the published `abdullahi1/gatesentry` image instead of building from source, use [docker-compose.prebuilt.yml](docker-compose.prebuilt.yml).
 
-For a copyable quickstart without a checkout, [docker-compose.prebuilt.yml](docker-compose.prebuilt.yml) pulls the published `abdullahi1/gatesentry` image. The currently published image predates the secure first-run release: it still starts with legacy `admin/admin` credentials and lacks the `/health` endpoint, so change that password immediately or prefer the verified build above until the next release is published.
+The container uses host networking so it can serve DNS on port 53 and see real client addresses. [docs/docker.md](docs/docker.md) covers port 53 conflicts (e.g. `systemd-resolved`), firewalling, persistent state, upgrades and rollback, and pointing your router's DNS at Gatesentry.
 
-GateSentry uses host networking to serve DNS on port 53 and see real client addresses. Read [Docker installation, upgrade, and rollback](docs/docker.md) before production use: it covers DNS port conflicts (for example `systemd-resolved`), firewall exposure, persistent state and backups, readiness checks and logs, pinned upgrades with rollback, and router DNS configuration.
+### Binary
 
-### Method 2: Using the Gatesentry binary directly
+Download the binary for your platform from [Releases](https://github.com/fifthsegment/Gatesentry/releases/latest):
 
-1.  Downloading Gatesentry:
+| OS      | amd64                          | arm64                    |
+| ------- | ------------------------------ | ------------------------ |
+| Linux   | `gatesentry-linux-amd64`       | `gatesentry-linux-arm64` |
+| macOS   | `gatesentry-darwin-amd64`      | `gatesentry-darwin-arm64` |
+| Windows | `gatesentry-windows-amd64.exe` | —                        |
 
-    Navigate to the 'Releases' section of this repository.
-    Download the binary for your operating system and CPU:
-
-    | Operating system | x86-64 / amd64 | ARM64 |
-    | ---------------- | -------------- | ----- |
-    | Linux | `gatesentry-linux-amd64` | `gatesentry-linux-arm64` |
-    | macOS | `gatesentry-darwin-amd64` | `gatesentry-darwin-arm64` |
-    | Windows | `gatesentry-windows-amd64.exe` | Not currently published |
-
-    Releases currently provide the Windows binary directly; a Windows installer is not published.
-
-2.  Installation:
-
-    **For macOS and Linux:**
-
-    Locate the downloaded Gatesentry binary file in your system.
-    Open a terminal window and navigate to the directory containing the downloaded binary.
-    Run the following command to grant execution permissions to the binary file:
-
-        chmod +x gatesentry-{os}-{arch}
-
-    Replace `{os}` with `linux` or `darwin` and `{arch}` with `amd64` or `arm64`.
-    Proceed to execute the binary file to initiate the server.
-
-    **Running as a Service (Optional)**
-
-    If you want Gatesentry to keep running in the background on your machine, install it as :
-
-    `./gatesentry-{os}-{arch} -service install`
-
-    Next, on linux you can use your system service runner to start or stop it, for example for ubuntu:
-
-    `service gatesentry start   #starts the service`
-
-    `service gatesentry stop    #stops the service`
-
-    **For Windows**
-
-    Download `gatesentry-windows-amd64.exe` and run it from PowerShell or Command Prompt.
-
-    **Running as a Service**
-
-    Run `gatesentry-windows-amd64.exe -service install` from an elevated PowerShell or Command Prompt, then look for GateSentry in the Windows Services manager (`services.msc`).
-
-3.  Start the server:
-
-    ```
-    ./gatesentry-{os}-{arch}
-    ```
-
-    The proxy listens on port 10413, admin UI on port 10786.
-
-### Run as a background service
-
-**Linux / macOS:**
-
+```bash
+chmod +x gatesentry-linux-amd64
+./gatesentry-linux-amd64
 ```
-./gatesentry-{os}-{arch} -service install
+
+Then open `http://<host>:10786`.
+
+To run it as a service:
+
+```bash
+./gatesentry-linux-amd64 -service install
 service gatesentry start
-service gatesentry stop
 ```
 
-**Windows:** Run `gatesentry-windows-amd64.exe -service install` from an elevated shell, then manage GateSentry through `services.msc`.
+On Windows, run `gatesentry-windows-amd64.exe -service install` from an elevated shell and manage it in `services.msc`.
 
-| Port  | Purpose                        |
-| ----- | ------------------------------ |
-| 10413 | Explicit proxy (all interfaces) |
-| 10414 | Transparent proxy (Linux; optional routing required) |
-| 10786 | Plain-HTTP web admin panel (all interfaces) |
-| 53    | DNS server (TCP and UDP; all interfaces by default) |
+### Ports
 
-### First-run setup
+| Port  | Purpose |
+| ----- | ------- |
+| 53    | DNS (TCP and UDP) |
+| 10413 | Explicit HTTP/HTTPS proxy |
+| 10414 | Transparent proxy (Linux, needs routing rules) |
+| 10786 | Web dashboard (plain HTTP) |
 
-Fresh installations have no default credentials. Open the dashboard on the GateSentry host and create the administrator on the one-time setup screen. Setup is not authenticated, so anyone who can reach the dashboard before setup completes can claim the administrator account; complete setup before exposing the port or restrict it to a trusted network. See [Secure first-run administration](docs/secure-first-run.md). Docker deployments follow the same flow, including unattended startup with the credentials file described in [Docker installation, upgrade, and rollback](docs/docker.md).
+All listeners bind to every interface. Restrict them to trusted clients with the host firewall and don't expose the dashboard to the internet. See [hardening guidance](SECURITY.md#administrative-exposure-and-hardening).
 
-Restrict these listeners to trusted clients with the host firewall. Do not
-expose the admin UI directly to the Internet. The supplied Docker Compose file
-uses host networking, so the host firewall controls its exposure. See the
-[security and hardening guidance](SECURITY.md#administrative-exposure-and-hardening).
+### Pointing clients at Gatesentry
 
-### DNS
+The simplest setup is to set Gatesentry as the DNS server on your router or on each device. The dashboard home page walks through this and runs an end-to-end check; see [docs/onboarding.md](docs/onboarding.md).
 
-DNS-first onboarding is the simple default. The DNS server blocks domains from
-external blocklists. Use `dns_resolver` in settings to choose an upstream
-(defaults to `8.8.8.8:53`). DNS filtering acts on domains; it cannot inspect or
-explain URL, MIME, keyword, or image-content decisions. See the
-[filtering coverage limits](SECURITY.md#filtering-coverage-limits). The
-dashboard home page provides guided DNS-first onboarding with an end-to-end
-protection check; see [onboarding and the ten-minute pilot
-protocol](docs/onboarding.md).
+For URL and content filtering, set Gatesentry as the device's HTTP proxy (`<host>:10413`), or use transparent mode on Linux (below). To inspect HTTPS, turn on HTTPS filtering in settings and install the CA certificate from the dashboard on each client.
 
-## Transparent Proxy Mode (Linux only)
+## Configuration
 
-GateSentry automatically enables transparent proxy mode on Linux systems. This allows traffic interception without client configuration using Linux's `SO_ORIGINAL_DST` socket option and `IP_TRANSPARENT` socket support for TPROXY.
+Most settings are in the dashboard. These environment variables are read at startup:
 
-### Setup for Local Traffic (REDIRECT mode)
+| Variable | Description | Default |
+| -------- | ----------- | ------- |
+| `GATESENTRY_DNS_PORT` | DNS listen port | `53` |
+| `GATESENTRY_DNS_RESOLVER` | Upstream DNS resolver | `8.8.8.8:53` |
+| `GS_TRANSPARENT_PROXY` | Set to `false` to disable the transparent proxy | `true` on Linux |
+| `GS_TRANSPARENT_PROXY_PORT` | Transparent proxy port | `10414` |
+| `GS_MAX_SCAN_SIZE_MB` | Largest response body scanned by content filters, in MB (max 1000) | `10` |
+| `GS_DEBUG_LOGGING` | Set to `true` for verbose logs | `false` |
+| `GATESENTRY_BOOTSTRAP_FILE` | Admin credentials file for unattended first start (see [docs/secure-first-run.md](docs/secure-first-run.md)) | |
 
-For traffic originating from the local machine:
+## Transparent proxy (Linux)
+
+The transparent proxy on port 10414 accepts redirected traffic without any client configuration. It needs root or `CAP_NET_ADMIN`.
+
+Traffic from the machine itself (REDIRECT):
 
 ```bash
 iptables -t nat -A PREROUTING -p tcp --dport 80 -j REDIRECT --to-port 10414
 iptables -t nat -A PREROUTING -p tcp --dport 443 -j REDIRECT --to-port 10414
 ```
 
-### Setup for Forwarded Traffic (TPROXY mode)
-
-For traffic forwarded through the machine (e.g., Tailscale exit node, router):
+Traffic routed through the machine, e.g. a router or Tailscale exit node (TPROXY):
 
 ```bash
-# Mark traffic for routing
 iptables -t mangle -A PREROUTING -p tcp --dport 80 -j TPROXY --tproxy-mark 0x1/0x1 --on-port 10414
 iptables -t mangle -A PREROUTING -p tcp --dport 443 -j TPROXY --tproxy-mark 0x1/0x1 --on-port 10414
-
-# Route marked traffic locally
 ip rule add fwmark 1 lookup 100
 ip route add local 0.0.0.0/0 dev lo table 100
 ```
 
-### Configuration
+HTTPS traffic in transparent mode is tunnelled unless HTTPS filtering is on and clients trust the Gatesentry CA.
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `GS_TRANSPARENT_PROXY_PORT` | Port for transparent proxy | `10414` |
-| `GS_TRANSPARENT_PROXY` | Set to `false` to disable | `true` on Linux |
+## Development
 
-### Requirements
+Requires Go 1.24.10, Node.js 24, and Yarn 4.10.3 (`corepack enable && corepack prepare yarn@4.10.3 --activate`).
 
-- Linux with `SO_ORIGINAL_DST` and `IP_TRANSPARENT` support
-- Root or CAP_NET_ADMIN privileges
-- CA certificate installed on clients for HTTPS interception
+```bash
+./run.sh          # build the UI and binary, then start on port 53
+make verify       # UI checks and tests, asset build, Go tests, Go build
+make verify-go    # Go checks only
+make proxy-smoke  # end-to-end proxy test against a local build
+make docker-smoke # build the Docker image and smoke test it
+make test         # full integration suite (privileged)
+```
 
-### Features
+## Releases
 
-- Supports both REDIRECT (local) and TPROXY (forwarded) traffic
-- Auto-starts on Linux with graceful fallback
-- Protocol auto-detection (HTTP vs HTTPS)
-- SSL Bump support for HTTPS filtering
-- Applies filters supported by the detected proxy path; review the [HTTPS and protocol limitations](SECURITY.md#filtering-coverage-limits)
-
-## Local Development
-
-`./setup.sh`
-
-To run it:
-
-`./run.sh`
-
-## Reproducible build
-
-GateSentry builds with Go 1.24.10, Node.js 24.x, and Yarn 4.10.3. Enable the exact Yarn version declared in `ui/package.json` with `corepack enable && corepack prepare yarn@4.10.3 --activate`, then run `make verify`. This fast path performs an immutable dependency install, UI checks and tests, a fresh dashboard build and embedded-asset sync, embedded dashboard and block-page tests, application and proxy tests, and a Go build. Any failed stage stops the build.
-
-Use `make verify-go` when the frontend assets have already been freshly synced and only Go checks are needed. `make docker-smoke` separately builds the checked-out revision into an image and exercises the dashboard and explicit proxy; it requires Docker and network access. The slower privileged integration suite remains available through `make test`.
-
-`make release-artifacts` writes cross-platform binaries, checksums, and the exact source commit to `dist/`. Ordinary branch builds only produce reviewable artifacts. Release publication requires an existing tag that resolves to the checked-out commit, and Docker publication uses the same tagged source rather than downloading another release.
+Bump `GATESENTRY_VERSION` in `main.go`, add a matching section to `CHANGELOG.md`, and merge to `master`. CI builds and tests the commit, tags it `v<version>`, publishes a GitHub release with the changelog section as notes, and pushes the Docker image.
