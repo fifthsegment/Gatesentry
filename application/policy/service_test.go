@@ -23,7 +23,7 @@ func (m *mapResolver) ResolveDeviceByIP(ip string) (string, bool, bool) {
 	return m.devices[ip], m.shared[ip], m.stales[ip]
 }
 
-func newTestService(t *testing.T) *Service {
+func newTestService(t testing.TB) *Service {
 	t.Helper()
 	dir := t.TempDir()
 	old := gatesentry2storage.GSBASEDIR

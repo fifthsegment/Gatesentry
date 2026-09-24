@@ -1,8 +1,11 @@
 package gatesentryDnsServer
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
+	"os"
 	"strings"
 
 	gatesentryPolicy "bitbucket.org/abdullah_irfan/gatesentryf/policy"
@@ -79,6 +82,74 @@ func migrateLegacyPolicy(svc *gatesentryPolicy.Service, settings *gatesentry2sto
 	}
 	if err := svc.Reload(); err != nil {
 		return fmt.Errorf("reload migrated policy: %w", err)
+	}
+	return nil
+}
+
+// legacyBlockListFile is the retired gateway-wide Block List filter.
+const legacyBlockListFile = "filterfiles/blockedsites.json"
+
+// legacyBlockListStock is the entry every installation shipped with. A list
+// holding only it was never edited, so it is retired without being copied into
+// every policy.
+const legacyBlockListStock = "snapads.com"
+
+// migrateLegacyBlockList moves the retired Block List into policies. The list
+// applied to every proxied request, so each existing policy, the default
+// included, gains its entries as blocked domains; DNS then enforces them too.
+// The file is emptied afterwards, which makes the migration safe to run on
+// every start.
+func migrateLegacyBlockList(svc *gatesentryPolicy.Service, basePath string) error {
+	if svc == nil {
+		return nil
+	}
+	path := basePath + legacyBlockListFile
+	raw, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("read legacy block list: %w", err)
+	}
+	var file struct {
+		Keywords []struct {
+			Content string `json:"Content"`
+		} `json:"keywords"`
+	}
+	if err := json.Unmarshal(raw, &file); err != nil {
+		return fmt.Errorf("decode legacy block list: %w", err)
+	}
+	var domains []string
+	for _, entry := range file.Keywords {
+		pattern, err := gatesentryPolicy.NormalizeDomainPattern(entry.Content)
+		if err != nil {
+			log.Printf("[DNS] Legacy block list entry %q is not a domain; not migrated", entry.Content)
+			continue
+		}
+		if pattern != "" {
+			domains = append(domains, pattern)
+		}
+	}
+	if len(domains) == 1 && domains[0] == legacyBlockListStock {
+		domains = nil
+	}
+	if len(file.Keywords) == 0 {
+		return nil
+	}
+	if len(domains) > 0 {
+		for _, group := range svc.OrderedGroups() {
+			group.BlockedDomains = append(group.BlockedDomains, domains...)
+			if err := svc.UpdateGroup(group.ID, group); err != nil {
+				return fmt.Errorf("add legacy block list to policy %q: %w", group.ID, err)
+			}
+		}
+		if err := svc.Reload(); err != nil {
+			return fmt.Errorf("reload policy after block list migration: %w", err)
+		}
+		log.Printf("[DNS] Moved %d legacy block list entries into every policy's blocked domains", len(domains))
+	}
+	if err := os.WriteFile(path, []byte(`{"keywords":[]}`), 0o600); err != nil {
+		return fmt.Errorf("empty legacy block list: %w", err)
 	}
 	return nil
 }

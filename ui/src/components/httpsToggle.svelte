@@ -25,7 +25,7 @@
     <Toggle
       bind:settingValue={enable_https_filtering}
       settingName="enable_https_filtering"
-      label={$_("HTTPS Filtering - Man In The Middle Filtering")}
+      label={$_("HTTPS inspection (decrypts traffic; needs the GateSentry certificate on each device)")}
       labelA={$_("Disabled")}
       labelB={$_("Enabled")}
       noNotification={true}

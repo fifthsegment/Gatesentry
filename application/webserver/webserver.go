@@ -675,7 +675,6 @@ func RegisterEndpointsStartServer(
 	internalServer.Get("/blockedkeywords", baseIndexHandler)
 	internalServer.Get("/blockedfiletypes", baseIndexHandler)
 	internalServer.Get("/excludeurls", baseIndexHandler)
-	internalServer.Get("/blockedurls", baseIndexHandler)
 	internalServer.Get("/excludehosts", baseIndexHandler)
 	internalServer.Get("/services", baseIndexHandler)
 	internalServer.Get("/devices", baseIndexHandler)

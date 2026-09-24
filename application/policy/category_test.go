@@ -2,6 +2,7 @@ package policy
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -110,7 +111,7 @@ func TestCategoryIndexCoversParentDomains(t *testing.T) {
 
 // categoryService wires a service whose group assignment is the only thing
 // deciding the outcome, so category matching is what the assertions measure.
-func categoryService(t *testing.T, group PolicyGroup, categories map[string][]string) (*Service, Identity) {
+func categoryService(t testing.TB, group PolicyGroup, categories map[string][]string) (*Service, Identity) {
 	t.Helper()
 	svc := newTestService(t)
 	index := NewCategoryIndex()
@@ -428,5 +429,56 @@ func TestEnabledCategoryMatchFollowsTheStoredSelection(t *testing.T) {
 	}
 	if id, matched := svc.EnabledCategoryMatch("facebook.com"); matched {
 		t.Fatalf("cleared category still matched: %q", id)
+	}
+}
+
+func TestGroupCategoryBlocksOnTheProxy(t *testing.T) {
+	svc, identity := categoryService(t,
+		PolicyGroup{ID: "kids", Name: "Kids", BlockedCategories: []string{"social"}},
+		map[string][]string{"social": {"facebook.com", "tiktok.com"}},
+	)
+
+	for _, host := range []string{"facebook.com", "www.facebook.com", "m.tiktok.com"} {
+		match := svc.EvaluateProxy(identity, host)
+		if !match.Matched || !match.ShouldBlock || match.MatchedDomain != "category:social" {
+			t.Fatalf("%s: match = %+v, want a block by category:social", host, match)
+		}
+		// A plain domain block needs no inspection: the proxy refuses the
+		// CONNECT before any TLS, so clients without the CA are covered too.
+		if match.ShouldMITM {
+			t.Fatalf("%s: match = %+v, want no inspection for a domain block", host, match)
+		}
+	}
+	if match := svc.EvaluateProxy(identity, "example.com"); match.Matched {
+		t.Fatalf("unrelated domain match = %+v, want no decision", match)
+	}
+	// Other devices stay on the default policy.
+	other := svc.ResolveIdentity("192.0.2.99", "")
+	if match := svc.EvaluateProxy(other, "www.facebook.com"); match.Matched {
+		t.Fatalf("unassigned device match = %+v, want no decision", match)
+	}
+}
+
+// BenchmarkProxyCategoryLookup measures a proxy decision against category
+// feeds the size of the real ones. The lookup is one hash probe per domain
+// label, so its cost must not grow with the number of domains in a feed.
+func BenchmarkProxyCategoryLookup(b *testing.B) {
+	for _, size := range []int{1_000, 1_000_000} {
+		b.Run(fmt.Sprintf("domains=%d", size), func(b *testing.B) {
+			domains := make([]string, size)
+			for i := range domains {
+				domains[i] = fmt.Sprintf("site%d.example", i)
+			}
+			svc, identity := categoryService(b,
+				PolicyGroup{ID: "kids", Name: "Kids", BlockedCategories: []string{"ads", "social", "adult"}},
+				map[string][]string{"ads": domains[:size/2], "social": {"facebook.com"}, "adult": domains[size/2:]},
+			)
+			hosts := []string{"cdn.www.site7.example", "www.facebook.com", "unrelated.host.example.org"}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				svc.EvaluateProxy(identity, hosts[i%len(hosts)])
+			}
+		})
 	}
 }

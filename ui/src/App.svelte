@@ -152,9 +152,6 @@
         <Route path="/excludeurls">
           <Filter type="excludeurls" />
         </Route>
-        <Route path="/blockedurls">
-          <Filter type="blockedurls" />
-        </Route>
         <Route path="/excludehosts">
           <Filter type="excludehosts" />
         </Route>

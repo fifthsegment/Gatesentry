@@ -259,6 +259,103 @@ func GetMDNSBrowser() *discovery.MDNSBrowser {
 
 const BLOCKLIST_HOURLY_UPDATE_INTERVAL = 10
 
+// policyStartOnce guards StartPolicyEnforcement. Policy state outlives the DNS
+// listener: stopping and restarting DNS must not drop devices, policies, or
+// downloaded category feeds that the proxy is still enforcing.
+var policyStartOnce sync.Once
+
+// StartPolicyEnforcement sets up the device store, the policy service, the
+// category index, and the blocklist refresh. The proxy enforces policies too,
+// so this runs at startup whether or not the DNS listener is enabled; a
+// gateway used only as a proxy still blocks a policy's categories. It is safe
+// to call more than once.
+func StartPolicyEnforcement(basePath string, blockedLists []string, settings *gatesentry2storage.MapStore, devices *gatesentry2storage.MapStore, dnsinfo *gatesentryTypes.DnsServerInfo) {
+	policyStartOnce.Do(func() {
+		readSetting := func(key, conservativeFallback string) string {
+			value, err := settings.GetE(key)
+			if err != nil {
+				log.Printf("[DNS] storage error while reading %q; retaining known-good value: %v", key, err)
+				if value == "" {
+					return conservativeFallback
+				}
+			}
+			return value
+		}
+		// Initialize the device store with configured zones (default: "local").
+		// Supports multiple comma-separated zones for split-horizon DNS.
+		// Example: "jvj28.com,local" → devices resolve as both
+		//   macmini.jvj28.com AND macmini.local
+		// The first zone is the primary (used for PTR targets).
+		zones := localZones(readSetting("dns_local_zone", "local"))
+		deviceStore = discovery.NewDeviceStoreMultiZone(zones...)
+		log.Printf("[DNS] Device store initialized with zones: %v (primary: %s)", zones, zones[0])
+		// Durable user-managed device assignments live in GSDevices (opened and
+		// fail-closed in runtime Init). Envelope corruption therefore already
+		// stops startup; this attach restores the content-level assignment
+		// subset. A load error here means the store is degraded between Init and
+		// DNS start, so persistence is disabled with the error logged rather than
+		// silently dropping assignments.
+		if devices != nil {
+			if err := deviceStore.AttachPersistence(devices); err != nil {
+				log.Printf("[DNS] Device persistence disabled after load error: %v", err)
+			}
+		}
+		// Policy enforcement is a dedicated service; discovery remains the owner
+		// of observed identity. A policy load error is logged and enforcement
+		// keeps the default (no groups) behavior rather than guessing.
+		policySvc, policyErr := gatesentryPolicy.NewService(settings, deviceResolver{})
+		if policyErr != nil {
+			log.Printf("[DNS] Policy service unavailable, retaining default enforcement: %v", policyErr)
+		} else {
+			// Category rules are only as good as the downloaded feeds. The index is
+			// attached before the scheduler starts so the first refresh fills it and
+			// enforcement never reads a partially built map.
+			categoryIndex = gatesentryPolicy.NewCategoryIndex()
+			policySvc.SetCategoryIndex(categoryIndex)
+			if err := migrateLegacyPolicy(policySvc, settings); err != nil {
+				log.Printf("[DNS] Legacy configuration migration unavailable, retaining default enforcement: %v", err)
+			}
+			if err := migrateLegacyBlockList(policySvc, basePath); err != nil {
+				log.Printf("[DNS] Legacy block list migration unavailable; the proxy keeps enforcing it: %v", err)
+			}
+			policyService = policySvc
+		}
+
+		restartDnsSchedulerChan = make(chan bool)
+
+		go gatesentryDnsScheduler.RunScheduler(
+			&blockedDomains,
+			&blockedLists,
+			&internalRecords,
+			&exceptionDomains,
+			&mutex,
+			settings,
+			dnsinfo,
+			categoryIndex,
+			referencedCategoryIDs,
+			BLOCKLIST_HOURLY_UPDATE_INTERVAL,
+			restartDnsSchedulerChan,
+		)
+		restartDnsSchedulerChan <- true
+	})
+}
+
+// localZones parses the comma-separated dns_local_zone setting, falling back
+// to "local" when it names nothing.
+func localZones(setting string) []string {
+	var zones []string
+	for _, z := range strings.Split(setting, ",") {
+		z = strings.TrimSpace(z)
+		if z != "" {
+			zones = append(zones, z)
+		}
+	}
+	if len(zones) == 0 {
+		zones = []string{"local"}
+	}
+	return zones
+}
+
 func StartDNSServer(basePath string, ilogger *gatesentryLogger.Log, blockedLists []string, settings *gatesentry2storage.MapStore, devices *gatesentry2storage.MapStore, dnsinfo *gatesentryTypes.DnsServerInfo) {
 
 	if server != nil || serverRunning.Load() {
@@ -266,9 +363,7 @@ func StartDNSServer(basePath string, ilogger *gatesentryLogger.Log, blockedLists
 		restartDnsSchedulerChan <- true
 		return
 	}
-	policyService = nil
-	categoryIndex = nil
-
+	StartPolicyEnforcement(basePath, blockedLists, settings, devices, dnsinfo)
 	logger = ilogger
 	logsPath = basePath + logsPath
 	readSetting := func(key, conservativeFallback string) string {
@@ -282,59 +377,11 @@ func StartDNSServer(basePath string, ilogger *gatesentryLogger.Log, blockedLists
 		return value
 	}
 	SetExternalResolver(readSetting("dns_resolver", "8.8.8.8:53"))
+	// The device store outlives the listener, so a zone changed while DNS was
+	// stopped is applied when it starts again.
+	deviceStore.SetZones(localZones(readSetting("dns_local_zone", "local")))
 	// InitializeLogs()
 	// go gatesentryDnsFilter.InitializeBlockedDomains(&blockedDomains, &blockedLists)
-
-	// Initialize the device store with configured zones (default: "local").
-	// Supports multiple comma-separated zones for split-horizon DNS.
-	// Example: "jvj28.com,local" → devices resolve as both
-	//   macmini.jvj28.com AND macmini.local
-	// The first zone is the primary (used for PTR targets).
-	zoneSetting := readSetting("dns_local_zone", "local")
-	if zoneSetting == "" {
-		zoneSetting = "local"
-	}
-	// Parse comma-separated zones
-	var zones []string
-	for _, z := range strings.Split(zoneSetting, ",") {
-		z = strings.TrimSpace(z)
-		if z != "" {
-			zones = append(zones, z)
-		}
-	}
-	if len(zones) == 0 {
-		zones = []string{"local"}
-	}
-	deviceStore = discovery.NewDeviceStoreMultiZone(zones...)
-	log.Printf("[DNS] Device store initialized with zones: %v (primary: %s)", zones, zones[0])
-	// Durable user-managed device assignments live in GSDevices (opened and
-	// fail-closed in runtime Init). Envelope corruption therefore already
-	// stops startup; this attach restores the content-level assignment
-	// subset. A load error here means the store is degraded between Init and
-	// DNS start, so persistence is disabled with the error logged rather than
-	// silently dropping assignments.
-	if devices != nil {
-		if err := deviceStore.AttachPersistence(devices); err != nil {
-			log.Printf("[DNS] Device persistence disabled after load error: %v", err)
-		}
-	}
-	// Policy enforcement is a dedicated service; discovery remains the owner
-	// of observed identity. A policy load error is logged and enforcement
-	// keeps the default (no groups) behavior rather than guessing.
-	policySvc, policyErr := gatesentryPolicy.NewService(settings, deviceResolver{})
-	if policyErr != nil {
-		log.Printf("[DNS] Policy service unavailable, retaining default enforcement: %v", policyErr)
-	} else {
-		// Category rules are only as good as the downloaded feeds. The index is
-		// attached before the scheduler starts so the first refresh fills it and
-		// enforcement never reads a partially built map.
-		categoryIndex = gatesentryPolicy.NewCategoryIndex()
-		policySvc.SetCategoryIndex(categoryIndex)
-		if err := migrateLegacyPolicy(policySvc, settings); err != nil {
-			log.Printf("[DNS] Legacy configuration migration unavailable, retaining default enforcement: %v", err)
-		}
-		policyService = policySvc
-	}
 
 	// Start mDNS/Bonjour browser for automatic device discovery (Phase 3).
 	// Browses common service types (_airplay._tcp, _googlecast._tcp, _printer._tcp, etc.)
@@ -382,23 +429,6 @@ func StartDNSServer(basePath string, ilogger *gatesentryLogger.Log, blockedLists
 	} else {
 		log.Println("[DDNS] Dynamic DNS updates disabled")
 	}
-
-	restartDnsSchedulerChan = make(chan bool)
-
-	go gatesentryDnsScheduler.RunScheduler(
-		&blockedDomains,
-		&blockedLists,
-		&internalRecords,
-		&exceptionDomains,
-		&mutex,
-		settings,
-		dnsinfo,
-		categoryIndex,
-		referencedCategoryIDs,
-		BLOCKLIST_HOURLY_UPDATE_INTERVAL,
-		restartDnsSchedulerChan,
-	)
-	restartDnsSchedulerChan <- true
 
 	serverRunning.Store(true)
 	// go PrintQueryLogsPeriodically()
