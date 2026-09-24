@@ -12,7 +12,6 @@ WARNING "src/components/filtereditor.svelte" 199:11 "A11y: <div> with click hand
 WARNING "src/components/filtereditor.svelte" 199:11 "A11y: visible, non-interactive elements with an on:click event must be accompanied by an on:keydown, on:keyup, or on:keypress event."
 WARNING "src/components/httpsToggle.svelte" 18:3 "A11y: <div> with click handler must have an ARIA role"
 WARNING "src/components/httpsToggle.svelte" 18:3 "A11y: visible, non-interactive elements with an on:click event must be accompanied by an on:keydown, on:keyup, or on:keypress event."
-WARNING "src/components/toggle.svelte" 60:3 "Empty block"
 WARNING "src/routes/dns/dns.svelte" 57:9 "A11y: <span> with click handler must have an ARIA role"
 WARNING "src/routes/dns/dns.svelte" 57:9 "A11y: visible, non-interactive elements with an on:click event must be accompanied by an on:keydown, on:keyup, or on:keypress event."
 WARNING "src/routes/dns/dns.svelte" 64:11 "A11y: A form label must be associated with a control."
@@ -20,4 +19,4 @@ WARNING "src/routes/dns/dns.svelte" 68:11 "A11y: A form label must be associated
 WARNING "src/routes/dns/dns.svelte" 74:11 "A11y: A form label must be associated with a control."
 WARNING "src/routes/filter/filter.svelte" 78:9 "A11y: A form label must be associated with a control."
 WARNING "src/routes/filter/filter.svelte" 83:9 "A11y: A form label must be associated with a control."
-COMPLETED 624 FILES 5 ERRORS 17 WARNINGS 9 FILES_WITH_PROBLEMS
+COMPLETED 624 FILES 5 ERRORS 16 WARNINGS 8 FILES_WITH_PROBLEMS
