@@ -304,3 +304,55 @@ export function ruleSentence(rule: GroupRule, categoryName: (id: string) => stri
 export function needsProxy(rule: GroupRule): boolean {
   return rule.url_regexes.length > 0 || rule.blocked_content_types.length > 0 || rule.users.length > 0;
 }
+
+// A bedtime rule is the one thing most households add to a policy: block all
+// traffic during a nightly window. The simple editor shows it as a single
+// switch, so it recognizes the rule by shape rather than by name.
+export function isBedtimeRule(rule: GroupRule): boolean {
+  return (
+    rule.action === "block" &&
+    rule.target.all_traffic &&
+    !!rule.schedule &&
+    rule.url_regexes.length === 0 &&
+    rule.blocked_content_types.length === 0 &&
+    rule.users.length === 0
+  );
+}
+
+export function bedtimeRule(timezone: string, preset?: SchedulePreset): GroupRule {
+  const rule = emptyRule();
+  rule.name = "Bedtime";
+  rule.target.all_traffic = true;
+  rule.schedule = {
+    timezone,
+    weekdays: preset ? [...preset.weekdays] : [],
+    windows: preset?.windows?.length
+      ? preset.windows.map((window) => ({ from: window.from, to: window.to }))
+      : [{ from: "21:00", to: "07:00" }],
+  };
+  return rule;
+}
+
+// hasAdvancedSettings reports whether a policy uses anything beyond the simple
+// editor, so the editor opens the advanced section instead of hiding it.
+export function hasAdvancedSettings(group: PolicyGroup): boolean {
+  const bedtime = group.rules.filter(isBedtimeRule);
+  return group.users.length > 0 || group.rules.length > bedtime.length || bedtime.length > 1;
+}
+
+// policySummary is the one line a policy card leads with.
+export function policySummary(group: PolicyGroup, categoryName: (id: string) => string): string {
+  const parts: string[] = [];
+  if (group.blocked_categories.length) {
+    const names = group.blocked_categories.map(categoryName);
+    parts.push("Blocks " + (names.length > 3 ? names.slice(0, 3).join(", ") + " and " + (names.length - 3) + " more" : names.join(", ")));
+  }
+  if (group.blocked_domains.length) parts.push(group.blocked_domains.length + " blocked site" + (group.blocked_domains.length === 1 ? "" : "s"));
+  if (group.allowed_domains.length) parts.push(group.allowed_domains.length + " always-allowed site" + (group.allowed_domains.length === 1 ? "" : "s"));
+  if (group.safe_search) parts.push("Safe search");
+  const bedtime = group.rules.find((rule) => rule.enabled && isBedtimeRule(rule));
+  if (bedtime) parts.push("Bedtime " + scheduleLabel(bedtime.schedule));
+  const other = group.rules.filter((rule) => !isBedtimeRule(rule)).length;
+  if (other) parts.push(other + " custom rule" + (other === 1 ? "" : "s"));
+  return parts.length ? parts.join(" · ") : "Blocks nothing of its own";
+}

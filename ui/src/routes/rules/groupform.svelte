@@ -15,7 +15,17 @@
   import { ChevronDown, ChevronUp } from "carbon-icons-svelte";
   import Categoryselect from "./categoryselect.svelte";
   import Domainlist from "./domainlist.svelte";
-  import { DEFAULT_GROUP_ID, SCHEDULE_PRESET_CUSTOM, WEEKDAYS, emptyRule, needsProxy, scheduleLabel } from "./policymodel";
+  import {
+    DEFAULT_GROUP_ID,
+    SCHEDULE_PRESET_CUSTOM,
+    WEEKDAYS,
+    bedtimeRule,
+    emptyRule,
+    hasAdvancedSettings,
+    isBedtimeRule,
+    needsProxy,
+    scheduleLabel,
+  } from "./policymodel";
   import type { CategoryStatus, GroupRule, PolicyGroup, SchedulePreset } from "./policymodel";
 
   // The draft is the page's object, mutated in place: the page reads it back
@@ -34,6 +44,36 @@
   const TIME_PATTERN = "([01][0-9]|2[0-3]):[0-5][0-9]";
 
   $: isDefault = draft.id === DEFAULT_GROUP_ID;
+
+  // The simple editor covers what most households need: categories, sites,
+  // safe search, and bedtime. Everything else lives under Advanced, which
+  // opens on its own when the policy already uses it.
+  const startAdvanced = hasAdvancedSettings(draft);
+  $: bedtimeIndex = draft.rules.findIndex(isBedtimeRule);
+  $: bedtime = bedtimeIndex >= 0 ? draft.rules[bedtimeIndex] : null;
+
+  function setBedtime(on: boolean) {
+    if (on && !bedtime) {
+      const preset = schedulePresets.find((candidate) => candidate.id === "bedtime");
+      draft.rules = [bedtimeRule(timezone, preset), ...draft.rules];
+    } else if (!on && bedtime) {
+      removeRule(bedtimeIndex);
+    }
+  }
+
+  function onBedtimeTime(key: "from" | "to", event: Event) {
+    if (!bedtime?.schedule) return;
+    bedtime.schedule.windows[0][key] = (event.target as HTMLInputElement).value;
+    bedtime.schedule.preset = undefined;
+    touchRules();
+  }
+
+  function onBedtimeDays(selected: (string | number)[]) {
+    if (!bedtime?.schedule) return;
+    bedtime.schedule.weekdays = selected.map(Number).sort((a, b) => a - b);
+    bedtime.schedule.preset = undefined;
+    touchRules();
+  }
 
   // Svelte re-renders an each block when the array it reads is reassigned, and
   // the rule objects keep their identity, so the page still sees every edit.
@@ -155,18 +195,13 @@
   }
 </script>
 
-<Row>
-  <Column sm={4} md={8} lg={8}>
-    <TextInput labelText="Name" bind:value={draft.name} />
-  </Column>
-  <Column sm={4} md={8} lg={8}>
-    <TextArea labelText="Description" rows={1} bind:value={draft.description} />
-  </Column>
-</Row>
+<div class="name-field">
+  <TextInput labelText="Name" placeholder="Kids" bind:value={draft.name} />
+</div>
 
 <fieldset class="field">
   <legend class="field-label">Blocked categories</legend>
-  <p class="field-note">Self-updating domain lists. A category also covers every subdomain of the sites it lists.</p>
+  <p class="field-note">Lists of sites that update themselves.</p>
   <Categoryselect
     {categories}
     selection={draft.blocked_categories}
@@ -195,7 +230,7 @@
         tagType="green"
         on:change={(event) => (draft.allowed_domains = event.detail)}
       />
-      <p class="field-note">Wins over blocked categories, blocked domains, and the gateway blocklist.</p>
+      <p class="field-note">Always reachable, even if a blocked category lists it.</p>
     </fieldset>
   </Column>
 </Row>
@@ -207,6 +242,54 @@
     labelB="Google, Bing, DuckDuckGo, and YouTube restricted mode"
     bind:toggled={draft.safe_search}
   />
+</div>
+
+<fieldset class="field">
+  <legend class="field-label">Bedtime</legend>
+  <Toggle
+    labelText="Bedtime"
+    hideLabel
+    labelA="Off"
+    labelB="No internet during these hours"
+    toggled={!!bedtime}
+    on:toggle={(event) => setBedtime(event.detail.toggled)}
+  />
+  {#if bedtime?.schedule}
+    <div class="window-row bedtime-row">
+      <TimePicker
+        size="sm"
+        labelText="From"
+        placeholder="HH:MM"
+        pattern={TIME_PATTERN}
+        value={bedtime.schedule.windows[0]?.from || ""}
+        on:change={(event) => onBedtimeTime("from", event)}
+      />
+      <TimePicker
+        size="sm"
+        labelText="Until"
+        placeholder="HH:MM"
+        pattern={TIME_PATTERN}
+        value={bedtime.schedule.windows[0]?.to || ""}
+        on:change={(event) => onBedtimeTime("to", event)}
+      />
+      <MultiSelect
+        size="sm"
+        titleText="Nights"
+        label="Every night"
+        items={WEEKDAYS}
+        selectedIds={bedtime.schedule.weekdays.map(String)}
+        on:select={(event) => onBedtimeDays(event.detail.selectedIds)}
+      />
+    </div>
+    <p class="field-note">A night lasts until the next morning, in {bedtime.schedule.timezone || "UTC"}.</p>
+  {/if}
+</fieldset>
+
+<details class="advanced-section" open={startAdvanced}>
+<summary>Advanced: custom rules, proxy users, description</summary>
+
+<div class="field">
+  <TextArea labelText="Description" rows={1} bind:value={draft.description} />
 </div>
 
 {#if !isDefault && users.length}
@@ -225,11 +308,12 @@
 <fieldset class="field">
   <legend class="field-label">Rules</legend>
   <p class="field-note">
-    Rules run before the lists above, top to bottom, and the first match decides. Use them for time limits
-    ("block all traffic at bedtime"), exceptions ("allow YouTube after school"), or blocking part of a site.
+    Rules run top to bottom before the lists above, and the first match decides. Use them for schedules on
+    specific sites ("allow YouTube after school"), per-user exceptions, or blocking part of a site.
   </p>
 
   {#each draft.rules as rule, index (index)}
+    {#if index !== bedtimeIndex}
     <div class="rule">
       <div class="rule-head">
         <h5>Rule {index + 1}</h5>
@@ -416,10 +500,12 @@
         </p>
       {/if}
     </div>
+    {/if}
   {/each}
 
   <Button size="small" kind="tertiary" on:click={addRule}>Add rule</Button>
 </fieldset>
+</details>
 
 <div class="group-actions">
   <Button size="small" disabled={saving} on:click={onSave}>Save policy</Button>
@@ -435,6 +521,25 @@
     font-size: 1rem;
     font-weight: 600;
     line-height: 1.375rem;
+  }
+  .name-field {
+    max-width: 24rem;
+  }
+  .bedtime-row {
+    flex-wrap: wrap;
+    align-items: flex-end;
+    margin-top: 0.75rem;
+    margin-bottom: 0;
+  }
+  .advanced-section {
+    margin-top: 1.5rem;
+    padding-top: 1rem;
+    border-top: 1px solid #e0e0e0;
+  }
+  .advanced-section > summary {
+    color: #0f62fe;
+    cursor: pointer;
+    font-size: 0.875rem;
   }
   .field {
     margin: 1.5rem 0 0;

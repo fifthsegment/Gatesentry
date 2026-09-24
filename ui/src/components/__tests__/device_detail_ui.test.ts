@@ -40,3 +40,10 @@ test("device detail links decision history to the log view", () => {
   expect(source).toContain('"/logs"');
   expect(source).toContain("decision history");
 });
+
+test("device detail saves labels through the modal submit event", () => {
+  // Carbon's ModalFooter primary button calls the ComposedModal submit
+  // context, so the handler must be on the modal, not the footer.
+  expect(source).toContain("on:submit={save}");
+  expect(source).not.toContain("on:click:button--primary");
+});
