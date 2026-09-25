@@ -18,7 +18,7 @@
 
   export let userProfilePanelOpen = false;
 
-  let updatePassword: (() => void) | undefined;
+  let updatePassword: (() => Promise<void>) | undefined;
   let modalOpen = false;
 
   const logout = () => {
