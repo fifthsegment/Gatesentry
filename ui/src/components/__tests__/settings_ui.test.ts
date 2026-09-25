@@ -7,7 +7,8 @@ import settingsSource from "../../routes/settings/settings.svelte?raw";
 
 const settings = settingsSource.replace(/\s+/g, " ");
 
-test("settings uses four route-local Carbon tabs", () => {
+test("settings uses the shared shell and four route-local Carbon tabs", () => {
+  expect(settings).toContain("<PageShell");
   expect(settings).toContain('<Tabs type="container" autoWidth');
   expect(settings).toContain('<Tab label={$_("General")} />');
   expect(settings).toContain('<Tab label={$_("HTTPS inspection")} />');
@@ -52,7 +53,6 @@ test("scoped setting controls expose progress and feedback", () => {
 });
 
 test("settings constrains tab panels and wide content", () => {
-  expect(settings).toContain("overflow-x: clip");
   expect(settings).toContain("max-width: 100%");
   expect(settings).toContain("min-width: 0");
   expect(settings).toContain(".bundle-preview pre");

@@ -16,6 +16,7 @@
 
   import ConnectedCertificateComposed from "../../components/connectedCertificateComposed.svelte";
   import ConnectedGeneralSettingInput from "../../components/connectedGeneralSettingInputs.svelte";
+  import PageShell from "../../components/layout/PageShell.svelte";
   import HttpsToggle from "../../components/httpsToggle.svelte";
   import { store } from "../../store/apistore";
 
@@ -163,22 +164,18 @@
   });
 </script>
 
-<div class="settings-page">
-  <div class="settings-breadcrumb">
-    <Breadcrumb>
+<PageShell
+  title={$_("Settings")}
+  description={$_(
+    "Configure this gateway, HTTPS inspection, network integrations, and support diagnostics.",
+  )}
+>
+  <svelte:fragment slot="breadcrumb">
+    <Breadcrumb noTrailingSlash>
       <BreadcrumbItem href="/">{$_("Dashboard")}</BreadcrumbItem>
       <BreadcrumbItem>{$_("Settings")}</BreadcrumbItem>
     </Breadcrumb>
-  </div>
-
-  <header class="page-heading">
-    <h2>{$_("Settings")}</h2>
-    <p>
-      {$_(
-        "Configure this gateway, HTTPS inspection, network integrations, and support diagnostics.",
-      )}
-    </p>
-  </header>
+  </svelte:fragment>
 
   <Tabs
     type="container"
@@ -517,32 +514,15 @@
       </TabContent>
     </svelte:fragment>
   </Tabs>
-</div>
+</PageShell>
 
 <style>
-  .settings-page {
-    width: 100%;
-    max-width: 76rem;
-    min-width: 0;
-    overflow-x: clip;
-  }
-
-  .settings-breadcrumb {
-    margin-bottom: 0.625rem;
-  }
-
-  .page-heading {
-    margin-bottom: 1.5rem;
-  }
-
-  .page-heading h2,
   .section-heading h3,
   .setting-copy h4,
   .bundle-preview h4 {
     margin: 0;
   }
 
-  .page-heading p,
   .section-heading p,
   .setting-copy p,
   .bundle-preview p {
@@ -713,9 +693,9 @@
     white-space: pre;
   }
 
-  .settings-page :global(.bx--tabs),
-  .settings-page :global(.bx--tabs__nav),
-  .settings-page :global([role="tabpanel"]) {
+  :global(.page-shell__content > .bx--tabs),
+  :global(.page-shell__content > .bx--tabs .bx--tabs__nav),
+  :global(.page-shell__content > .bx--tabs [role="tabpanel"]) {
     max-width: 100%;
     min-width: 0;
   }
