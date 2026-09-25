@@ -178,11 +178,7 @@
       state="empty"
       title={$_("No custom records")}
       message={$_("Add a record when a local domain should resolve to a specific IPv4 address.")}
-    >
-      <Button size="small" icon={AddAlt} on:click={openCreate}>
-        {$_("Add record")}
-      </Button>
-    </ResourceState>
+    />
   {:else}
     <div class="table-region">
       <DataTable sortable size="compact" {headers} rows={data}>

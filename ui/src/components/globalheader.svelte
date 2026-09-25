@@ -1,6 +1,6 @@
 <script lang="ts">
   import { Header, SkipToContent } from "carbon-components-svelte";
-  import { onMount } from "svelte";
+  import { onMount, createEventDispatcher } from "svelte";
   import { store } from "../store/apistore";
   import { routeHref } from "../menu";
   import Headermenu from "./headermenu.svelte";
@@ -10,6 +10,8 @@
   export let userProfilePanelOpen = false;
   export let pathname = "/";
   let version = "";
+
+  const dispatch = createEventDispatcher<{ loggedout: void }>();
 
   onMount(async () => {
     try {
@@ -32,5 +34,8 @@
     <SkipToContent />
   </svelte:fragment>
   <Headermenu {pathname} />
-  <Headerrightnav bind:userProfilePanelOpen />
+  <Headerrightnav
+    bind:userProfilePanelOpen
+    on:loggedout={() => dispatch("loggedout")}
+  />
 </Header>

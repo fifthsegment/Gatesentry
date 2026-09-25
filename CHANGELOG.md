@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## v2.3.1 (25 September 2026)
+
+### Fixes
+
+- Login page shows the Clear and Sign in buttons in one row instead of stacked
+- Logging out now renders the login page immediately instead of a page-not-found state
+- DNS custom records show a single Add record action in the empty state
+- Services page uses the standard page width like other routes
+
 ## v2.3.0 (25 September 2026)
 
 ### Administration UI

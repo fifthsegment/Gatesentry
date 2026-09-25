@@ -90,7 +90,7 @@
       bind:value={password}
       invalidText={invalidMessage}
     />
-    <ButtonSet stacked>
+    <ButtonSet>
       <Button
         size="lg"
         kind="secondary"

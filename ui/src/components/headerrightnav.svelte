@@ -12,11 +12,14 @@
   } from "carbon-components-svelte";
   import { UserAvatarFilledAlt } from "carbon-icons-svelte";
   import { _ } from "svelte-i18n";
+  import { createEventDispatcher } from "svelte";
   import { store } from "../store/apistore";
   import { gsNavigate } from "../lib/navigate";
   import ConnectedGeneralSettingInputs from "./connectedGeneralSettingInputs.svelte";
 
   export let userProfilePanelOpen = false;
+
+  const dispatch = createEventDispatcher<{ loggedout: void }>();
 
   let updatePassword: (() => Promise<void>) | undefined;
   let modalOpen = false;
@@ -26,6 +29,7 @@
     userProfilePanelOpen = false;
     modalOpen = false;
     gsNavigate("/login", { replace: true });
+    dispatch("loggedout");
   };
 
   const savePassword = () => {

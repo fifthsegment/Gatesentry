@@ -34,6 +34,12 @@ test("custom DNS records preserve endpoint payload and stable edit identity", ()
   expect(records).not.toContain('style="float:right;"');
 });
 
+test("custom DNS records expose one add-record action, not a duplicate empty-state button", () => {
+  expect(recordsSource.match(/Add record/g)?.length ?? 0).toBe(1);
+  expect(recordsSource).toContain('slot="actions"');
+  expect(recordsSource).toContain("on:click={openCreate}");
+});
+
 test("DNS block lists edit by row identity and confirm removal", () => {
   const lists = compact(listsSource);
   expect(lists).toContain('getSetting("dns_custom_entries")');
