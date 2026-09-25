@@ -23,7 +23,10 @@
   }
 
   function add() {
-    const values = draft.split(/[\s,]+/).map(clean).filter(Boolean);
+    const values = draft
+      .split(/[\s,]+/)
+      .map(clean)
+      .filter(Boolean);
     const next = [...entries];
     for (const value of values) {
       if (!next.includes(value)) next.push(value);
@@ -52,7 +55,9 @@
 {#if entries.length}
   <div class="tags">
     {#each entries as entry (entry)}
-      <Tag filter size="sm" type={tagType} on:close={() => remove(entry)}>{entry}</Tag>
+      <Tag filter size="sm" type={tagType} on:close={() => remove(entry)}
+        >{entry}</Tag
+      >
     {/each}
   </div>
 {/if}
@@ -77,5 +82,16 @@
   }
   .tags :global(.bx--tag) {
     margin: 0;
+  }
+  @media (max-width: 30rem) {
+    .list-entry {
+      align-items: stretch;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+    .list-entry :global(.bx--btn) {
+      width: 100%;
+      max-width: none;
+    }
   }
 </style>
