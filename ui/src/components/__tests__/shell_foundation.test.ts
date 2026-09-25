@@ -36,6 +36,14 @@ test("unknown routes render an explicit recovery state", () => {
   expect(appSource).toContain("<Route component={NotFound} />");
 });
 
+test("compact navigation is inert while closed and returns focus after routing", () => {
+  expect(appSource).toContain("$: sideNavVisible = !isCompactNavigation || isSideNavOpen");
+  expect(appSource).toContain("inert={!sideNavVisible}");
+  expect(appSource).toContain('aria-hidden={!sideNavVisible}');
+  expect(appSource).toContain('querySelector<HTMLButtonElement>(".bx--header__menu-toggle")');
+  expect(appSource).toContain("onNavigate={closeSideNavigation}");
+});
+
 test("Carbon styles load before application overrides", () => {
   expect(mainSource.indexOf('carbon-components-svelte/css/g10.css')).toBeLessThan(
     mainSource.indexOf('./app.css'),

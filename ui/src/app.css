@@ -287,8 +287,11 @@ textarea {
     padding: 1.5rem;
   }
 
-  .app-frame > .bx--side-nav:not(.bx--side-nav--expanded) {
+  .app-frame > .bx--side-nav.bx--side-nav--rail[aria-hidden="true"],
+  .app-frame > .bx--side-nav.bx--side-nav--rail[aria-hidden="true"]:hover {
     width: 0;
+    visibility: hidden;
+    pointer-events: none;
   }
 }
 

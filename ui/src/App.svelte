@@ -32,10 +32,16 @@
   register("en", () => import("./language/en.json"));
   const localization = init({ initialLocale: "en", fallbackLocale: "en" });
 
+  const navigationBreakpoint = 1056;
+
   let state: AppState = "checking";
   let isSideNavOpen = false;
   let userProfilePanelOpen = false;
   let pathname = "/";
+  let windowWidth = 0;
+
+  $: isCompactNavigation = windowWidth < navigationBreakpoint;
+  $: sideNavVisible = !isCompactNavigation || isSideNavOpen;
 
   const routePath = () => {
     const base = getBasePath();
@@ -49,6 +55,17 @@
   const syncPathname = () => {
     pathname = routePath();
     isSideNavOpen = false;
+  };
+
+  const closeSideNavigation = () => {
+    isSideNavOpen = false;
+    if (isCompactNavigation && typeof window !== "undefined") {
+      window.requestAnimationFrame(() => {
+        document
+          .querySelector<HTMLButtonElement>(".bx--header__menu-toggle")
+          ?.focus();
+      });
+    }
   };
 
   async function checkSession() {
@@ -89,6 +106,8 @@
   Promise.resolve(localization).then(checkSession).catch(() => (state = "error"));
 </script>
 
+<svelte:window bind:innerWidth={windowWidth} />
+
 <Router {url} basepath={getBasePath()}>
   {#if state === "checking"}
     <AuthShell title="GateSentry" description="Checking this installation…">
@@ -113,8 +132,15 @@
   {:else}
     <div class="app-frame">
       <Globalheader bind:isSideNavOpen bind:userProfilePanelOpen {pathname} />
-      <SideNav bind:isOpen={isSideNavOpen} rail ariaLabel="Primary navigation">
-        <Sidenavmenu {pathname} onNavigate={() => (isSideNavOpen = false)} />
+      <SideNav
+        bind:isOpen={isSideNavOpen}
+        rail
+        expansionBreakpoint={navigationBreakpoint}
+        ariaLabel="Primary navigation"
+        aria-hidden={!sideNavVisible}
+        inert={!sideNavVisible}
+      >
+        <Sidenavmenu {pathname} onNavigate={closeSideNavigation} />
       </SideNav>
       <Content id="main-content">
         <Route path="/dns" component={Dns} />

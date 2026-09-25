@@ -200,11 +200,13 @@
   )}
 >
   <svelte:fragment slot="breadcrumb">
-    <Breadcrumb noTrailingSlash>
-      <BreadcrumbItem href="/">{$_("Dashboard")}</BreadcrumbItem>
-      <BreadcrumbItem>{$_("AI image filtering")}</BreadcrumbItem>
-    </Breadcrumb>
-    <Tag type="red" size="sm">Alpha</Tag>
+    <div class="breadcrumb-line">
+      <Breadcrumb noTrailingSlash>
+        <BreadcrumbItem href="/">{$_("Dashboard")}</BreadcrumbItem>
+        <BreadcrumbItem>{$_("AI image filtering")}</BreadcrumbItem>
+      </Breadcrumb>
+      <Tag type="red" size="sm">Alpha</Tag>
+    </div>
   </svelte:fragment>
   <svelte:fragment slot="actions">
     <Button
@@ -400,6 +402,7 @@
 </PageShell>
 
 <style>
+  .breadcrumb-line,
   .section-head,
   .status-line {
     display: flex;
@@ -407,6 +410,12 @@
     justify-content: space-between;
     gap: 1rem;
     flex-wrap: wrap;
+  }
+
+  .breadcrumb-line {
+    align-items: center;
+    justify-content: flex-start;
+    gap: 0.5rem;
   }
 
   .provider-choice > p,
