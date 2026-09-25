@@ -62,6 +62,17 @@ test("login keeps clear and submit actions in one row", () => {
   expect(loginSource).not.toContain("<ButtonSet stacked>");
 });
 
+test("login follows the Carbon auth form composition", () => {
+  expect(loginSource).not.toContain("FluidForm");
+  expect(loginSource).toContain("<Form on:submit={handleLogin}>");
+  expect(loginSource).toContain('size="xl"');
+  expect(loginSource).toContain('autocomplete="username"');
+  expect(loginSource).toContain('autocomplete="current-password"');
+  // The certificate download is a de-emphasized secondary action inside the card.
+  expect(loginSource).toContain('<DownloadCertificateLink kind="ghost" />');
+  expect(loginSource).not.toContain('slot="footer"');
+});
+
 test("logout signals the shell so the login route renders immediately", () => {
   expect(headerSource).toContain('dispatch("loggedout")');
   expect(globalHeaderSource).toContain('on:loggedout={() => dispatch("loggedout")}');

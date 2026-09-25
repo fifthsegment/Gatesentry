@@ -1,20 +1,13 @@
 <script lang="ts">
-  import {
-    Button,
-    ButtonSet,
-    FluidForm,
-    PasswordInput,
-    TextInput,
-  } from "carbon-components-svelte";
-  import { ChevronRight, Close } from "carbon-icons-svelte";
+  import { Button, ButtonSet, Form, PasswordInput, TextInput } from "carbon-components-svelte";
   import { store } from "../../store/apistore";
   import { gsNavigate } from "../../lib/navigate";
   import { notificationstore } from "../../store/notifications";
   import { createNotificationError } from "../../lib/utils";
   import { _ } from "svelte-i18n";
   import { createEventDispatcher } from "svelte";
-  import DownloadCertificateLink from "../../components/downloadCertificateLink.svelte";
   import AuthShell from "../../components/layout/AuthShell.svelte";
+  import DownloadCertificateLink from "../../components/downloadCertificateLink.svelte";
 
   let username = "";
   let password = "";
@@ -71,8 +64,9 @@
   title={$_("Sign in")}
   description={$_("Manage protection, policies, and connected devices.")}
 >
-  <FluidForm on:submit={handleLogin}>
+  <Form on:submit={handleLogin}>
     <TextInput
+      size="xl"
       {invalid}
       autocomplete="username"
       labelText={$_("User name")}
@@ -82,37 +76,40 @@
       invalidText={invalidMessage}
     />
     <PasswordInput
+      size="xl"
       {invalid}
       autocomplete="current-password"
       required
       labelText={$_("Password")}
       placeholder={$_("Enter password")}
+      tooltipAlignment="end"
       bind:value={password}
       invalidText={invalidMessage}
     />
     <ButtonSet>
       <Button
-        size="lg"
         kind="secondary"
-        icon={Close}
         type="button"
         disabled={submitting || (!username && !password)}
         on:click={cancel}
       >
         {$_("Clear")}
       </Button>
-      <Button
-        size="lg"
-        type="submit"
-        icon={ChevronRight}
-        disabled={submitting || !username || !password}
-      >
+      <Button type="submit" disabled={submitting || !username || !password}>
         {submitting ? $_("Signing in…") : $_("Sign in")}
       </Button>
     </ButtonSet>
-  </FluidForm>
+  </Form>
 
-  <svelte:fragment slot="footer">
-    <DownloadCertificateLink />
-  </svelte:fragment>
+  <div class="login-secondary">
+    <DownloadCertificateLink kind="ghost" />
+  </div>
 </AuthShell>
+
+<style>
+  .login-secondary {
+    margin-top: 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid #e0e0e0;
+  }
+</style>

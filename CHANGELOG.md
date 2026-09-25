@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## v2.4.0 (25 September 2026)
+
+### Administration UI
+
+- Redesigned the sign-in page around the Carbon authentication pattern: a light G10 surface with a branded GateSentry header, extra-large labeled inputs, and one Clear / Sign in action row
+- The inspection certificate download is now a de-emphasized ghost action inside the sign-in card instead of a standalone tertiary button, with the same download available in Settings
+- Setup, session-checking, and unavailable screens share the same refreshed authentication layout
+
 ## v2.3.1 (25 September 2026)
 
 ### Fixes
