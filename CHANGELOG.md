@@ -1,5 +1,21 @@
 # CHANGELOG
 
+## v2.3.0 (25 September 2026)
+
+### Administration UI
+
+- Unified every Svelte administration route around shared Carbon page shells, section panels, resource states, authentication layouts, and confirmations
+- Reorganized Settings into focused tabs and rebuilt Policies, Devices, DNS, HTTPS inspection, AI image filtering, Proxy users, Overview, Stats, Logs, and Services with consistent hierarchy and feedback
+- Added explicit loading, empty, error, retry, save, and destructive-action states while removing native confirmations and legacy route-local layout patterns
+- Made dense tables and editors own their overflow, improved tablet and phone layouts, and fixed the compact navigation drawer intercepting pointer or keyboard input after it closes
+- Added a page-not-found recovery state, base-path-aware navigation and certificate downloads, and clearer guidance around HTTPS inspection, external AI processing, proxy users, and device-policy coverage
+
+### Quality
+
+- Expanded focused UI contracts for the application shell, connected settings, setup, policies, devices, DNS/HTTPS inspection, AI, and Proxy users
+- Eliminated the accepted Svelte diagnostic baseline: the UI now checks with zero errors and zero warnings
+- Rebuilt and validated the embedded administration assets
+
 ## v2.2.2 (24 September 2026)
 
 ### Performance
