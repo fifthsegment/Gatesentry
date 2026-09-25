@@ -2,237 +2,273 @@
   import { isIPv4 } from "is-ip";
   import {
     Button,
-    ComposedModal,
     DataTable,
-    ModalBody,
-    ModalFooter,
-    ModalHeader,
+    InlineNotification,
+    OverflowMenu,
+    OverflowMenuItem,
     TextInput,
     Toolbar,
     ToolbarContent,
   } from "carbon-components-svelte";
-  import { store } from "../store/apistore";
+  import { AddAlt } from "carbon-icons-svelte";
+  import { createEventDispatcher, onMount } from "svelte";
   import { _ } from "svelte-i18n";
-  import { AddAlt, Edit, RowDelete, Save } from "carbon-icons-svelte";
-  import { notificationstore } from "../store/notifications";
-  import { createNotificationError } from "../lib/utils";
-  import { createEventDispatcher } from "svelte";
-  const dispatch = createEventDispatcher();
 
-  let data = null;
+  import ConfirmDialog from "./ConfirmDialog.svelte";
+  import Modal from "./modal.svelte";
+  import ResourceState from "./layout/ResourceState.svelte";
+  import SectionPanel from "./layout/SectionPanel.svelte";
+  import { createNotificationError, createNotificationSuccess } from "../lib/utils";
+  import { store } from "../store/apistore";
+  import { notificationstore } from "../store/notifications";
+
+  type DnsRecord = {
+    id: number;
+    domain: string;
+    ip: string;
+  };
+
+  const dispatch = createEventDispatcher();
+  const url = "/dns/custom_entries";
+  const headers = [
+    { key: "domain", value: $_("Domain") },
+    { key: "ip", value: $_("IP address") },
+    { key: "actions", value: $_("Actions") },
+  ];
+
+  let data: DnsRecord[] = [];
+  let loading = true;
+  let saving = false;
+  let loadError = "";
   let domainText = "";
   let ipText = "";
-
-  let editingRowId = null;
+  let editingRowId: number | null = null;
+  let pendingDelete: DnsRecord | null = null;
   let showForm = false;
 
-  const url = "/dns/custom_entries";
-
-  const loadAPIData = () => {
-    data = [];
-    $store.api.doCall(url).then(function (json) {
-      data = json.data.map((item, index) => {
-        return { ...item, id: index + 1 };
-      });
-    });
-  };
-
-  const saveAPIData = () => {
-    const filteredData = data.map((item) => {
-      return { domain: item.domain, ip: item.ip };
-    });
-
-    $store.api
-      .doCall(url, "post", filteredData, { "Content-Type": "application/json" })
-      .then(function (json) {
-        if (json.ok == true) {
-          loadAPIData();
-          domainText = "";
-          ipText = "";
-          showForm = false;
-          dispatch("updatednsinfo");
-          notificationstore.add({
-            kind: "success",
-            title: $_("Success:"),
-            subtitle: $_("Successfully saved data to the api"),
-          });
-        } else if ("error" in json) {
-          notificationstore.add(
-            createNotificationError(
-              { title: $_("Error"), subtitle: json.error },
-              $_,
-            ),
-          );
-          loadAPIData();
-        }
-      })
-      .catch(function (err) {
-        notificationstore.add({
-          kind: "error",
-          title: $_("Error:"),
-          subtitle: $_("Unable to save data to the api : ") + err.message,
-          timeout: 30000,
-        });
-        loadAPIData();
-      });
-  };
-
-  loadAPIData();
-
-  const addSaveRow = () => {
-    // search if the same domain already exists
-    // const existingDomain = data.find((row) => row.domain === domainText);
-    // const existingIp = data.find((row) => row.ip === ipText);
-    // if (existingDomain) {
-    //   notificationstore.add(
-    //     createNotificationError(
-    //       { title: $_("Error"), subtitle: $_("Domain already exists") },
-    //       $_,
-    //     ),
-    //   );
-    //   return;
-    // }
-    // if (existingIp) {
-    //   notificationstore.add(
-    //     createNotificationError(
-    //       { title: $_("Error"), subtitle: $_("IP already exists") },
-    //       $_,
-    //     ),
-    //   );
-    //   return;
-    // }
-    if (editingRowId) {
-      const row = data.find((row) => row.id === editingRowId);
-      data[editingRowId - 1].domain = domainText;
-      data[editingRowId - 1].ip = ipText;
-
-      editingRowId = null;
-    } else {
-      data = [...data, { id: data.length + 1, domain: domainText, ip: ipText }];
+  const loadAPIData = async () => {
+    loading = true;
+    loadError = "";
+    try {
+      const json = await $store.api.doCall(url);
+      const records = Array.isArray(json?.data) ? json.data : [];
+      data = records.map((item, index) => ({
+        id: index + 1,
+        domain: String(item.domain ?? ""),
+        ip: String(item.ip ?? ""),
+      }));
+    } catch (caught) {
+      loadError =
+        caught instanceof Error && caught.message
+          ? caught.message
+          : $_("Custom DNS records could not be loaded.");
+    } finally {
+      loading = false;
     }
-
-    saveAPIData();
   };
 
-  const editRow = (rowId) => {
+  const closeForm = () => {
+    showForm = false;
+    editingRowId = null;
+    domainText = "";
+    ipText = "";
+  };
+
+  const openCreate = () => {
+    closeForm();
+    showForm = true;
+  };
+
+  const editRow = (rowId: number) => {
+    const row = data.find((item) => item.id === rowId);
+    if (!row) return;
     editingRowId = rowId;
-    const row = data.find((row) => row.id === rowId);
     domainText = row.domain;
     ipText = row.ip;
     showForm = true;
-    // saveAPIData();
   };
 
-  const deleteRow = (rowId) => {
-    data = [...data.filter((row) => row.id !== rowId)];
-    saveAPIData();
+  const persist = async (records: DnsRecord[]) => {
+    if (saving) return false;
+    saving = true;
+    try {
+      const payload = records.map(({ domain, ip }) => ({ domain, ip }));
+      const json = await $store.api.doCall(url, "post", payload, {
+        "Content-Type": "application/json",
+      });
+      if (!json?.ok) {
+        throw new Error(json?.error || $_("The DNS records were not accepted."));
+      }
+
+      notificationstore.add(
+        createNotificationSuccess(
+          { title: $_("DNS records updated"), subtitle: $_("Custom A records were saved.") },
+          $_,
+        ),
+      );
+      dispatch("updatednsinfo");
+      await loadAPIData();
+      return true;
+    } catch (caught) {
+      notificationstore.add(
+        createNotificationError(
+          {
+            title: $_("DNS records not saved"),
+            subtitle:
+              caught instanceof Error && caught.message
+                ? caught.message
+                : $_("Custom DNS records could not be saved."),
+          },
+          $_,
+        ),
+      );
+      return false;
+    } finally {
+      saving = false;
+    }
   };
+
+  const saveRow = async () => {
+    const domain = domainText.trim();
+    const ip = ipText.trim();
+    if (!domain || !isIPv4(ip) || saving) return;
+
+    const next = editingRowId == null
+      ? [...data, { id: data.length + 1, domain, ip }]
+      : data.map((row) =>
+          row.id === editingRowId ? { ...row, domain, ip } : row,
+        );
+
+    if (await persist(next)) closeForm();
+  };
+
+  const confirmDelete = async () => {
+    if (!pendingDelete || saving) return;
+    const target = pendingDelete;
+    const saved = await persist(data.filter((row) => row.id !== target.id));
+    if (saved) pendingDelete = null;
+  };
+
+  onMount(loadAPIData);
 </script>
 
-<div>
-  {#if data == null}
-    <p>Loading...</p>
-  {:else}
-    <h5>{$_("Custom A Records")}</h5>
-    <p>
-      {$_("Add all domains that you would like to resolve internally here.")}
-    </p>
-    <br />
-    {#if showForm}
-      <ComposedModal
-        open
-        preventCloseOnClickOutside={true}
-        on:submit={() => {
-          addSaveRow();
-        }}
-        on:close={() => {
-          showForm = false;
-          domainText = "";
-          ipText = "";
-        }}
-      >
-        <ModalHeader title={$_("Add an entry")} />
-        <ModalBody hasForm>
-          <TextInput
-            labelText={$_("Domain")}
-            type="text"
-            bind:value={domainText}
-            placeholder="domain.com"
-            size="sm"
-          />
-          <br />
-          <TextInput
-            type="text"
-            bind:value={ipText}
-            placeholder="1.1.1.1"
-            size="sm"
-            labelText={$_("IP Address")}
-          />
-        </ModalBody>
-        <ModalFooter
-          primaryButtonDisabled={!isIPv4(ipText)}
-          primaryButtonIcon={Save}
-          primaryButtonText={$_("Save")}
-        />
-      </ComposedModal>
-    {/if}
-    <DataTable
-      sortable
-      size="medium"
-      style="width:100%;"
-      headers={[
-        {
-          key: "domain",
-          value: "Domain",
-        },
-        {
-          key: "ip",
-          value: "IP",
-        },
-        {
-          key: "actions",
-          value: "",
-        },
-      ]}
-      rows={data
-        .map((item, index) => {
-          return {
-            ...item,
-            actions: "",
-          };
-        })
-        .sort((a, b) => b.id - a.id)}
-    >
-      <Toolbar size="sm">
-        <ToolbarContent>
-          {#if showForm}{:else}
-            <Button icon={AddAlt} on:click={() => (showForm = true)}>
-              {$_("Insert")}
-            </Button>
-          {/if}
-        </ToolbarContent>
-      </Toolbar>
-      <svelte:fragment slot="cell" let:row let:cell>
-        {#if cell.key === "actions"}
-          <div style="float:right;">
-            <Button
-              icon={editingRowId != null && row.id === editingRowId
-                ? Save
-                : Edit}
-              iconDescription={$_("Edit")}
-              disabled={row.id == editingRowId}
-              on:click={() => editRow(row.id)}
-            />
-            <Button
-              icon={RowDelete}
-              iconDescription={$_("Delete")}
-              on:click={() => deleteRow(row.id)}
-            />
-          </div>
-        {:else}
-          {cell.value}
-        {/if}
-      </svelte:fragment>
-    </DataTable>
+<SectionPanel
+  title={$_("Custom A records")}
+  description={$_("Resolve selected domains to local IPv4 addresses before using the upstream resolver.")}
+>
+  <svelte:fragment slot="actions">
+    <Button size="small" icon={AddAlt} on:click={openCreate}>
+      {$_("Add record")}
+    </Button>
+  </svelte:fragment>
+
+  {#if loadError}
+    <InlineNotification
+      kind="error"
+      title={$_("Custom records unavailable")}
+      subtitle={loadError}
+      on:close={() => (loadError = "")}
+    />
   {/if}
-</div>
+
+  {#if loading && data.length === 0}
+    <ResourceState state="loading" message={$_("Loading custom DNS records…")} />
+  {:else if data.length === 0}
+    <ResourceState
+      state="empty"
+      title={$_("No custom records")}
+      message={$_("Add a record when a local domain should resolve to a specific IPv4 address.")}
+    >
+      <Button size="small" icon={AddAlt} on:click={openCreate}>
+        {$_("Add record")}
+      </Button>
+    </ResourceState>
+  {:else}
+    <div class="table-region">
+      <DataTable sortable size="compact" {headers} rows={data}>
+        <Toolbar size="sm">
+          <ToolbarContent />
+        </Toolbar>
+        <svelte:fragment slot="cell" let:row let:cell>
+          {#if cell.key === "actions"}
+            <OverflowMenu flipped iconDescription={$_("Record actions")}>
+              <OverflowMenuItem text={$_("Edit")} on:click={() => editRow(row.id)} />
+              <OverflowMenuItem
+                danger
+                text={$_("Delete")}
+                on:click={() => (pendingDelete = data.find((item) => item.id === row.id) ?? null)}
+              />
+            </OverflowMenu>
+          {:else}
+            {cell.value}
+          {/if}
+        </svelte:fragment>
+      </DataTable>
+    </div>
+  {/if}
+</SectionPanel>
+
+<Modal
+  bind:open={showForm}
+  title={editingRowId == null ? $_("Add custom record") : $_("Edit custom record")}
+  label={$_("DNS")}
+  primaryButtonText={saving ? $_("Saving…") : $_("Save record")}
+  secondaryButtonText={$_("Cancel")}
+  primaryButtonDisabled={!domainText.trim() || !isIPv4(ipText.trim()) || saving}
+  hasForm
+  shouldSubmitOnEnter
+  preventCloseOnClickOutside={saving}
+  on:submit={saveRow}
+  on:close={closeForm}
+>
+  <div class="record-form">
+    <TextInput
+      labelText={$_("Domain")}
+      type="text"
+      bind:value={domainText}
+      placeholder="printer.home"
+      disabled={saving}
+    />
+    <TextInput
+      labelText={$_("IPv4 address")}
+      helperText={ipText && !isIPv4(ipText.trim()) ? $_("Enter a valid IPv4 address.") : ""}
+      invalid={Boolean(ipText) && !isIPv4(ipText.trim())}
+      invalidText={$_("Enter a valid IPv4 address.")}
+      type="text"
+      bind:value={ipText}
+      placeholder="192.168.1.20"
+      disabled={saving}
+    />
+  </div>
+</Modal>
+
+<ConfirmDialog
+  open={pendingDelete != null}
+  title={$_("Delete custom DNS record?")}
+  label={$_("DNS")}
+  confirmText={$_("Delete record")}
+  cancelText={$_("Cancel")}
+  danger
+  busy={saving}
+  on:submit={confirmDelete}
+  on:close={() => (pendingDelete = null)}
+>
+  <p>
+    {$_("GateSentry will stop resolving")}
+    <strong>{pendingDelete?.domain ?? ""}</strong>
+    {$_("to the configured local address.")}
+  </p>
+</ConfirmDialog>
+
+<style>
+  .table-region {
+    min-width: 0;
+    max-width: 100%;
+    overflow-x: auto;
+  }
+
+  .record-form {
+    display: grid;
+    gap: 1rem;
+  }
+</style>
