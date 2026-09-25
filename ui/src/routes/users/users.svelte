@@ -15,6 +15,7 @@
   import { _ } from "svelte-i18n";
 
   import ConnectedSettingInput from "../../components/connectedSettingInput.svelte";
+  import PageShell from "../../components/layout/PageShell.svelte";
   import Modal from "../../components/modal.svelte";
   import { bytesToSize } from "../../lib/utils";
   import { store } from "../../store/apistore";
@@ -147,24 +148,23 @@
   onMount(loadUsers);
 </script>
 
-<div class="page">
-  <header class="page-head">
-    <div>
-      <Breadcrumb>
-        <BreadcrumbItem href="/">{$_("Dashboard")}</BreadcrumbItem>
-        <BreadcrumbItem>{$_("Proxy users")}</BreadcrumbItem>
-      </Breadcrumb>
-      <h2>{$_("Proxy users")}</h2>
-      <p class="lede">
-        {$_(
-          "Proxy users are sign-in credentials for devices and browsers that connect through the GateSentry proxy. They are separate from administrator accounts used to manage this dashboard.",
-        )}
-      </p>
-    </div>
+<PageShell
+  title={$_("Proxy users")}
+  description={$_(
+    "Proxy users are sign-in credentials for devices and browsers that connect through the GateSentry proxy. They are separate from administrator accounts used to manage this dashboard.",
+  )}
+>
+  <svelte:fragment slot="breadcrumb">
+    <Breadcrumb noTrailingSlash>
+      <BreadcrumbItem href="/">{$_("Dashboard")}</BreadcrumbItem>
+      <BreadcrumbItem>{$_("Proxy users")}</BreadcrumbItem>
+    </Breadcrumb>
+  </svelte:fragment>
+  <svelte:fragment slot="actions">
     <Button size="small" icon={AddAlt} on:click={addUser}>
       {$_("Add proxy user")}
     </Button>
-  </header>
+  </svelte:fragment>
 
   {#if error}
     <InlineNotification
@@ -270,7 +270,7 @@
       </DataTable>
     {/if}
   </section>
-</div>
+</PageShell>
 
 <Modal
   bind:open={showForm}
@@ -320,14 +320,6 @@
 </Modal>
 
 <style>
-  .page {
-    display: flex;
-    flex-direction: column;
-    gap: 1.5rem;
-    max-width: 80rem;
-  }
-
-  .page-head,
   .section-head {
     display: flex;
     justify-content: space-between;
@@ -336,11 +328,6 @@
     flex-wrap: wrap;
   }
 
-  .page-head h2 {
-    margin-top: 0.75rem;
-  }
-
-  .lede,
   .section-head p,
   .enforcement p,
   .empty-state p {

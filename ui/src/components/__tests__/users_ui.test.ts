@@ -5,6 +5,7 @@ import form from "../../routes/users/usermodal.svelte?raw";
 describe("Proxy users Carbon workflow", () => {
   test("explains proxy users and exposes enforcement and list states", () => {
     expect(page).toContain("Proxy users");
+    expect(page).toContain("<PageShell");
     expect(page).toContain("separate from administrator accounts");
     expect(page).toContain('keyName="EnableUsers"');
     expect(page).toContain("Loading proxy users…");

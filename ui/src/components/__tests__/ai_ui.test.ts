@@ -17,6 +17,7 @@ test("AI page exposes provider radio, selected configuration, and Alpha badge", 
   expect(source).toMatch("Reachable");
   expect(source).toMatch("Alpha");
   expect(source).toMatch("AI image filtering");
+  expect(source).toContain("<PageShell");
   expect(source).toMatch("Selected provider status");
   expect(source).toMatch("Legacy local scanner");
   expect(source).toMatch("Advanced");

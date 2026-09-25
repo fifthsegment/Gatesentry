@@ -14,6 +14,7 @@
   import { _ } from "svelte-i18n";
 
   import ConnectedSettingInput from "../../components/connectedSettingInput.svelte";
+  import PageShell from "../../components/layout/PageShell.svelte";
   import { store } from "../../store/apistore";
 
   type Probe = { state: string; detail?: string };
@@ -192,23 +193,20 @@
   onMount(refreshStatus);
 </script>
 
-<div class="page">
-  <header class="page-head">
-    <div>
-      <Breadcrumb>
-        <BreadcrumbItem href="/">{$_("Dashboard")}</BreadcrumbItem>
-        <BreadcrumbItem>{$_("AI image filtering")}</BreadcrumbItem>
-      </Breadcrumb>
-      <div class="title-line">
-        <h2>{$_("AI image filtering")}</h2>
-        <Tag type="red" size="sm">Alpha</Tag>
-      </div>
-      <p class="lede">
-        {$_(
-          "Optionally classify image content seen through HTTPS inspection. External AI processing is disabled by default; images are sent only to the provider you select.",
-        )}
-      </p>
-    </div>
+<PageShell
+  title={$_("AI image filtering")}
+  description={$_(
+    "Optionally classify image content seen through HTTPS inspection. External AI processing is disabled by default; images are sent only to the provider you select.",
+  )}
+>
+  <svelte:fragment slot="breadcrumb">
+    <Breadcrumb noTrailingSlash>
+      <BreadcrumbItem href="/">{$_("Dashboard")}</BreadcrumbItem>
+      <BreadcrumbItem>{$_("AI image filtering")}</BreadcrumbItem>
+    </Breadcrumb>
+    <Tag type="red" size="sm">Alpha</Tag>
+  </svelte:fragment>
+  <svelte:fragment slot="actions">
     <Button
       kind="ghost"
       size="small"
@@ -218,7 +216,7 @@
     >
       {probing ? $_("Checking…") : $_("Refresh status")}
     </Button>
-  </header>
+  </svelte:fragment>
 
   {#if statusError}
     <InlineNotification
@@ -399,18 +397,9 @@
       </AccordionItem>
     </Accordion>
   </section>
-</div>
+</PageShell>
 
 <style>
-  .page {
-    display: flex;
-    flex-direction: column;
-    gap: 1.5rem;
-    max-width: 80rem;
-  }
-
-  .page-head,
-  .title-line,
   .section-head,
   .status-line {
     display: flex;
@@ -420,13 +409,6 @@
     flex-wrap: wrap;
   }
 
-  .title-line {
-    justify-content: flex-start;
-    align-items: center;
-    margin-top: 0.75rem;
-  }
-
-  .lede,
   .provider-choice > p,
   .section-head p,
   .disabled-state p,
