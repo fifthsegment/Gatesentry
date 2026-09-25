@@ -31,6 +31,11 @@ test("navigation is typed, base-path aware, active, and includes exclude URLs", 
   expect(menuSource).toContain("isRouteActive");
 });
 
+test("unknown routes render an explicit recovery state", () => {
+  expect(appSource).toContain('import NotFound from "./routes/notfound/notfound.svelte"');
+  expect(appSource).toContain("<Route component={NotFound} />");
+});
+
 test("Carbon styles load before application overrides", () => {
   expect(mainSource.indexOf('carbon-components-svelte/css/g10.css')).toBeLessThan(
     mainSource.indexOf('./app.css'),

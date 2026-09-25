@@ -23,6 +23,7 @@
   import Users from "./routes/users/users.svelte";
   import Rules from "./routes/rules/rules.svelte";
   import Devices from "./routes/devices/devices.svelte";
+  import NotFound from "./routes/notfound/notfound.svelte";
 
   export let url = "";
 
@@ -130,6 +131,7 @@
         <Route path="/ai" component={AI} />
         <Route path="/users" component={Users} />
         <Route path="/" component={Home} />
+        <Route component={NotFound} />
       </Content>
       <Notifications />
     </div>
