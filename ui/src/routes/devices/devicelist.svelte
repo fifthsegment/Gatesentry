@@ -2,7 +2,6 @@
   import {
     Button,
     DataTable,
-    InlineLoading,
     InlineNotification,
     OverflowMenu,
     OverflowMenuItem,
@@ -13,6 +12,9 @@
   } from "carbon-components-svelte";
   import { Renew } from "carbon-icons-svelte";
   import { onMount, onDestroy } from "svelte";
+  import ConfirmDialog from "../../components/ConfirmDialog.svelte";
+  import ResourceState from "../../components/layout/ResourceState.svelte";
+  import SectionPanel from "../../components/layout/SectionPanel.svelte";
   import { getBasePath } from "../../lib/navigate";
   import DeviceDetail from "./devicedetail.svelte";
 
@@ -49,24 +51,32 @@
     tailscale_nodes: TailscaleNode[];
   }
 
-  let devices: Device[] = [];
+  type DeviceRow = Device & {
+    status: string;
+    tailscale_display: string;
+    address_display: string;
+    last_seen_display: string;
+    [key: string]: unknown;
+  };
+
+  let devices: DeviceRow[] = [];
   let loading = false;
+  let loaded = false;
   let error = "";
   let success = "";
-  let selectedDevice: Device | null = null;
+  let selectedDevice: DeviceRow | null = null;
   let detailOpen = false;
+  let pendingRemoval: DeviceRow | null = null;
+  let removing = false;
   let refreshInterval: ReturnType<typeof setInterval>;
+  let noticeTimer: ReturnType<typeof setTimeout> | null = null;
 
   const headers = [
     { key: "status", value: "Status" },
-    { key: "display_name", value: "Name" },
-    { key: "dns_name", value: "DNS Name" },
+    { key: "display_name", value: "Device" },
+    { key: "address_display", value: "Address" },
     { key: "tailscale_display", value: "Tailscale" },
-    { key: "ipv4", value: "IPv4" },
-    { key: "ipv6", value: "IPv6" },
-    { key: "macs_display", value: "MAC" },
-    { key: "source", value: "Via" },
-    { key: "last_seen_display", value: "Last Seen" },
+    { key: "last_seen_display", value: "Last seen" },
     { key: "actions", value: "" },
   ];
 
@@ -74,14 +84,18 @@
     return localStorage.getItem("jwt") || "";
   }
 
+  function showSuccess(message: string) {
+    success = message;
+    if (noticeTimer) clearTimeout(noticeTimer);
+    noticeTimer = setTimeout(() => (success = ""), 3000);
+  }
+
   async function loadDevices() {
     loading = true;
     error = "";
     try {
       const token = getToken();
-      if (!token) {
-        throw new Error("Please login first to view devices");
-      }
+      if (!token) throw new Error("Please login first to view devices");
       const response = await fetch(API_BASE, {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -89,7 +103,6 @@
         throw new Error("Authentication failed. Please login again");
       }
       if (response.status === 503) {
-        // DNS server not started yet — not an error, just empty
         devices = [];
         return;
       }
@@ -102,19 +115,21 @@
       const data = await response.json();
       devices = (data.devices || []).map(formatDevice);
     } catch (err) {
-      error = err.message;
+      error =
+        err instanceof Error ? err.message : "Devices could not be loaded";
     } finally {
       loading = false;
+      loaded = true;
     }
   }
 
-  function formatDevice(d: Device): Device & Record<string, any> {
+  function formatDevice(d: Device): DeviceRow {
     return {
       ...d,
       id: d.id,
       status: d.online ? "online" : "offline",
       display_name: d.manual_name || d.display_name || d.dns_name || "Unknown",
-      macs_display: d.macs?.length ? d.macs[0] : "—",
+      address_display: d.ipv4 || d.ipv6 || "—",
       tailscale_display: d.tailscale_nodes?.length
         ? d.tailscale_nodes.map((node) => node.name || node.dns_name).join(", ")
         : "—",
@@ -125,74 +140,79 @@
   function formatTimeAgo(isoDate: string): string {
     if (!isoDate) return "Never";
     const date = new Date(isoDate);
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    const diffSec = Math.floor(diffMs / 1000);
+    const diffSec = Math.floor((Date.now() - date.getTime()) / 1000);
     if (diffSec < 60) return "Just now";
     const diffMin = Math.floor(diffSec / 60);
     if (diffMin < 60) return `${diffMin}m ago`;
     const diffHr = Math.floor(diffMin / 60);
     if (diffHr < 24) return `${diffHr}h ago`;
-    const diffDay = Math.floor(diffHr / 24);
-    return `${diffDay}d ago`;
+    return `${Math.floor(diffHr / 24)}d ago`;
   }
 
-  function openDetail(device: Device) {
+  function openDetail(device: DeviceRow) {
     selectedDevice = device;
     detailOpen = true;
   }
 
-  function openDetailRow(row: any) {
-    openDetail(row as Device);
+  function openDetailRow(row: unknown) {
+    openDetail(row as DeviceRow);
+  }
+
+  function closeDetail() {
+    detailOpen = false;
+    selectedDevice = null;
   }
 
   async function handleNameSaved() {
-    detailOpen = false;
-    selectedDevice = null;
-    success = "Device updated successfully";
-    setTimeout(() => (success = ""), 3000);
+    closeDetail();
+    showSuccess("Device updated successfully");
     await loadDevices();
   }
 
-  function removeDeviceRow(row: any) {
-    return removeDevice(row as Device);
+  function requestRemoval(row: unknown) {
+    pendingRemoval = row as DeviceRow;
   }
 
-  async function removeDevice(device: Device) {
-    if (!confirm(`Remove "${device.display_name}" from the inventory?`)) return;
+  async function confirmRemoval() {
+    if (!pendingRemoval || removing) return;
+    const device = pendingRemoval;
+    removing = true;
+    error = "";
     try {
-      const token = getToken();
       const response = await fetch(`${API_BASE}/${device.id}`, {
         method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
+        headers: { Authorization: `Bearer ${getToken()}` },
       });
       if (!response.ok) {
         const errorText = await response.text();
         throw new Error(`Failed to remove device: ${errorText}`);
       }
-      success = `"${device.display_name}" removed`;
-      setTimeout(() => (success = ""), 3000);
+      pendingRemoval = null;
+      showSuccess(`"${device.display_name}" removed`);
       await loadDevices();
     } catch (err) {
-      error = err.message;
+      error =
+        err instanceof Error ? err.message : "Device could not be removed";
+    } finally {
+      removing = false;
     }
   }
 
   onMount(() => {
     loadDevices();
-    // Auto-refresh every 30 seconds
     refreshInterval = setInterval(loadDevices, 30000);
   });
 
   onDestroy(() => {
     if (refreshInterval) clearInterval(refreshInterval);
+    if (noticeTimer) clearTimeout(noticeTimer);
   });
 </script>
 
-{#if error}
+{#if error && devices.length > 0}
   <InlineNotification
     kind="error"
-    title="Error"
+    title="Device action failed"
     subtitle={error}
     on:close={() => (error = "")}
   />
@@ -201,151 +221,190 @@
 {#if success}
   <InlineNotification
     kind="success"
-    title="Success"
+    title="Device inventory updated"
     subtitle={success}
     on:close={() => (success = "")}
   />
 {/if}
 
-{#if loading && devices.length === 0}
-  <InlineLoading description="Loading devices..." />
-{:else}
-  <DataTable
-    sortable
-    title="Device Inventory"
-    description="Devices discovered on your network, including explicitly linked Tailscale peers."
-    {headers}
-    rows={devices}
-  >
-    <Toolbar>
-      <ToolbarContent>
-        <ToolbarSearch
-          persistent
-          shouldFilterRows
-          placeholder="Search devices..."
-        />
-        <Button
-          kind="ghost"
-          icon={Renew}
-          iconDescription="Refresh"
-          on:click={loadDevices}
-        />
-      </ToolbarContent>
-    </Toolbar>
-    <svelte:fragment slot="cell" let:row let:cell>
-      {#if cell.key === "status"}
-        <span
-          class="status-dot {row.online ? 'online' : 'offline'}"
-          title={row.online ? "Online" : "Offline"}
-        ></span>
-      {:else if cell.key === "display_name"}
-        <button class="device-name-link" on:click={() => openDetailRow(row)}>
-          {cell.value}
-        </button>
-        {#if !row.manual_name && row.source !== "manual"}
-          <Tag size="sm" type="cyan">auto</Tag>
-        {/if}
-      {:else if cell.key === "tailscale_display"}
-        {#if row.tailscale_nodes?.length}
-          <div class="tailscale-links">
-            {#each row.tailscale_nodes as node}
-              <Tag size="sm" type={node.online ? "green" : "warm-gray"}>
-                {node.name || node.dns_name || node.node_id}
-              </Tag>
-            {/each}
-          </div>
-        {:else}
-          —
-        {/if}
-      {:else if cell.key === "source"}
-        <Tag
-          size="sm"
-          type={cell.value === "ddns"
-            ? "green"
-            : cell.value === "mdns"
-            ? "blue"
-            : cell.value === "passive"
-            ? "warm-gray"
-            : cell.value === "manual"
-            ? "purple"
-            : "gray"}>{cell.value}</Tag
-        >
-      {:else if cell.key === "actions"}
-        <OverflowMenu flipped>
-          <OverflowMenuItem
-            text="Edit / Name"
-            on:click={() => openDetailRow(row)}
-          />
-          <OverflowMenuItem
-            text="Manage Tailscale links"
-            on:click={() => openDetailRow(row)}
-          />
-          <OverflowMenuItem
-            danger
-            text="Remove"
-            on:click={() => removeDeviceRow(row)}
-          />
-        </OverflowMenu>
-      {:else}
-        {cell.value || "—"}
-      {/if}
-    </svelte:fragment>
-  </DataTable>
+<SectionPanel
+  title="Device inventory"
+  description="Devices discovered on your network, including peers you explicitly linked from Tailscale."
+>
+  <svelte:fragment slot="actions">
+    <Button
+      kind="ghost"
+      size="small"
+      icon={Renew}
+      disabled={loading}
+      on:click={loadDevices}
+    >
+      {loading ? "Refreshing…" : "Refresh"}
+    </Button>
+  </svelte:fragment>
 
-  <div class="device-summary">
-    {devices.length} device{devices.length !== 1 ? "s" : ""} discovered · {devices.filter(
-      (d) => d.online,
-    ).length} online
-  </div>
-{/if}
+  {#if loading && !loaded}
+    <ResourceState state="loading" message="Loading network devices…" />
+  {:else if error && devices.length === 0}
+    <ResourceState
+      state="error"
+      title="Unable to load network devices"
+      message={error}
+      retryLabel="Retry"
+      onRetry={loadDevices}
+    />
+  {:else if devices.length === 0}
+    <ResourceState
+      state="empty"
+      title="No devices discovered yet"
+      message="GateSentry will list devices after it observes DNS or proxy traffic."
+    />
+  {:else}
+    <div class="inventory-table" aria-label="Discovered device inventory">
+      <DataTable sortable size="compact" {headers} rows={devices}>
+        <Toolbar>
+          <ToolbarContent>
+            <ToolbarSearch
+              persistent
+              shouldFilterRows
+              placeholder="Search devices…"
+            />
+          </ToolbarContent>
+        </Toolbar>
+        <svelte:fragment slot="cell" let:row let:cell>
+          {#if cell.key === "status"}
+            <Tag size="sm" type={row.online ? "green" : "warm-gray"}>
+              {row.online ? "Online" : "Offline"}
+            </Tag>
+          {:else if cell.key === "display_name"}
+            <button
+              class="device-name-link"
+              on:click={() => openDetailRow(row)}
+            >
+              {cell.value}
+            </button>
+            {#if !row.manual_name && row.source !== "manual"}
+              <Tag size="sm" type="cyan">Automatic</Tag>
+            {/if}
+            {#if row.owner || row.category}
+              <span class="device-meta">
+                {[row.owner, row.category].filter(Boolean).join(" · ")}
+              </span>
+            {/if}
+          {:else if cell.key === "tailscale_display"}
+            {#if row.tailscale_nodes?.length}
+              <div class="tailscale-links">
+                {#each row.tailscale_nodes as node}
+                  <Tag size="sm" type={node.online ? "green" : "warm-gray"}>
+                    {node.name || node.dns_name || node.node_id}
+                  </Tag>
+                {/each}
+              </div>
+            {:else}
+              —
+            {/if}
+          {:else if cell.key === "actions"}
+            <OverflowMenu flipped aria-label="Device actions">
+              <OverflowMenuItem
+                text="View details"
+                on:click={() => openDetailRow(row)}
+              />
+              <OverflowMenuItem
+                text="Manage Tailscale links"
+                on:click={() => openDetailRow(row)}
+              />
+              <OverflowMenuItem
+                danger
+                text="Remove"
+                on:click={() => requestRemoval(row)}
+              />
+            </OverflowMenu>
+          {:else}
+            {cell.value || "—"}
+          {/if}
+        </svelte:fragment>
+      </DataTable>
+    </div>
+
+    <p class="device-summary" aria-live="polite">
+      {devices.length} device{devices.length !== 1 ? "s" : ""} discovered · {devices.filter(
+        (device) => device.online,
+      ).length} online
+    </p>
+  {/if}
+</SectionPanel>
 
 {#if detailOpen && selectedDevice}
   <DeviceDetail
     device={selectedDevice}
     open={detailOpen}
-    on:close={() => {
-      detailOpen = false;
-      selectedDevice = null;
-    }}
+    on:close={closeDetail}
     on:saved={handleNameSaved}
     on:tailscaleChanged={loadDevices}
   />
 {/if}
 
+<ConfirmDialog
+  open={Boolean(pendingRemoval)}
+  title="Remove device?"
+  label="Confirm inventory change"
+  confirmText="Remove device"
+  danger
+  busy={removing}
+  on:close={() => {
+    if (!removing) pendingRemoval = null;
+  }}
+  on:submit={confirmRemoval}
+>
+  <p>
+    Remove <strong>{pendingRemoval?.display_name || "this device"}</strong> from
+    the inventory? GateSentry may discover it again when it next sends traffic.
+  </p>
+</ConfirmDialog>
+
 <style>
-  .status-dot {
-    display: inline-block;
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    vertical-align: middle;
+  .inventory-table {
+    max-width: 100%;
+    min-width: 0;
+    overflow-x: auto;
   }
-  .status-dot.online {
-    background-color: #24a148; /* Carbon green-60 */
+
+  .inventory-table :global(.bx--data-table-container) {
+    min-width: 42rem;
   }
-  .status-dot.offline {
-    background-color: #8d8d8d; /* Carbon gray-50 */
-  }
+
   .device-name-link {
-    background: none;
-    border: none;
-    color: #0f62fe; /* Carbon blue-60 */
-    cursor: pointer;
+    margin-right: 0.5rem;
     padding: 0;
+    border: 0;
+    background: none;
+    color: var(--cds-link-primary, #0f62fe);
+    cursor: pointer;
     font: inherit;
+    text-align: left;
     text-decoration: underline;
   }
+
   .device-name-link:hover {
-    color: #0043ce; /* Carbon blue-70 */
+    color: var(--cds-link-primary-hover, #0043ce);
   }
+
+  .device-meta {
+    display: block;
+    margin-top: 0.25rem;
+    color: var(--cds-text-secondary, #525252);
+    font-size: 0.75rem;
+  }
+
   .tailscale-links {
     display: flex;
     flex-wrap: wrap;
     gap: 0.25rem;
   }
+
   .device-summary {
-    margin-top: 1rem;
+    margin: 1rem 0 0;
+    color: var(--cds-text-secondary, #525252);
     font-size: 0.875rem;
-    color: #525252; /* Carbon gray-70 */
   }
 </style>

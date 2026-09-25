@@ -1,29 +1,36 @@
 <script lang="ts">
   import { Header, SkipToContent } from "carbon-components-svelte";
-  import Headermenu from "./headermenu.svelte";
-  import Headerrightnav from "./headerrightnav.svelte";
   import { onMount } from "svelte";
   import { store } from "../store/apistore";
+  import { routeHref } from "../menu";
+  import Headermenu from "./headermenu.svelte";
+  import Headerrightnav from "./headerrightnav.svelte";
+
   export let isSideNavOpen = false;
   export let userProfilePanelOpen = false;
+  export let pathname = "/";
   let version = "";
 
   onMount(async () => {
-    const data = await $store.api.doCall("/about");
-    version = data.version;
+    try {
+      const data = await $store.api.doCall("/about");
+      version = data?.version || "";
+    } catch {
+      version = "";
+    }
   });
 </script>
 
 <Header
-  company="Gatesentry"
+  company="GateSentry"
   platformName={version}
+  href={routeHref("/")}
   bind:isSideNavOpen
-  persistentHamburgerMenu={true}
+  persistentHamburgerMenu
 >
   <svelte:fragment slot="skip-to-content">
     <SkipToContent />
   </svelte:fragment>
-  <Headermenu />
-
-  <Headerrightnav {userProfilePanelOpen} />
+  <Headermenu {pathname} />
+  <Headerrightnav bind:userProfilePanelOpen />
 </Header>

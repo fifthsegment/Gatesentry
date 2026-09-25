@@ -6,6 +6,7 @@ import appSource from "../../App.svelte?raw";
 import generalSettingsSource from "../connectedGeneralSettingInputs.svelte?raw";
 import headerSource from "../headerrightnav.svelte?raw";
 import settingsSource from "../../routes/settings/settings.svelte?raw";
+import certificateLinkSource from "../downloadCertificateLink.svelte?raw";
 
 test("setup page contains one-time credential form", () => {
   const { js } = compile(setupSource, { generate: "dom" });
@@ -26,14 +27,24 @@ test("login never persists administrator password", () => {
   expect(loginSource).not.toContain(`localStorage.getItem("password"`);
   expect(loginSource).toContain(`localStorage.removeItem("password")`);
   expect(loginSource).toContain(`localStorage.removeItem("rememberMe")`);
-  expect(loginSource).toContain("/api/setup/status");
-  expect(appSource).toContain('gsNavigate("/setup")');
-  expect(appSource).toContain("!setupStatusFailed");
+  expect(loginSource).not.toContain("/api/setup/status");
+  expect(appSource).toContain('fetch(getBasePath() + "/api/setup/status")');
+  expect(appSource).toContain('gsNavigate("/setup", { replace: true })');
+  expect(appSource).toContain('state = "error"');
   expect(appSource).toContain("Retry status check");
   expect(generalSettingsSource).toContain(
     'keyName === "admin_password" || keyName === "admin_username"',
   );
   expect(generalSettingsSource).toContain('gsNavigate("/login")');
+});
+
+test("certificate download stays on the configured GateSentry base path", () => {
+  expect(certificateLinkSource).toContain(
+    'getBasePath() + "/api/files/certificate"',
+  );
+  expect(certificateLinkSource).toContain("<Button");
+  expect(certificateLinkSource).toContain("download");
+  expect(certificateLinkSource).not.toContain('target="_blank"');
 });
 
 test("authenticated administrator identity is displayed from the verified session", () => {

@@ -1,22 +1,19 @@
 <script lang="ts">
-  import {
-    Breadcrumb,
-    BreadcrumbItem,
-    Column,
-    Row,
-  } from "carbon-components-svelte";
+  import { Breadcrumb, BreadcrumbItem } from "carbon-components-svelte";
+  import PageShell from "../../components/layout/PageShell.svelte";
   import DeviceList from "./devicelist.svelte";
 </script>
 
-<Breadcrumb style="margin-bottom: 10px;">
-  <BreadcrumbItem href="/">Dashboard</BreadcrumbItem>
-  <BreadcrumbItem>Devices</BreadcrumbItem>
-</Breadcrumb>
-<h2>Network Devices</h2>
-<br />
+<PageShell
+  title="Network devices"
+  description="Review devices GateSentry has observed, assign protection, and manage explicit identity links."
+>
+  <svelte:fragment slot="breadcrumb">
+    <Breadcrumb noTrailingSlash>
+      <BreadcrumbItem href="/">Dashboard</BreadcrumbItem>
+      <BreadcrumbItem>Devices</BreadcrumbItem>
+    </Breadcrumb>
+  </svelte:fragment>
 
-<Row>
-  <Column>
-    <DeviceList />
-  </Column>
-</Row>
+  <DeviceList />
+</PageShell>

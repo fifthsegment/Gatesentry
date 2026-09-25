@@ -1,121 +1,206 @@
 <script lang="ts">
-  export let type;
-  import { _ } from "svelte-i18n";
-
-  import Filtereditor from "../../components/filtereditor.svelte";
   import {
     Breadcrumb,
     BreadcrumbItem,
-    Column,
-    Row,
-    Grid,
+    Button,
+    InlineLoading,
+    InlineNotification,
   } from "carbon-components-svelte";
-  import ConnectedSettingInput from "../../components/connectedSettingInput.svelte";
-  import { InlineNotification } from "carbon-components-svelte";
   import { onMount } from "svelte";
+  import { _ } from "svelte-i18n";
+
+  import ConnectedSettingInput from "../../components/connectedSettingInput.svelte";
+  import Filtereditor from "../../components/filtereditor.svelte";
+  import PageShell from "../../components/layout/PageShell.svelte";
+  import SectionPanel from "../../components/layout/SectionPanel.svelte";
+  import { gsNavigate } from "../../lib/navigate";
   import { store } from "../../store/apistore";
 
-  // These lists act on decrypted HTTPS traffic, so say plainly when
-  // inspection is off rather than let them look like they are working.
+  type InspectionType =
+    | "blockedfiletypes"
+    | "blockedkeywords"
+    | "excludeurls"
+    | "excludehosts";
+
+  type RouteConfiguration = {
+    path: string;
+    label: string;
+    title: string;
+    description: string;
+    sectionTitle: string;
+    sectionDescription: string;
+    filterId: string;
+    showColumns?: string[];
+    warnsWhenDisabled: boolean;
+  };
+
+  export let type: InspectionType;
+
+  const routes: Record<InspectionType, RouteConfiguration> = {
+    blockedkeywords: {
+      path: "/blockedkeywords",
+      label: $_("Blocked keywords"),
+      title: $_("Blocked keywords"),
+      description: $_("Score words found in inspected HTTP and HTTPS response content."),
+      sectionTitle: $_("Keyword scores"),
+      sectionDescription: $_(
+        "GateSentry totals matching scores and blocks the response when the filtering strictness threshold is reached.",
+      ),
+      filterId: "bVxTPTOXiqGRbhF",
+      warnsWhenDisabled: true,
+    },
+    blockedfiletypes: {
+      path: "/blockedfiletypes",
+      label: $_("Blocked content types"),
+      title: $_("Blocked content types"),
+      description: $_("Block inspected proxy responses by their MIME content type."),
+      sectionTitle: $_("Content types"),
+      sectionDescription: $_(
+        "Entries apply to every device using the proxy. Use a policy rule when a content type should apply only to selected devices.",
+      ),
+      filterId: "JHGJiwjkGOeglsk",
+      showColumns: ["content", "actions"],
+      warnsWhenDisabled: true,
+    },
+    excludehosts: {
+      path: "/excludehosts",
+      label: $_("Sites not inspected"),
+      title: $_("Sites not inspected"),
+      description: $_("Pass selected HTTPS hosts through without decrypting their traffic."),
+      sectionTitle: $_("Host exclusions"),
+      sectionDescription: $_(
+        "Add apps or sites that fail under inspection, such as certificate-pinning services. Policies can still block these hosts by domain.",
+      ),
+      filterId: "CeBqssmRbqXzbHR",
+      showColumns: ["content", "actions"],
+      warnsWhenDisabled: false,
+    },
+    excludeurls: {
+      path: "/excludeurls",
+      label: $_("URLs not inspected"),
+      title: $_("URLs not inspected"),
+      description: $_("Exclude selected request URLs from content filtering after the connection is inspected."),
+      sectionTitle: $_("URL exclusions"),
+      sectionDescription: $_(
+        "Use narrowly scoped URLs for content that should bypass response filtering. Use Sites not inspected when the TLS connection itself must not be decrypted.",
+      ),
+      filterId: "JHGJiwjkGOeglsd",
+      showColumns: ["content", "actions"],
+      warnsWhenDisabled: true,
+    },
+  };
+
+  $: configuration = routes[type] ?? routes.blockedkeywords;
+
   let inspectionOn: boolean | null = null;
-  onMount(async () => {
+  let inspectionError = "";
+
+  const loadInspectionState = async () => {
+    inspectionError = "";
     try {
       const json = await $store.api.doCall("/settings/enable_https_filtering");
       inspectionOn = json?.Value === "true";
-    } catch {
+    } catch (caught) {
       inspectionOn = null;
+      inspectionError =
+        caught instanceof Error && caught.message
+          ? caught.message
+          : $_("HTTPS inspection status could not be checked.");
     }
-  });
+  };
+
+  onMount(loadInspectionState);
 </script>
 
-<Row>
-  <Column>
-    <Breadcrumb style="margin-bottom: 10px;">
+<PageShell title={configuration.title} description={configuration.description}>
+  <svelte:fragment slot="breadcrumb">
+    <Breadcrumb noTrailingSlash>
       <BreadcrumbItem href="/">{$_("Dashboard")}</BreadcrumbItem>
       <BreadcrumbItem>{$_("HTTPS inspection")}</BreadcrumbItem>
+      <BreadcrumbItem>{configuration.label}</BreadcrumbItem>
     </Breadcrumb>
-  </Column>
-</Row>
+  </svelte:fragment>
 
-{#if type !== "excludehosts" && inspectionOn === false}
-  <InlineNotification
-    kind="warning"
-    lowContrast
-    hideCloseButton
-    title="HTTPS inspection is off."
-    subtitle="This list only applies to plain HTTP traffic until you turn on HTTPS filtering in Settings and install the GateSentry certificate on each device. To block whole sites, use Policies."
-  />
-{/if}
+  <nav class="inspection-navigation" aria-label={$_("HTTPS inspection sections")}>
+    {#each Object.values(routes) as route}
+      <Button
+        kind={route.path === configuration.path ? "primary" : "ghost"}
+        size="small"
+        on:click={() => gsNavigate(route.path)}
+      >
+        {route.label}
+      </Button>
+    {/each}
+  </nav>
 
-{#if type == "blockedfiletypes"}
-  <h2>{$_("Blocked content types")}</h2>
-  <div class="description">
-    {$_(
-      "Responses of these types are blocked on every device that uses the proxy. For example image/jpeg blocks .jpg files and video/ blocks all video. To block a type for one policy only, add it to a rule in Policies.",
-    )}
-  </div>
-  <Filtereditor
-    filterId="JHGJiwjkGOeglsk"
-    showColumns={["content", "actions"]}
-  />
-{:else if type == "blockedkeywords"}
-  <h2>{$_("Blocked keywords")}</h2>
-  <div class="description">
-    {$_(
-      "Add/Update keywords to block here. The score is used to determine how bad the keyword is. The higher the score, the worse the keyword.",
-    )}
-  </div>
-  <div>
-    <Row>
-      <Column md={4} lg={4}
-        ><ConnectedSettingInput
+  {#if configuration.warnsWhenDisabled && inspectionOn === null && !inspectionError}
+    <InlineLoading description={$_("Checking HTTPS inspection…")} />
+  {:else if configuration.warnsWhenDisabled && inspectionOn === false}
+    <InlineNotification
+      kind="warning"
+      lowContrast
+      hideCloseButton
+      title={$_("HTTPS inspection is off")}
+      subtitle={$_(
+        "This list applies to plain HTTP traffic only until HTTPS inspection is enabled in Settings and the GateSentry certificate is installed on each device. Use Policies to block whole domains.",
+      )}
+    />
+  {:else if inspectionError}
+    <InlineNotification
+      kind="info"
+      lowContrast
+      title={$_("Inspection status unavailable")}
+      subtitle={inspectionError}
+      on:close={() => (inspectionError = "")}
+    />
+  {/if}
+
+  {#if type === "blockedkeywords"}
+    <SectionPanel
+      title={$_("Filtering strictness")}
+      description={$_(
+        "Set the total keyword score at which GateSentry blocks an inspected page. For example, two matches scored 1,000 reach a threshold of 2,000.",
+      )}
+    >
+      <div class="strictness-control">
+        <ConnectedSettingInput
           keyName="strictness"
           title={$_("Filtering strictness")}
           labelText={$_("Filtering strictness")}
           type="number"
-          helperText=""
+          helperText={$_("Lower thresholds block pages after fewer or lower-scored matches.")}
         />
-        <label class="bx--label"
-          >{$_(
-            "Filtering strictness is the threshold beyond which you want the page to be blocked",
-          )}</label
-        >
-        <label class="bx--label"
-          >{$_(
-            "Example for a value of 2000, if 2 keywords with a score of 1000 are found, the page will be blocked. If 4 keywords with a score of 500 are found, the page will be blocked. If 1 keyword with a score of 2000 is found, the page will be blocked.",
-          )}</label
-        >
-        <br />
-      </Column>
-      <Column md={12} lg={12}>
-        <Filtereditor filterId="bVxTPTOXiqGRbhF" />
-      </Column>
-    </Row>
-  </div>
-{:else if type == "excludeurls"}
-  <h2>{$_("Excluded URLs")}</h2>
-  <div class="description">
-    {$_("Add URLs to exclude from filtering here.")}
-  </div>
-  <Filtereditor
-    filterId="JHGJiwjkGOeglsd"
-    showColumns={["content", "actions"]}
-  />
-{:else if type == "excludehosts"}
-  <h2>{$_("Sites not inspected")}</h2>
-  <div class="description">
-    {$_(
-      "HTTPS traffic to these hosts is passed through without decryption. Add apps and sites that break when inspected, such as banking apps or apps that pin their certificates. Policies still block these sites by domain.",
-    )}
-  </div>
-  <Filtereditor
-    filterId="CeBqssmRbqXzbHR"
-    showColumns={["content", "actions"]}
-  />
-{/if}
+      </div>
+    </SectionPanel>
+  {/if}
+
+  <SectionPanel
+    title={configuration.sectionTitle}
+    description={configuration.sectionDescription}
+  >
+    <Filtereditor
+      filterId={configuration.filterId}
+      showColumns={configuration.showColumns ?? ["content", "score", "actions"]}
+    />
+  </SectionPanel>
+</PageShell>
 
 <style>
-  .description {
-    margin: 20px 0px;
+  .inspection-navigation {
+    display: flex;
+    max-width: 100%;
+    flex-wrap: wrap;
+    gap: 1px;
+    padding: 1px;
+    background: var(--cds-border-subtle, #c6c6c6);
+  }
+
+  .inspection-navigation :global(.bx--btn) {
+    flex: 1 1 12rem;
+    justify-content: center;
+  }
+
+  .strictness-control {
+    max-width: 24rem;
   }
 </style>

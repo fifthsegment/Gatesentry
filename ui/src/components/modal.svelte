@@ -1,24 +1,47 @@
 <script lang="ts">
-  import { Modal, ModalBody } from "carbon-components-svelte";
-  import { _ } from "svelte-i18n";
+  import { createEventDispatcher } from "svelte";
+  import { Modal } from "carbon-components-svelte";
+
   export let open = false;
-  export let on: { close: () => void } = { close: () => {} };
   export let title = "";
-  export let children = null;
+  export let label = "";
+  export let primaryButtonText = "";
+  export let secondaryButtonText = "";
+  export let primaryButtonDisabled = false;
   export let hasForm = false;
   export let shouldSubmitOnEnter = false;
+  export let danger = false;
+  export let size: "xs" | "sm" | "lg" | undefined = undefined;
+  export let preventCloseOnClickOutside = false;
+
+  const dispatch = createEventDispatcher<{
+    close: void;
+    submit: void;
+  }>();
+
+  const close = () => {
+    open = false;
+    dispatch("close");
+  };
 </script>
 
 {#if open}
-  <div class="gatesentry-modal">
-    <Modal
-      {shouldSubmitOnEnter}
-      {hasForm}
-      bind:open
-      on:close={on.close}
-      modalHeading={title}
-      primaryButtonDisabled={true}
-      ><slot />
-    </Modal>
-  </div>
+  <Modal
+    bind:open
+    modalHeading={title}
+    modalLabel={label}
+    {primaryButtonText}
+    {secondaryButtonText}
+    {primaryButtonDisabled}
+    {hasForm}
+    {shouldSubmitOnEnter}
+    {danger}
+    {size}
+    {preventCloseOnClickOutside}
+    on:submit={() => dispatch("submit")}
+    on:click:button--secondary={close}
+    on:close={() => dispatch("close")}
+  >
+    <slot />
+  </Modal>
 {/if}

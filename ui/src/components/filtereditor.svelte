@@ -1,190 +1,258 @@
 <script lang="ts">
-  export let filterId;
-  export let showColumns = ["content", "score", "actions"];
-
   import {
     Button,
-    Column,
     DataTable,
-    Grid,
-    Row,
+    InlineNotification,
+    OverflowMenu,
+    OverflowMenuItem,
     TextInput,
-    Tile,
     Toolbar,
     ToolbarContent,
     ToolbarSearch,
   } from "carbon-components-svelte";
-  import { AddAlt, Edit, RowDelete, Save, TaskAdd } from "carbon-icons-svelte";
-  import { store } from "../store/apistore";
-  import { notificationstore } from "../store/notifications";
+  import { AddAlt } from "carbon-icons-svelte";
+  import { onMount } from "svelte";
   import { _ } from "svelte-i18n";
 
-  let data = [];
+  import ConfirmDialog from "./ConfirmDialog.svelte";
+  import ResourceState from "./layout/ResourceState.svelte";
+  import { store } from "../store/apistore";
+  import { notificationstore } from "../store/notifications";
 
-  let editingRowId = null;
-
-  let url = `/filters/${filterId}`;
-
-  const loadAPIdata = () => {
-    $store.api
-      .doCall(url)
-      .then(function (content) {
-        try {
-          var filterData = content[0];
-          data = filterData.Entries.map((item, index) => {
-            return { id: index + 1, content: item.Content, score: item.Score };
-          });
-        } catch (err) {
-          notificationstore.add({
-            kind: "error",
-            title: "Error:",
-            subtitle: err.message,
-            timeout: 30000,
-          });
-        }
-      })
-      .catch(function (err) {
-        notificationstore.add({
-          kind: "error",
-          title: $_("Error:"),
-          subtitle: $_("Unable to load data from the api : ") + err.message,
-          timeout: 30000,
-        });
-      });
+  type FilterRow = {
+    id: number;
+    content: string;
+    score: number;
+    draft?: boolean;
   };
 
-  function handleContentChange(id, event) {
-    const newValue = event.detail;
-    data = data.map((item) =>
-      item.id === id ? { ...item, content: newValue } : item,
-    );
-  }
+  export let filterId: string;
+  export let showColumns: string[] = ["content", "score", "actions"];
 
-  function handleScoreChange(id, event) {
-    const newScore = parseInt(event.detail);
-    if (!isNaN(newScore)) {
-      data = data.map((item) =>
-        item.id === id ? { ...item, score: newScore } : item,
-      );
-    } else {
-      notificationstore.add({
-        kind: "error",
-        title: "Error:",
-        subtitle: "Score must be a number",
-        timeout: 30000,
-      });
-    }
-  }
+  const allHeaders = [
+    { key: "content", value: $_("Content") },
+    { key: "score", value: $_("Score") },
+    { key: "actions", value: $_("Actions") },
+  ];
 
-  const saveData = () => {
-    let payload = data.map((item) => {
-      return { Content: item.content, Score: item.score };
-    });
+  let data: FilterRow[] = [];
+  let loading = true;
+  let saving = false;
+  let loadError = "";
+  let saveError = "";
+  let editingRowId: number | null = null;
+  let pendingDelete: FilterRow | null = null;
+  let filteredRowIds: Array<string | number> = [];
+  let nextId = 1;
 
-    $store.api.doCall(url, "post", payload).then(function (content) {
-      if (content.Response.includes("Ok")) {
-        notificationstore.add({
-          kind: "success",
-          title: "Success:",
-          subtitle: "Filter saved successfully",
-          timeout: 3000,
-        });
-        loadAPIdata();
-      }
-    });
-  };
+  $: headers = allHeaders.filter((item) => showColumns.includes(item.key));
+  $: rows = data.map(({ id, content, score }) => ({ id, content, score }));
+  $: editingRow = data.find((item) => item.id === editingRowId) ?? null;
+  $: canSaveEditing = Boolean(editingRow?.content.trim()) &&
+    (!showColumns.includes("score") || Number.isFinite(editingRow?.score));
 
-  const editRow = (id) => {
-    if (editingRowId == id) {
+  const loadAPIData = async () => {
+    loading = true;
+    loadError = "";
+    try {
+      const content = await $store.api.doCall(`/filters/${filterId}`);
+      const filterData = Array.isArray(content) ? content[0] : null;
+      const entries = Array.isArray(filterData?.Entries) ? filterData.Entries : [];
+      data = entries.map((item, index) => ({
+        id: index + 1,
+        content: String(item.Content ?? ""),
+        score: Number(item.Score) || 0,
+      }));
+      nextId = data.length + 1;
       editingRowId = null;
-      saveData();
-    } else {
-      editingRowId = id;
+    } catch (caught) {
+      loadError =
+        caught instanceof Error && caught.message
+          ? caught.message
+          : $_("This inspection list could not be loaded.");
+    } finally {
+      loading = false;
     }
   };
 
-  const removeRow = (id) => {
-    data = data.filter((item) => item.id !== id);
-    saveData();
+  const notifySaved = () => {
+    notificationstore.add({
+      kind: "success",
+      title: $_("Inspection list updated"),
+      subtitle: $_("The filter was saved successfully."),
+      timeout: 3000,
+    });
+  };
+
+  const saveData = async (next: FilterRow[]) => {
+    if (saving) return false;
+    saving = true;
+    saveError = "";
+    try {
+      const payload = next.map((item) => ({
+        Content: item.content,
+        Score: item.score,
+      }));
+      const content = await $store.api.doCall(`/filters/${filterId}`, "post", payload);
+      const response = String(content?.response ?? content?.Response ?? "");
+      if (!response.includes("Ok")) {
+        throw new Error(content?.error || $_("The filter service did not confirm the save."));
+      }
+      notifySaved();
+      await loadAPIData();
+      return true;
+    } catch (caught) {
+      saveError =
+        caught instanceof Error && caught.message
+          ? caught.message
+          : $_("This inspection list could not be saved.");
+      return false;
+    } finally {
+      saving = false;
+    }
+  };
+
+  const handleContentChange = (id: number, event: CustomEvent<string | number>) => {
+    const value = String(event.detail ?? "");
+    data = data.map((item) => (item.id === id ? { ...item, content: value } : item));
+  };
+
+  const handleScoreChange = (id: number, event: CustomEvent<string | number>) => {
+    const value = Number(event.detail);
+    data = data.map((item) => (item.id === id ? { ...item, score: value } : item));
+  };
+
+  const editRow = (id: number) => {
+    editingRowId = id;
+    saveError = "";
+  };
+
+  const saveEditingRow = async () => {
+    if (!editingRow || !canSaveEditing) return;
+    await saveData(data.map((item) => ({ ...item, draft: false })));
+  };
+
+  const cancelEditing = () => {
+    if (editingRow?.draft) data = data.filter((item) => item.id !== editingRow.id);
+    editingRowId = null;
+    saveError = "";
   };
 
   const addRow = () => {
-    const newId = data.length + 1;
-    data = [...data, { id: newId, content: $_("New item"), score: 0 }];
-    editRow(newId);
+    if (editingRowId != null) return;
+    const row: FilterRow = {
+      id: nextId++,
+      content: "",
+      score: 0,
+      draft: true,
+    };
+    data = [...data, row];
+    editingRowId = row.id;
   };
 
-  loadAPIdata();
-  let filteredRowIds = [];
+  const confirmDelete = async () => {
+    if (!pendingDelete || saving) return;
+    const target = pendingDelete;
+    if (await saveData(data.filter((item) => item.id !== target.id))) {
+      pendingDelete = null;
+    }
+  };
 
+  onMount(loadAPIData);
 </script>
 
-<Row>
-  <Column>
-    <DataTable
-      sortable
-      size="medium"
-      style="width:100%;"
-      headers={[
-        {
-          key: "content",
-          value: $_("Content"),
-        },
-        {
-          key: "score",
-          value: $_("Score"),
-          width: "15%",
-        },
-        {
-          key: "actions",
-          value: $_("Actions"),
-          width: "25%",
-        },
-      ].filter((item) => showColumns.includes(item.key))}
-      rows={data
-        .map((item) => {
-          return {
-            id: item.id,
-            content: item.content,
-            score: item.score,
-            actions: "",
-          };
-        })
-        .sort((a, b) => b.id - a.id)}
-    >
+{#if loadError}
+  <InlineNotification
+    kind="error"
+    title={$_("Inspection list unavailable")}
+    subtitle={loadError}
+    on:close={() => (loadError = "")}
+  />
+{/if}
+{#if saveError}
+  <InlineNotification
+    kind="error"
+    title={$_("Inspection list not saved")}
+    subtitle={saveError}
+    on:close={() => (saveError = "")}
+  />
+{/if}
+
+{#if loading && data.length === 0}
+  <ResourceState state="loading" message={$_("Loading inspection list…")} />
+{:else if data.length === 0 && editingRowId == null}
+  <ResourceState
+    state="empty"
+    title={$_("No list entries")}
+    message={$_("Add an entry when this inspection rule should match content or a host.")}
+  >
+    <Button size="small" icon={AddAlt} on:click={addRow}>{$_("Add entry")}</Button>
+  </ResourceState>
+{:else}
+  <div class="filter-table">
+    <DataTable sortable size="compact" {headers} {rows}>
       <Toolbar size="sm">
         <ToolbarContent>
-          <ToolbarSearch value="" shouldFilterRows bind:filteredRowIds />
-          <Button icon={AddAlt} on:click={addRow}>{$_("Insert")}</Button>
+          <ToolbarSearch
+            value=""
+            shouldFilterRows
+            bind:filteredRowIds
+            placeholder={$_("Search entries")}
+          />
+          <Button
+            size="small"
+            icon={AddAlt}
+            disabled={editingRowId != null || saving}
+            on:click={addRow}
+          >
+            {$_("Add entry")}
+          </Button>
         </ToolbarContent>
       </Toolbar>
       <svelte:fragment slot="cell" let:row let:cell>
         {#if cell.key === "actions"}
-          <div style="float:right;">
-            <Button
-              icon={editingRowId != null && row.id === editingRowId
-                ? Save
-                : Edit}
-              iconDescription={$_("Edit")}
-              on:click={() => editRow(row.id)}
-            ></Button>
-            <Button
-              icon={RowDelete}
-              iconDescription={$_("Delete")}
-              on:click={() => removeRow(row.id)}
-            ></Button>
-          </div>
-        {:else if editingRowId && editingRowId === row.id}
+          {#if editingRowId === Number(row.id)}
+            <div class="edit-actions">
+              <Button
+                size="small"
+                disabled={!canSaveEditing || saving}
+                on:click={saveEditingRow}
+              >
+                {saving ? $_("Saving…") : $_("Save")}
+              </Button>
+              <Button kind="ghost" size="small" disabled={saving} on:click={cancelEditing}>
+                {$_("Cancel")}
+              </Button>
+            </div>
+          {:else}
+            <OverflowMenu flipped iconDescription={$_("Entry actions")}>
+              <OverflowMenuItem text={$_("Edit")} on:click={() => editRow(Number(row.id))} />
+              <OverflowMenuItem
+                danger
+                text={$_("Delete")}
+                on:click={() => (pendingDelete = data.find((item) => item.id === Number(row.id)) ?? null)}
+              />
+            </OverflowMenu>
+          {/if}
+        {:else if editingRowId === Number(row.id)}
           {#if cell.key === "score"}
             <TextInput
               type="number"
+              labelText={$_("Score")}
+              hideLabel
+              invalid={!Number.isFinite(Number(cell.value))}
+              invalidText={$_("Score must be a number.")}
               value={cell.value}
-              on:input={(e) => handleScoreChange(row.id, e)}
+              on:input={(event) => handleScoreChange(Number(row.id), event)}
             />
           {:else}
             <TextInput
+              labelText={$_("Content")}
+              hideLabel
+              invalid={!String(cell.value).trim()}
+              invalidText={$_("Content is required.")}
               value={cell.value}
-              on:input={(e) => handleContentChange(row.id, e)}
+              on:input={(event) => handleContentChange(Number(row.id), event)}
             />
           {/if}
         {:else}
@@ -192,29 +260,42 @@
         {/if}
       </svelte:fragment>
     </DataTable>
-    {#if data.length == 0}
-      <div>
-        <Tile class="text-center">
-          <h3>{$_("No items")}</h3>
-          <div on:click={addRow} class="add-row-empty-state">
-            {$_("No items yet. Click the add button below to create one. ")}
-          </div>
-          <div class="add-icon">
-            <TaskAdd size="200" />
-          </div>
-          <Button icon={AddAlt} on:click={addRow}>{$_("Create Item")}</Button>
-        </Tile>
-      </div>
-    {/if}
-  </Column>
-</Row>
+  </div>
+{/if}
+
+<ConfirmDialog
+  open={pendingDelete != null}
+  title={$_("Delete inspection-list entry?")}
+  label={$_("HTTPS inspection")}
+  confirmText={$_("Delete entry")}
+  cancelText={$_("Cancel")}
+  danger
+  busy={saving}
+  on:submit={confirmDelete}
+  on:close={() => (pendingDelete = null)}
+>
+  <p>
+    {$_("Remove")}
+    <strong>{pendingDelete?.content ?? ""}</strong>
+    {$_("from this inspection list?")}
+  </p>
+</ConfirmDialog>
 
 <style>
-  .add-icon {
-    margin-bottom: 20px;
+  .filter-table {
+    min-width: 0;
+    max-width: 100%;
+    overflow-x: auto;
   }
-  .add-row-empty-state {
-    margin-top: 20px;
-    margin-bottom: 20px;
+
+  .edit-actions {
+    display: flex;
+    gap: 0.25rem;
+    flex-wrap: wrap;
+  }
+
+  :global(.filter-table .bx--toolbar-content) {
+    min-width: 0;
+    flex-wrap: wrap;
   }
 </style>

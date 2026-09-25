@@ -1,214 +1,291 @@
 <script lang="ts">
-  import { createEventDispatcher, onMount } from "svelte";
-  import { store } from "../store/apistore";
   import {
     Button,
-    Column,
-    ComposedModal,
+    CodeSnippet,
     DataTable,
-    ModalBody,
-    ModalFooter,
-    ModalHeader,
-    Row,
+    InlineNotification,
+    Link,
+    OverflowMenu,
+    OverflowMenuItem,
     TextInput,
   } from "carbon-components-svelte";
-  import { AddAlt, Edit, RowDelete, Save } from "carbon-icons-svelte";
+  import { AddAlt } from "carbon-icons-svelte";
+  import { createEventDispatcher, onMount } from "svelte";
   import { _ } from "svelte-i18n";
+
+  import ConfirmDialog from "./ConfirmDialog.svelte";
+  import Modal from "./modal.svelte";
+  import ResourceState from "./layout/ResourceState.svelte";
+  import SectionPanel from "./layout/SectionPanel.svelte";
+  import { createNotificationError, createNotificationSuccess } from "../lib/utils";
+  import { store } from "../store/apistore";
   import { notificationstore } from "../store/notifications";
-  import {
-    createNotificationError,
-    createNotificationSuccess,
-  } from "../lib/utils";
+
+  type BlockListRow = {
+    id: number;
+    content: string;
+  };
+
   const dispatch = createEventDispatcher();
+  const headers = [
+    { key: "content", value: $_("Block-list URL") },
+    { key: "actions", value: $_("Actions") },
+  ];
 
-  let data = null;
-  let editingRowId = null;
+  let data: string[] = [];
+  let loading = true;
+  let saving = false;
+  let loadError = "";
+  let editingRowId: number | null = null;
   let editingItemValue = "";
+  let pendingDelete: BlockListRow | null = null;
   let showForm = false;
-  onMount(async () => {
-    const json = await $store.api.getSetting("dns_custom_entries");
-    if (json) data = JSON.parse(json.Value) as Array<string>;
-  });
 
-  const saveAPIData = async () => {
+  $: rows = data.map((content, id) => ({ id, content }));
+  $: valueIsValid = /^https?:\/\/\S+$/i.test(editingItemValue.trim());
+
+  const loadAPIData = async () => {
+    loading = true;
+    loadError = "";
     try {
-      const response = await $store.api.setSetting(
-        "dns_custom_entries",
-        JSON.stringify(data),
-      );
-
-      dispatch("updatednsinfo");
-      notificationstore.add(
-        createNotificationSuccess(
-          {
-            title: $_("Success"),
-            subtitle: $_("Block list updated"),
-          },
-          $_,
-        ),
-      );
-    } catch (error) {
-      notificationstore.add(
-        createNotificationError(
-          {
-            title: $_("Error"),
-            subtitle: $_("Unable to save block list"),
-          },
-          $_,
-        ),
-      );
+      const json = await $store.api.getSetting("dns_custom_entries");
+      const parsed = JSON.parse(json?.Value || "[]");
+      data = Array.isArray(parsed) ? parsed.map(String) : [];
+    } catch (caught) {
+      data = [];
+      loadError =
+        caught instanceof Error && caught.message
+          ? caught.message
+          : $_("DNS block lists could not be loaded.");
+    } finally {
+      loading = false;
     }
   };
 
-  const addRow = () => {
+  const closeForm = () => {
+    showForm = false;
+    editingRowId = null;
+    editingItemValue = "";
+  };
+
+  const openCreate = () => {
+    closeForm();
     showForm = true;
   };
 
   const editRow = (id: number) => {
-    if (editingRowId && editingRowId === id) {
-      // save the data
-      data = data.map((item, index) => (item == id ? editingItemValue : item));
-      saveAPIData();
-      editingRowId = null;
-      editingItemValue = "";
-      return;
-    }
+    const value = data[id];
+    if (value == null) return;
     editingRowId = id;
-    editingItemValue = data.find((item) => item === id);
+    editingItemValue = value;
+    showForm = true;
   };
 
-  const removeRow = (id: number) => {
-    data = data.filter((item) => item !== id);
-    saveAPIData();
-  };
+  const persist = async (next: string[]) => {
+    if (saving) return false;
+    saving = true;
+    try {
+      const response = await $store.api.setSetting(
+        "dns_custom_entries",
+        JSON.stringify(next),
+      );
+      if (response === false) throw new Error($_("The block-list setting was rejected."));
 
-  const handleContentChange = (id, event) => {
-    const newValue = event.detail;
-    editingItemValue = newValue;
-  };
-
-  const addSaveRow = async () => {
-    if (editingItemValue) {
-      data = [...data, editingItemValue];
-      await saveAPIData();
-      editingItemValue = "";
-      showForm = false;
+      data = next;
+      dispatch("updatednsinfo");
+      notificationstore.add(
+        createNotificationSuccess(
+          { title: $_("Block lists updated"), subtitle: $_("DNS block-list sources were saved.") },
+          $_,
+        ),
+      );
+      return true;
+    } catch (caught) {
+      notificationstore.add(
+        createNotificationError(
+          {
+            title: $_("Block lists not saved"),
+            subtitle:
+              caught instanceof Error && caught.message
+                ? caught.message
+                : $_("Unable to save block lists."),
+          },
+          $_,
+        ),
+      );
+      return false;
+    } finally {
+      saving = false;
     }
   };
+
+  const saveRow = async () => {
+    const value = editingItemValue.trim();
+    if (!valueIsValid || saving) return;
+    const next = editingRowId == null
+      ? [...data, value]
+      : data.map((item, index) => (index === editingRowId ? value : item));
+    if (await persist(next)) closeForm();
+  };
+
+  const confirmDelete = async () => {
+    if (!pendingDelete || saving) return;
+    const target = pendingDelete;
+    if (await persist(data.filter((_, index) => index !== target.id))) {
+      pendingDelete = null;
+    }
+  };
+
+  onMount(loadAPIData);
 </script>
 
-<h5>{$_("DNS Block lists")}</h5>
-<p>
-  {$_(
-    "A block list is a file containing a list of domains to block. Gatesentry comes with a series of predefined blocklists for adblocking. You can also add your own custom block lists or remove the existing ones.",
+<SectionPanel
+  title={$_("DNS block lists")}
+  description={$_(
+    "GateSentry downloads these domain lists and applies them to DNS requests from every protected client.",
   )}
-  <a href="https://github.com/hagezi/dns-blocklists#fake" target="_blank"
-    >{$_("Get more block lists from here")}</a
-  >
-</p>
-<br />
-<strong>{$_("The following two formats are supported: ")}</strong>
-<Row>
-  <Column>
-    <pre class="simple-border">
-      <code>
-        0.0.0.0 domain.com
-      </code>
-    </pre>
-  </Column>
+>
+  <svelte:fragment slot="actions">
+    <Button size="small" icon={AddAlt} on:click={openCreate}>
+      {$_("Add block list")}
+    </Button>
+  </svelte:fragment>
 
-  <Column>
-    <pre class="simple-border">
-      <code>
-        domain.com
-      </code>
-    </pre>
-  </Column>
-</Row>
-<br />
-{#if data}
-  {#if showForm}
-    <ComposedModal
-      open
-      preventCloseOnClickOutside={true}
-      on:submit={() => {
-        addSaveRow();
-      }}
-      on:close={() => {
-        showForm = false;
-        editingItemValue = "";
-      }}
-    >
-      <ModalHeader title={$_("Add a Block list")} />
-      <ModalBody hasForm>
-        <TextInput
-          labelText={$_("Block list URL")}
-          type="text"
-          bind:value={editingItemValue}
-          placeholder="domain.com/blocklist.txt"
-          size="sm"
-        />
-      </ModalBody>
-      <ModalFooter
-        primaryButtonDisabled={false}
-        primaryButtonIcon={Save}
-        primaryButtonText={$_("Save")}
-      />
-    </ComposedModal>
-  {/if}
-  <DataTable
-    sortable
-    size="medium"
-    style="width:100%;"
-    headers={[
-      {
-        key: "content",
-        value: $_("Block list URL"),
-      },
-      {
-        key: "actions",
-        value: $_("Actions"),
-      },
-    ]}
-    rows={data
-      .map((item) => {
-        return {
-          id: item,
-          content: item,
-          actions: "",
-        };
-      })
-      .sort((a, b) => b.id - a.id)}
-  >
-    <div>
-      <div style="float:right;">
-        <Button size="small" icon={AddAlt} on:click={addRow}>
-          {$_("Insert")}
-        </Button>
-      </div>
+  <div class="format-guidance">
+    <p>
+      {$_("Each source may contain either hosts-file entries or one domain per line.")}
+      <Link href="https://github.com/hagezi/dns-blocklists#fake" target="_blank" inline>
+        {$_("Browse compatible lists")}
+      </Link>
+    </p>
+    <div class="format-examples" aria-label={$_("Supported block-list formats")}>
+      <CodeSnippet type="single">0.0.0.0 domain.com</CodeSnippet>
+      <CodeSnippet type="single">domain.com</CodeSnippet>
     </div>
-    <svelte:fragment slot="cell" let:row let:cell>
-      {#if cell.key === "actions"}
-        <div style="float:right; width: 100px;">
-          <Button
-            icon={editingRowId != null && row.id === editingRowId ? Save : Edit}
-            iconDescription={$_("Edit")}
-            on:click={() => editRow(row.id)}
-          ></Button>
-          <Button
-            icon={RowDelete}
-            iconDescription={$_("Delete")}
-            on:click={() => removeRow(row.id)}
-          ></Button>
-        </div>
-      {:else if editingRowId && editingRowId === row.id}
-        <TextInput
-          value={cell.value}
-          on:input={(e) => handleContentChange(row.id, e)}
-        />
-      {:else}
-        {cell.value}
-      {/if}
-    </svelte:fragment>
-  </DataTable>
-{/if}
+  </div>
+
+  {#if loadError}
+    <InlineNotification
+      kind="error"
+      title={$_("Block lists unavailable")}
+      subtitle={loadError}
+      on:close={() => (loadError = "")}
+    />
+  {/if}
+
+  {#if loading && data.length === 0}
+    <ResourceState state="loading" message={$_("Loading DNS block lists…")} />
+  {:else if data.length === 0}
+    <ResourceState
+      state="empty"
+      title={$_("No block-list sources")}
+      message={$_("Add a compatible HTTP or HTTPS list to begin blocking its domains.")}
+    >
+      <Button size="small" icon={AddAlt} on:click={openCreate}>
+        {$_("Add block list")}
+      </Button>
+    </ResourceState>
+  {:else}
+    <div class="table-region">
+      <DataTable sortable size="compact" {headers} {rows}>
+        <svelte:fragment slot="cell" let:row let:cell>
+          {#if cell.key === "actions"}
+            <OverflowMenu flipped iconDescription={$_("Block-list actions")}>
+              <OverflowMenuItem text={$_("Edit")} on:click={() => editRow(Number(row.id))} />
+              <OverflowMenuItem
+                danger
+                text={$_("Delete")}
+                on:click={() => (pendingDelete = rows.find((item) => item.id === Number(row.id)) ?? null)}
+              />
+            </OverflowMenu>
+          {:else}
+            <span class="url-cell">{cell.value}</span>
+          {/if}
+        </svelte:fragment>
+      </DataTable>
+    </div>
+  {/if}
+</SectionPanel>
+
+<Modal
+  bind:open={showForm}
+  title={editingRowId == null ? $_("Add DNS block list") : $_("Edit DNS block list")}
+  label={$_("DNS")}
+  primaryButtonText={saving ? $_("Saving…") : $_("Save block list")}
+  secondaryButtonText={$_("Cancel")}
+  primaryButtonDisabled={!valueIsValid || saving}
+  hasForm
+  shouldSubmitOnEnter
+  preventCloseOnClickOutside={saving}
+  on:submit={saveRow}
+  on:close={closeForm}
+>
+  <TextInput
+    labelText={$_("Block-list URL")}
+    helperText={$_("Use a complete HTTP or HTTPS URL to a plain-text domain list.")}
+    invalid={Boolean(editingItemValue) && !valueIsValid}
+    invalidText={$_("Enter a complete HTTP or HTTPS URL.")}
+    type="url"
+    bind:value={editingItemValue}
+    placeholder="https://example.org/blocklist.txt"
+    disabled={saving}
+  />
+</Modal>
+
+<ConfirmDialog
+  open={pendingDelete != null}
+  title={$_("Remove DNS block list?")}
+  label={$_("DNS")}
+  confirmText={$_("Remove block list")}
+  cancelText={$_("Cancel")}
+  danger
+  busy={saving}
+  on:submit={confirmDelete}
+  on:close={() => (pendingDelete = null)}
+>
+  <p>
+    {$_("GateSentry will stop downloading and applying")}
+    <strong>{pendingDelete?.content ?? ""}</strong>.
+  </p>
+</ConfirmDialog>
+
+<style>
+  .format-guidance {
+    display: grid;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+  }
+
+  .format-guidance p {
+    max-width: 48rem;
+    margin: 0;
+    color: var(--cds-text-secondary, #525252);
+    line-height: 1.45;
+  }
+
+  .format-guidance :global(.bx--link) {
+    margin-left: 0.25rem;
+  }
+
+  .format-examples {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.75rem;
+  }
+
+  .table-region {
+    min-width: 0;
+    max-width: 100%;
+    overflow-x: auto;
+  }
+
+  .url-cell {
+    overflow-wrap: anywhere;
+  }
+
+  @media (max-width: 42rem) {
+    .format-examples {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>

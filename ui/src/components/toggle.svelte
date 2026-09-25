@@ -51,21 +51,20 @@
     loadAPIData();
   });
 
-  $: {
-    loadAPIData();
-  }
 </script>
 
-<span>
-  {#if hide == true}{:else if settingValue == ""}
-    <Loading />
-  {:else}
-    <Toggle
-      labelText={label}
-      {labelA}
-      {labelB}
-      toggled={settingValue == "true"}
-      on:change={toggleSettingStatus}
-    />
-  {/if}
-</span>
+{#if !hide}
+  <span>
+    {#if settingValue == ""}
+      <Loading />
+    {:else}
+      <Toggle
+        labelText={label}
+        {labelA}
+        {labelB}
+        toggled={settingValue == "true"}
+        on:change={toggleSettingStatus}
+      />
+    {/if}
+  </span>
+{/if}

@@ -2,22 +2,19 @@
   import {
     Breadcrumb,
     BreadcrumbItem,
-    Column,
     DataTable,
-    Row,
     Search,
     Select,
     SelectItem,
-    Tag,
   } from "carbon-components-svelte";
   import { format } from "timeago.js";
   import { store } from "../../store/apistore";
-  import {
-    buildDeviceNameMap,
-    formatDeviceAddress,
-  } from "../../lib/devicenames";
+  import { buildDeviceNameMap, formatDeviceAddress } from "../../lib/devicenames";
   import _ from "lodash";
   import { onDestroy, onMount } from "svelte";
+  import PageShell from "../../components/layout/PageShell.svelte";
+  import ResourceState from "../../components/layout/ResourceState.svelte";
+  import SectionPanel from "../../components/layout/SectionPanel.svelte";
 
   let search = "";
   let actionFilter = "";
@@ -32,6 +29,8 @@
   let mounted = false;
   let destroyed = false;
   let activeFilter = "";
+  let initialLoaded = false;
+  let loadError = "";
 
   const buildQuery = () => {
     const params: string[] = [];
@@ -47,9 +46,13 @@
     const query = buildQuery();
     try {
       const json = await $store.api.doCall("/decisions" + query);
-      if (!destroyed && query === buildQuery()) decisions = json?.items || [];
+      if (!destroyed && query === buildQuery()) {
+        decisions = json?.items || [];
+        loadError = "";
+        initialLoaded = true;
+      }
     } catch {
-      // Keep the last successful page during a transient refresh failure.
+      if (!destroyed && !initialLoaded) loadError = "Unable to load decisions.";
     } finally {
       decisionsLoading = false;
       if (destroyed) return;
@@ -123,70 +126,81 @@
   });
 </script>
 
-<Row>
-  <Column>
-    <Breadcrumb style="margin-bottom: 10px;">
+<PageShell
+  title="Decision log"
+  description="Structured filtering decisions from DNS, proxy, and content inspection layers."
+>
+  <svelte:fragment slot="breadcrumb">
+    <Breadcrumb noTrailingSlash>
       <BreadcrumbItem href="/">Dashboard</BreadcrumbItem>
       <BreadcrumbItem>Logs</BreadcrumbItem>
     </Breadcrumb>
-    <h2>Decision log</h2>
-  </Column>
-</Row>
-<Row>
-  <Column>
-    <div style="margin: 20px 0px;">
-      Structured filtering decisions from DNS and proxy layers.
-    </div>
-    <div style="margin-bottom: 15px;">
-      <Tag>
-        IMPORTANT: If you are using GateSentry on a Raspberry Pi please make
-        sure to change GateSentry's log file location to RAM. You can do that by
-        going to Settings and changing the log file location to "/tmp/log.db".
-      </Tag>
-    </div>
-    <div
-      style="display: flex; gap: 16px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 15px;"
-    >
-      <div style="flex: 1; min-width: 200px;">
-        <Search
-          bind:value={search}
-          on:clear={clearSearch}
-          placeholder="Search by domain..."
-        />
+  </svelte:fragment>
+
+  <SectionPanel title="Filter decisions" description="Search recent activity or narrow it by outcome and enforcement layer.">
+    <div class="filters">
+      <div class="filters__search">
+        <Search bind:value={search} on:clear={clearSearch} placeholder="Search by domain" labelText="Search decisions" />
       </div>
-      <div style="min-width: 160px;">
-        <Select bind:selected={actionFilter} labelText="Action">
-          <SelectItem value="" text="All actions" />
-          <SelectItem value="block" text="Block" />
-          <SelectItem value="allow" text="Allow" />
-          <SelectItem value="bypass" text="Bypass" />
-          <SelectItem value="inspect" text="Inspect" />
-          <SelectItem value="error" text="Error" />
-        </Select>
-      </div>
-      <div style="min-width: 160px;">
-        <Select bind:selected={layerFilter} labelText="Layer">
-          <SelectItem value="" text="All layers" />
-          <SelectItem value="dns" text="DNS" />
-          <SelectItem value="explicit_proxy" text="Explicit proxy" />
-          <SelectItem value="transparent_proxy" text="Transparent proxy" />
-          <SelectItem value="content" text="Content" />
-        </Select>
-      </div>
+      <Select bind:selected={actionFilter} labelText="Action">
+        <SelectItem value="" text="All actions" />
+        <SelectItem value="block" text="Block" />
+        <SelectItem value="allow" text="Allow" />
+        <SelectItem value="bypass" text="Bypass" />
+        <SelectItem value="inspect" text="Inspect" />
+        <SelectItem value="error" text="Error" />
+      </Select>
+      <Select bind:selected={layerFilter} labelText="Layer">
+        <SelectItem value="" text="All layers" />
+        <SelectItem value="dns" text="DNS" />
+        <SelectItem value="explicit_proxy" text="Explicit proxy" />
+        <SelectItem value="transparent_proxy" text="Transparent proxy" />
+        <SelectItem value="content" text="Content" />
+      </Select>
     </div>
-    <DataTable
-      sortable
-      size="medium"
-      style="width:100%; min-height: 600px;"
-      headers={[
-        { key: "time", value: "Time" },
-        { key: "client", value: "Client" },
-        { key: "url", value: "URL" },
-        { key: "action", value: "Action" },
-        { key: "layer", value: "Layer" },
-        { key: "reason", value: "Reason" },
-      ]}
-      rows={logsToRender}
-    />
-  </Column>
-</Row>
+
+    {#if loadError}
+      <ResourceState state="error" title="Decisions unavailable" message={loadError} onRetry={refreshDecisions} />
+    {:else if !initialLoaded}
+      <ResourceState state="loading" message="Loading filtering decisions" />
+    {:else if logsToRender.length === 0}
+      <ResourceState
+        state="empty"
+        title="No decisions found"
+        message="Try clearing the search or choosing a different filter."
+      />
+    {:else}
+      <DataTable
+        sortable
+        size="medium"
+        headers={[
+          { key: "time", value: "Time" },
+          { key: "client", value: "Client" },
+          { key: "url", value: "URL" },
+          { key: "action", value: "Action" },
+          { key: "layer", value: "Layer" },
+          { key: "reason", value: "Reason" },
+        ]}
+        rows={logsToRender}
+      />
+    {/if}
+  </SectionPanel>
+</PageShell>
+
+<style>
+  .filters {
+    display: grid;
+    grid-template-columns: minmax(16rem, 1fr) repeat(2, minmax(10rem, 13rem));
+    align-items: end;
+    gap: 1rem;
+    margin-bottom: 1rem;
+  }
+  .filters__search {
+    min-width: 0;
+  }
+  @media (max-width: 48rem) {
+    .filters {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>

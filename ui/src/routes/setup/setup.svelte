@@ -1,11 +1,8 @@
 <script lang="ts">
   import {
     Button,
-    Column,
     FluidForm,
-    Grid,
     PasswordInput,
-    Row,
     TextInput,
   } from "carbon-components-svelte";
   import {
@@ -15,6 +12,7 @@
     utf8ByteLength,
   } from "../../lib/credentials";
   import { getBasePath, gsNavigate } from "../../lib/navigate";
+  import AuthShell from "../../components/layout/AuthShell.svelte";
 
   let username = "";
   let password = "";
@@ -105,72 +103,58 @@
   }
 </script>
 
-<Grid noGutter
-  ><Row noGutter
-    ><Column>
-      <div class="setup-card">
-        <FluidForm on:submit={submit}>
-          <Column>
-            <h2>Set up GateSentry</h2>
-            <p>Create the administrator account for this installation.</p>
-            {#if error}<p class="error" role="alert">{error}</p>{/if}
-            {#if statusFailed}<Button
-                type="button"
-                kind="secondary"
-                on:click={loadStatus}>Retry status check</Button
-              >{/if}
-            <TextInput
-              required
-              autocomplete="username"
-              labelText="Administrator username"
-              bind:value={username}
-            />
-            <PasswordInput
-              required
-              autocomplete="new-password"
-              labelText="Password"
-              helperText={`Use ${MIN_PASSWORD_BYTES} to ${MAX_PASSWORD_BYTES} UTF-8 bytes.`}
-              invalid={passwordLengthError}
-              invalidText={passwordLengthMessage}
-              bind:value={password}
-            />
-            <PasswordInput
-              required
-              autocomplete="new-password"
-              labelText="Confirm password"
-              invalid={confirmationMismatch}
-              invalidText="Passwords do not match."
-              bind:value={confirmation}
-            />
-            <br />
-            {#if statusLoaded && hintMessage}
-              <p class="hint" aria-live="polite">{hintMessage}</p>
-            {/if}
-            <Button
-              type="submit"
-              disabled={!statusLoaded || submitting || blockingReason !== ""}
-              >Complete setup</Button
-            >
-          </Column>
-        </FluidForm>
-      </div>
-    </Column></Row
-  ></Grid
+<AuthShell
+  title="Set up GateSentry"
+  description="Create the administrator account for this installation."
 >
+  <FluidForm on:submit={submit}>
+    {#if error}<p class="form-message form-message--error" role="alert">{error}</p>{/if}
+    {#if statusFailed}
+      <Button type="button" kind="secondary" on:click={loadStatus}>
+        Retry status check
+      </Button>
+    {/if}
+    <TextInput
+      required
+      autocomplete="username"
+      labelText="Administrator username"
+      bind:value={username}
+    />
+    <PasswordInput
+      required
+      autocomplete="new-password"
+      labelText="Password"
+      helperText={`Use ${MIN_PASSWORD_BYTES} to ${MAX_PASSWORD_BYTES} UTF-8 bytes.`}
+      invalid={passwordLengthError}
+      invalidText={passwordLengthMessage}
+      bind:value={password}
+    />
+    <PasswordInput
+      required
+      autocomplete="new-password"
+      labelText="Confirm password"
+      invalid={confirmationMismatch}
+      invalidText="Passwords do not match."
+      bind:value={confirmation}
+    />
+    {#if statusLoaded && hintMessage}
+      <p class="hint" aria-live="polite">{hintMessage}</p>
+    {/if}
+    <Button
+      type="submit"
+      disabled={!statusLoaded || submitting || blockingReason !== ""}
+    >
+      {submitting ? "Completing setup…" : "Complete setup"}
+    </Button>
+  </FluidForm>
+</AuthShell>
 
 <style>
-  .setup-card {
-    border: 1px solid;
-    max-width: 30rem;
-    background: white;
-    margin: 15vh auto 0;
-    padding: 1rem;
-  }
-  h2,
-  p {
+  .form-message,
+  .hint {
     margin-bottom: 1rem;
   }
-  .error {
+  .form-message--error {
     color: #da1e28;
   }
   .hint {

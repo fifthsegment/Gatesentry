@@ -10,6 +10,7 @@
   let value = "";
   export let settingName;
   export let label;
+  $: inputId = `certificate-${settingName}`;
 
   const loadAPIData = async () => {
     if (settingName === undefined) {
@@ -45,7 +46,13 @@
   }
 </script>
 
-<br />
-<FormLabel>{label}</FormLabel>
+<div class="certificate-field">
+  <FormLabel for={inputId}>{label}</FormLabel>
+  <TextArea id={inputId} {value} on:blur={onBlur}></TextArea>
+</div>
 
-<TextArea {value} on:blur={onBlur}></TextArea>
+<style>
+  .certificate-field {
+    margin-top: 1rem;
+  }
+</style>

@@ -20,10 +20,15 @@ const model = modelSource.replace(/\s+/g, " ");
 const category = categorySource.replace(/\s+/g, " ");
 const domains = domainSource.replace(/\s+/g, " ");
 
-test("the policies page has one editor and no separate advanced rule list", () => {
+test("the policies page has one editor and route-local Carbon tabs", () => {
   expect(rules).toContain("Policygroups");
   expect(rules).not.toContain("Advanced rule editor");
   expect(rules).not.toContain("Rulelist");
+  expect(groups).toContain('<Tab label="Policies"');
+  expect(groups).toContain('<Tab label="Test a site"');
+  expect(groups).toContain('<Tab label="Gateway defaults"');
+  expect(groups).toContain("<TabContent>");
+  expect(groups).not.toContain('<details class="section fold"');
 });
 
 test("a policy has blocked and always-allowed lists, safe search, and rules", () => {
@@ -38,6 +43,12 @@ test("a policy has blocked and always-allowed lists, safe search, and rules", ()
   expect(form).toContain("Add rule");
   expect(form).toContain("Remove rule");
   expect(form).toContain("Save policy");
+  expect(form).toContain('legendText="Basic protection"');
+  expect(form).toContain('legendText="Schedule"');
+  expect(form).toContain('legendText="Advanced rules"');
+  expect(form).toContain("<AccordionItem");
+  expect(form).toContain("position: sticky");
+  expect(form).toContain('aria-label="Policy actions"');
   // Rule order is evaluation order, so the form can move a rule.
   expect(form).toContain("Move rule up");
   expect(form).toContain("Move rule down");
@@ -57,10 +68,12 @@ test("a rule names its own target, including all traffic", () => {
 
 test("every device is on one policy and the page manages assignment", () => {
   expect(groups).toContain("DEFAULT_GROUP_ID");
-  expect(groups).toContain("Devices on this policy");
+  expect(groups).toContain("Assigned devices");
   expect(groups).toContain("setDevicePolicy");
+  expect(groups).toContain("assignSelectedDevices");
   expect(groups).toContain('"/assignment"');
-  expect(groups).toContain("Every device uses exactly one policy");
+  expect(groups).toContain("Every device follows one policy");
+  expect(groups).toContain('titleText="Add devices"');
   // The default policy cannot be deleted.
   expect(groups).toContain("group.id !== DEFAULT_GROUP_ID");
 });
@@ -72,14 +85,25 @@ test("the site tester runs the live evaluator", () => {
   expect(groups).toContain("testResult.active.proxy_only");
 });
 
-test("starter policies preview their categories and their own caveat", () => {
+test("starter policies are the first step of create", () => {
   expect(groups).toContain("templateData.templates");
   expect(groups).toContain("template.limitations");
   expect(groups).toContain("templateData.shared_limitations");
-  expect(groups).toContain("Applies to every starter");
+  expect(groups).toContain("Starter limitations");
   expect(groups).toContain("categoryName(category)");
+  expect(groups).toContain("openCreate");
+  expect(groups).toContain('editingGroupId === "choose"');
+  expect(groups).toContain("Use starter");
+  expect(groups).toContain("Start blank");
   expect(groups).toContain("/apply");
-  expect(groups).toContain("never overwrites your changes");
+});
+
+test("policy deletion uses an accessible Carbon confirmation", () => {
+  expect(groups).toContain("<ComposedModal");
+  expect(groups).toContain('title="Delete policy?"');
+  expect(groups).toContain("on:submit={confirmDeleteGroup}");
+  expect(groups).toContain("primaryButtonDisabled={saving}");
+  expect(groups).not.toContain("confirm(");
 });
 
 test("gateway-wide categories stay selectable", () => {
@@ -107,7 +131,11 @@ test("the model round-trips a policy into the API body", () => {
         id: "bed",
         name: "Bedtime",
         target: { all_traffic: true, domains: [], categories: [] },
-        schedule: { timezone: "UTC", weekdays: [0, 1], windows: [{ from: "20:00", to: "07:00" }] },
+        schedule: {
+          timezone: "UTC",
+          weekdays: [0, 1],
+          windows: [{ from: "20:00", to: "07:00" }],
+        },
       },
     ],
   });
@@ -126,16 +154,28 @@ test("a rule reads as a sentence and flags proxy-only conditions", () => {
   const bedtime = {
     ...emptyRule(),
     target: { all_traffic: true, domains: [], categories: [] },
-    schedule: { timezone: "UTC", weekdays: [0, 1], windows: [{ from: "20:00", to: "07:00" }] },
+    schedule: {
+      timezone: "UTC",
+      weekdays: [0, 1],
+      windows: [{ from: "20:00", to: "07:00" }],
+    },
   };
-  expect(ruleSentence(bedtime, name)).toBe("Block all traffic, 20:00-07:00 Sun, Mon");
+  expect(ruleSentence(bedtime, name)).toBe(
+    "Block all traffic, 20:00-07:00 Sun, Mon",
+  );
   expect(needsProxy(bedtime)).toBe(false);
 
   const shorts = {
     ...emptyRule(),
-    target: { all_traffic: false, domains: ["youtube.com"], categories: ["social"] },
+    target: {
+      all_traffic: false,
+      domains: ["youtube.com"],
+      categories: ["social"],
+    },
     url_regexes: ["/shorts/"],
   };
-  expect(ruleSentence(shorts, name)).toBe("Block Social media, youtube.com when the URL matches /shorts/");
+  expect(ruleSentence(shorts, name)).toBe(
+    "Block Social media, youtube.com when the URL matches /shorts/",
+  );
   expect(needsProxy(shorts)).toBe(true);
 });
