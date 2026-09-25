@@ -5,6 +5,7 @@ import loginSource from "../../routes/login/login.svelte?raw";
 import appSource from "../../App.svelte?raw";
 import generalSettingsSource from "../connectedGeneralSettingInputs.svelte?raw";
 import headerSource from "../headerrightnav.svelte?raw";
+import globalHeaderSource from "../globalheader.svelte?raw";
 import settingsSource from "../../routes/settings/settings.svelte?raw";
 import certificateLinkSource from "../downloadCertificateLink.svelte?raw";
 
@@ -54,4 +55,15 @@ test("authenticated administrator identity is displayed from the verified sessio
   expect(loginSource).not.toContain("data.Username || username");
   expect(settingsSource).toContain("value={$store.api.username}");
   expect(settingsSource).not.toContain('keyName="admin_username"');
+});
+
+test("login keeps clear and submit actions in one row", () => {
+  expect(loginSource).toContain("<ButtonSet>");
+  expect(loginSource).not.toContain("<ButtonSet stacked>");
+});
+
+test("logout signals the shell so the login route renders immediately", () => {
+  expect(headerSource).toContain('dispatch("loggedout")');
+  expect(globalHeaderSource).toContain('on:loggedout={() => dispatch("loggedout")}');
+  expect(appSource).toContain('on:loggedout={() => (state = "login")}');
 });

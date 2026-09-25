@@ -8,7 +8,6 @@
 <PageShell
   title="Services"
   description="Control the gateway services running on this installation."
-  narrow
 >
   <svelte:fragment slot="breadcrumb">
     <Breadcrumb noTrailingSlash>

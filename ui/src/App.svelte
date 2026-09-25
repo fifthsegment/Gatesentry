@@ -131,7 +131,12 @@
     </Route>
   {:else}
     <div class="app-frame">
-      <Globalheader bind:isSideNavOpen bind:userProfilePanelOpen {pathname} />
+      <Globalheader
+        bind:isSideNavOpen
+        bind:userProfilePanelOpen
+        {pathname}
+        on:loggedout={() => (state = "login")}
+      />
       <SideNav
         bind:isOpen={isSideNavOpen}
         rail

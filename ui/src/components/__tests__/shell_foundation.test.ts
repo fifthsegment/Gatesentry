@@ -3,6 +3,7 @@ import appSource from "../../App.svelte?raw";
 import menuSource from "../../menu.ts?raw";
 import mainSource from "../../main.ts?raw";
 import logsSource from "../../routes/logs/logs.svelte?raw";
+import servicesSource from "../../routes/services/services.svelte?raw";
 
 const compact = (source: string) => source.replace(/\s+/g, " ");
 
@@ -53,4 +54,9 @@ test("Carbon styles load before application overrides", () => {
 test("Raspberry Pi storage guidance is not shown on the decision log", () => {
   expect(logsSource).not.toContain("Raspberry Pi");
   expect(logsSource).not.toContain("/tmp/log.db");
+});
+
+test("services page uses the standard page width like other routes", () => {
+  expect(servicesSource).toContain("<PageShell");
+  expect(servicesSource).not.toContain("narrow");
 });
