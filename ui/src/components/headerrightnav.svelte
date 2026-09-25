@@ -1,14 +1,7 @@
 <script lang="ts">
-  import { store } from "../store/apistore";
-  import { _ } from "svelte-i18n";
-
-  export let userProfilePanelOpen;
   import {
-    Button,
-    Checkbox,
     ComposedModal,
     HeaderAction,
-    HeaderGlobalAction,
     HeaderPanelDivider,
     HeaderPanelLink,
     HeaderPanelLinks,
@@ -17,71 +10,65 @@
     ModalFooter,
     ModalHeader,
   } from "carbon-components-svelte";
-  import { SettingsAdjust, UserAvatarFilledAlt } from "carbon-icons-svelte";
-  import { afterUpdate } from "svelte";
-  import ConnectedGeneralSettingInputs from "./connectedGeneralSettingInputs.svelte";
+  import { UserAvatarFilledAlt } from "carbon-icons-svelte";
+  import { _ } from "svelte-i18n";
+  import { store } from "../store/apistore";
   import { gsNavigate } from "../lib/navigate";
+  import ConnectedGeneralSettingInputs from "./connectedGeneralSettingInputs.svelte";
 
-  $: loggedIn = $store.api.loggedIn;
-  let checked = false;
+  export let userProfilePanelOpen = false;
 
-  let bindedUpdate;
-  let modalOpen;
+  let updatePassword: (() => void) | undefined;
+  let modalOpen = false;
 
-  let onLogout = () => {
-    // navigate("/login");
+  const logout = () => {
     store.logout();
     userProfilePanelOpen = false;
     modalOpen = false;
-    gsNavigate("/login");
+    gsNavigate("/login", { replace: true });
+  };
+
+  const savePassword = () => {
+    modalOpen = false;
+    updatePassword?.();
   };
 </script>
 
 <HeaderUtilities>
-  {#if loggedIn}
-    <HeaderAction
-      bind:isOpen={userProfilePanelOpen}
-      icon={UserAvatarFilledAlt}
-      closeIcon={UserAvatarFilledAlt}
-    >
-      <HeaderPanelLinks>
-        <HeaderPanelDivider>
-          {$store.api.username ? `Logged in as ${$store.api.username}` : "Logged in"}
-        </HeaderPanelDivider>
-        <HeaderPanelLink
-          on:click={() => {
-            modalOpen = true;
-          }}>{$_("Change password")}</HeaderPanelLink
-        >
-        <HeaderPanelLink on:click={onLogout}>Logout</HeaderPanelLink>
-      </HeaderPanelLinks>
-    </HeaderAction>
+  <HeaderAction
+    bind:isOpen={userProfilePanelOpen}
+    icon={UserAvatarFilledAlt}
+    closeIcon={UserAvatarFilledAlt}
+    text={$_("Account")}
+  >
+    <HeaderPanelLinks>
+      <HeaderPanelDivider>
+        {$store.api.username ? `Logged in as ${$store.api.username}` : "Logged in"}
+      </HeaderPanelDivider>
+      <HeaderPanelLink on:click={() => (modalOpen = true)}>
+        {$_("Change password")}
+      </HeaderPanelLink>
+      <HeaderPanelLink on:click={logout}>{$_("Log out")}</HeaderPanelLink>
+    </HeaderPanelLinks>
+  </HeaderAction>
 
-    <ComposedModal open={modalOpen}>
-      <ModalHeader title={$_("Update password")} />
-
-      <ModalBody hasForm>
-        {#if loggedIn}
-          <ConnectedGeneralSettingInputs
-            keyName="admin_password"
-            helperText={$_("Leave blank to keep the current password")}
-            type="password"
-            title={$_("Password")}
-            labelText={$_("Password")}
-            disableOnblur={true}
-            bind:updateDataOnBackend={bindedUpdate}
-          />
-        {/if}
-      </ModalBody>
-      <ModalFooter
-        secondaryButtonText="Proceed"
-        primaryButtonDisabled={true}
-        secondaryClass="button--primary"
-        on:click:button--secondary={() => {
-          modalOpen = false;
-          bindedUpdate();
-        }}
+  <ComposedModal bind:open={modalOpen} on:submit={savePassword}>
+    <ModalHeader title={$_("Update password")} />
+    <ModalBody hasForm>
+      <ConnectedGeneralSettingInputs
+        keyName="admin_password"
+        helperText={$_("Leave blank to keep the current password")}
+        type="password"
+        title={$_("Password")}
+        labelText={$_("Password")}
+        disableOnblur
+        bind:updateDataOnBackend={updatePassword}
       />
-    </ComposedModal>
-  {/if}
+    </ModalBody>
+    <ModalFooter
+      secondaryButtonText={$_("Cancel")}
+      primaryButtonText={$_("Update password")}
+      on:click:button--secondary={() => (modalOpen = false)}
+    />
+  </ComposedModal>
 </HeaderUtilities>

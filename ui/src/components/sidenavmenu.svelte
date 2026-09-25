@@ -4,43 +4,55 @@
     SideNavItems,
     SideNavLink,
     SideNavMenu,
+    SideNavMenuItem,
   } from "carbon-components-svelte";
-  import { menuItems } from "../menu";
-  import { store } from "../store/apistore";
-  import { afterUpdate } from "svelte";
+  import { useLocation } from "svelte-routing";
+  import {
+    currentRoute,
+    isMenuActive,
+    isRouteActive,
+    menuItems,
+    routeHref,
+  } from "../menu";
   import { gsNavigate } from "../lib/navigate";
-  $: loggedIn = $store.api.loggedIn;
 
-  let menuItemsToRender = [...menuItems];
-  afterUpdate(() => {
-    if (loggedIn) {
-      menuItemsToRender = [...menuItems];
-    } else {
-      menuItemsToRender = [];
-    }
-  });
+  export let pathname = "/";
+  export let onNavigate: () => void = () => {};
+  const location = useLocation();
+  $: activePath = $location?.pathname ? currentRoute($location.pathname) : pathname;
+
+  const navigate = (event: MouseEvent, href: string) => {
+    event.preventDefault();
+    gsNavigate(href);
+    onNavigate();
+  };
+
+  const linkHref = (item: (typeof menuItems)[number]) =>
+    item.type === "link" ? item.href : "/";
 </script>
 
 <SideNavItems>
-  {#each menuItemsToRender as item}
+  {#each menuItems as item}
     {#if item.type === "link"}
       <SideNavLink
         icon={item.icon}
         text={item.text}
-        isSelected={item.isSelected}
-        on:click={() => {
-          gsNavigate(item.href);
-        }}
+        href={routeHref(item.href)}
+        isSelected={isRouteActive(item.href, activePath)}
+        on:click={(event) => navigate(event, linkHref(item))}
       />
-    {:else if item.type === "menu"}
-      <SideNavMenu icon={item.icon} text={item.text}>
+    {:else}
+      <SideNavMenu
+        icon={item.icon}
+        text={item.text}
+        expanded={isMenuActive(item, activePath)}
+      >
         {#each item.children as child}
-          <SideNavLink
-            icon={child.icon}
+          <SideNavMenuItem
             text={child.text}
-            on:click={() => {
-              gsNavigate(child.href);
-            }}
+            href={routeHref(child.href)}
+            isSelected={isRouteActive(child.href, activePath)}
+            on:click={(event) => navigate(event, child.href)}
           />
         {/each}
       </SideNavMenu>

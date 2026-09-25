@@ -26,9 +26,10 @@ test("login never persists administrator password", () => {
   expect(loginSource).not.toContain(`localStorage.getItem("password"`);
   expect(loginSource).toContain(`localStorage.removeItem("password")`);
   expect(loginSource).toContain(`localStorage.removeItem("rememberMe")`);
-  expect(loginSource).toContain("/api/setup/status");
-  expect(appSource).toContain('gsNavigate("/setup")');
-  expect(appSource).toContain("!setupStatusFailed");
+  expect(loginSource).not.toContain("/api/setup/status");
+  expect(appSource).toContain('fetch(getBasePath() + "/api/setup/status")');
+  expect(appSource).toContain('gsNavigate("/setup", { replace: true })');
+  expect(appSource).toContain('state = "error"');
   expect(appSource).toContain("Retry status check");
   expect(generalSettingsSource).toContain(
     'keyName === "admin_password" || keyName === "admin_username"',

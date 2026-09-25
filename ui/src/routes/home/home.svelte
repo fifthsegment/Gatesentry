@@ -16,6 +16,7 @@
   import { store } from "../../store/apistore";
   import { gsNavigate } from "../../lib/navigate";
   import { _ } from "svelte-i18n";
+  import PageShell from "../../components/layout/PageShell.svelte";
 
   type CheckStep = { state: string; action?: string; detail?: string };
   type OnboardingStep = { name: string; state: string };
@@ -210,20 +211,17 @@
   });
 </script>
 
-<div class="page">
-  <header class="page-head">
-    <div>
-      <h2>{$_("Overview")}</h2>
-      <p class="lede">
-        {$_(
-          "GateSentry is a self-hosted internet safety gateway. Devices that use it for DNS, or send traffic through its proxy, are filtered by your policies.",
-        )}
-      </p>
-    </div>
+<PageShell
+  title={$_("Overview")}
+  description={$_(
+    "GateSentry is a self-hosted internet safety gateway. Devices that use it for DNS, or send traffic through its proxy, are filtered by your policies.",
+  )}
+>
+  <svelte:fragment slot="actions">
     <Button kind="ghost" size="small" icon={Restart} on:click={refresh}>
       {$_("Refresh")}
     </Button>
-  </header>
+  </svelte:fragment>
 
   {#if statusError}
     <InlineNotification
@@ -435,27 +433,9 @@
       </section>
     </div>
   {/if}
-</div>
+</PageShell>
 
 <style>
-  .page {
-    display: flex;
-    flex-direction: column;
-    gap: 1.5rem;
-    max-width: 80rem;
-  }
-  .page-head {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    gap: 1rem;
-    flex-wrap: wrap;
-  }
-  .lede {
-    max-width: 44rem;
-    margin-top: 0.5rem;
-    color: var(--cds-text-secondary, #525252);
-  }
   .helper {
     max-width: 44rem;
     margin: 0.75rem 0;

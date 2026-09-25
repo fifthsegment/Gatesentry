@@ -4,7 +4,6 @@
     BreadcrumbItem,
     ContentSwitcher,
     DataTable,
-    InlineNotification,
     Switch,
     Tag,
   } from "carbon-components-svelte";
@@ -13,6 +12,8 @@
   import { onDestroy, onMount } from "svelte";
   import { store } from "../../store/apistore";
   import { _ } from "svelte-i18n";
+  import PageShell from "../../components/layout/PageShell.svelte";
+  import ResourceState from "../../components/layout/ResourceState.svelte";
 
   type Count = { key: string; count: number };
   type ProxyTraffic = {
@@ -208,14 +209,17 @@
   });
 </script>
 
-<div class="page">
-  <Breadcrumb noTrailingSlash>
-    <BreadcrumbItem href="/">{$_("Dashboard")}</BreadcrumbItem>
-    <BreadcrumbItem>{$_("Stats")}</BreadcrumbItem>
-  </Breadcrumb>
-
-  <header class="page-head">
-    <h2>{$_("Stats")}</h2>
+<PageShell
+  title={$_("Statistics")}
+  description={$_("Review filtering outcomes, client activity, and live proxy traffic.")}
+>
+  <svelte:fragment slot="breadcrumb">
+    <Breadcrumb noTrailingSlash>
+      <BreadcrumbItem href="/">{$_("Dashboard")}</BreadcrumbItem>
+      <BreadcrumbItem>{$_("Stats")}</BreadcrumbItem>
+    </Breadcrumb>
+  </svelte:fragment>
+  <svelte:fragment slot="actions">
     <div class="switcher">
       <ContentSwitcher
         size="sm"
@@ -226,15 +230,17 @@
         <Switch text={$_("7 days")} />
       </ContentSwitcher>
     </div>
-  </header>
+  </svelte:fragment>
 
   {#if loadError}
-    <InlineNotification
-      kind="error"
+    <ResourceState
+      state="error"
       title={$_("Stats unavailable")}
-      subtitle={loadError}
-      hideCloseButton
+      message={loadError}
+      onRetry={refreshSummary}
     />
+  {:else if !summary}
+    <ResourceState state="loading" message={$_("Loading statistics")} />
   {/if}
 
   <section class="tiles">
@@ -397,22 +403,9 @@
       </section>
     </div>
   {/if}
-</div>
+</PageShell>
 
 <style>
-  .page {
-    display: flex;
-    flex-direction: column;
-    gap: 1.25rem;
-    max-width: 80rem;
-  }
-  .page-head {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 1rem;
-  }
   .switcher {
     min-width: 18rem;
   }
