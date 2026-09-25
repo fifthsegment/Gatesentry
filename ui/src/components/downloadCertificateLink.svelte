@@ -1,11 +1,12 @@
 <script lang="ts">
-  import { _ } from "svelte-i18n";
-  import { store } from "../store/apistore";
+  import { Button } from "carbon-components-svelte";
   import { Download } from "carbon-icons-svelte";
+  import { _ } from "svelte-i18n";
+  import { getBasePath } from "../lib/navigate";
 
-  let link = `/api/files/certificate`;
+  const link = getBasePath() + "/api/files/certificate";
 </script>
 
-<a href={link} target="_blank"
-  ><Download style="position:relative;top:3px" />{$_("Download Certificate")}</a
->
+<Button href={link} icon={Download} kind="tertiary" size="small" download>
+  {$_("Download certificate")}
+</Button>
