@@ -48,16 +48,31 @@ test("device detail saves labels through the modal submit event", () => {
   expect(source).not.toContain("on:click:button--primary");
 });
 
-test("device activity refreshes while the modal is open", () => {
+test("device activity refreshes only while the modal is open", () => {
   expect(source).toContain("activity?since=86400&limit=100");
   expect(source).toContain("setTimeout(loadActivity, 5000)");
   expect(source).toContain("activityController?.abort()");
   expect(source).toContain("clearTimeout(activityTimer)");
+  expect(source).toContain("!open ||");
+  expect(source).toContain(
+    "$: if (!open && activityDeviceID) stopActivity(true)",
+  );
+  expect(source).toContain("requestedDeviceID === activityDeviceID");
+  expect(source).toContain("requestGeneration === activityGeneration");
+});
+
+test("device detail uses four focused Carbon tabs", () => {
+  expect(source).toContain('<Tabs type="container" autoWidth');
+  expect(source).toContain('<Tab label="Overview" />');
+  expect(source).toContain('<Tab label="Policy" />');
+  expect(source).toContain('<Tab label="Connections" />');
+  expect(source).toContain('<Tab label="Identity & activity" />');
+  expect(source.match(/<TabContent>/g)).toHaveLength(4);
 });
 
 test("device detail links and unlinks Tailscale peers only after manual action", () => {
   expect(source).toContain('TAILSCALE_BASE + "/peers"');
-  expect(source).toContain('/tailscale/" + encodeURIComponent(nodeID)');
+  expect(source).toContain("encodeURIComponent(peer.node_id)");
   expect(source).toContain(
     "body: JSON.stringify({ node_id: selectedPeerNodeID })",
   );
@@ -65,6 +80,9 @@ test("device detail links and unlinks Tailscale peers only after manual action",
   expect(source).toContain("disabled={tailscaleSaving || !selectedPeerNodeID}");
   expect(source).toContain("Suggestions are shown as hints only");
   expect(source).toContain("never select or link a peer automatically");
+  expect(source).toContain("pendingUnlink = peer");
+  expect(source).toContain("on:submit={confirmUnlink}");
+  expect(source).not.toContain("confirm(");
   expect(source).not.toContain("selectedPeerNodeID = peer.suggestion");
 });
 

@@ -39,3 +39,14 @@ test("device inventory exposes linked Tailscale peers and opens link management"
   expect(devices).toContain("on:tailscaleChanged={loadDevices}");
   expect(devices).toContain("setInterval(loadDevices, 30000)");
 });
+
+test("device inventory uses explicit Carbon states and confirmation", () => {
+  expect(devices).toContain("ResourceState");
+  expect(devices).toContain("No devices discovered yet");
+  expect(devices).toContain('size="compact"');
+  expect(devices).toContain("<ConfirmDialog");
+  expect(devices).toContain("on:submit={confirmRemoval}");
+  expect(devices).not.toContain("confirm(");
+  expect(devices).toContain('class="inventory-table"');
+  expect(devices).toContain("overflow-x: auto");
+});
