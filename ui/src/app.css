@@ -191,21 +191,36 @@ textarea {
   align-items: center;
   justify-content: center;
   gap: 1.5rem;
-  background:
-    linear-gradient(135deg, rgba(15, 98, 254, 0.12), transparent 44%),
-    #161616;
+  background: #f4f4f4;
 }
 
 .auth-shell__card {
-  width: min(100%, 32rem);
+  width: min(100%, 28rem);
   padding: clamp(1.5rem, 5vw, 2.5rem);
   background: #ffffff;
-  box-shadow: 0 1rem 3rem rgba(0, 0, 0, 0.28);
+  border: 1px solid #e0e0e0;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
 }
 
 .auth-shell__brand {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
   margin-bottom: 2.5rem;
-  color: #0f62fe;
+}
+
+.auth-shell__mark {
+  display: inline-flex;
+  width: 1.5rem;
+  height: 1.5rem;
+  align-items: center;
+  justify-content: center;
+  background: #0f62fe;
+  color: #ffffff;
+}
+
+.auth-shell__name {
+  color: #161616;
   font-size: 0.875rem;
   font-weight: 600;
   letter-spacing: 0.08em;
@@ -217,7 +232,7 @@ textarea {
 }
 
 .auth-shell__header h1 {
-  font-size: clamp(2rem, 7vw, 2.625rem);
+  font-size: clamp(1.75rem, 5vw, 2.25rem);
   font-weight: 300;
   line-height: 1.15;
 }
@@ -239,14 +254,20 @@ textarea {
   margin-top: 1.5rem;
 }
 
+.auth-shell__card .bx--btn-set .bx--btn {
+  min-width: 0;
+  flex-shrink: 1;
+}
+
 .auth-shell__footer {
-  width: min(100%, 32rem);
-  color: #f4f4f4;
+  width: min(100%, 28rem);
+  color: #525252;
+  font-size: 0.875rem;
   text-align: center;
 }
 
 .auth-shell__footer a {
-  color: #78a9ff;
+  color: #0f62fe;
 }
 
 .notification-region {
